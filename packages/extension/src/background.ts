@@ -1,8 +1,17 @@
-import type { BrowserActionPlan, ClientMessage, InspectedElement, PageSnapshot, ServerMessage } from "@auto-page-agent/shared";
+import type { AutomationSkillDraft, BrowserActionPlan, ClientMessage, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
 
 const BRIDGE_URL = "ws://127.0.0.1:3210";
 let socket: WebSocket | null = null;
 let connecting: Promise<WebSocket> | null = null;
+const RECORDING_KEY = "automationRecording";
+
+interface RecordingState {
+  active: boolean;
+  tabId: number;
+  startedAt: number;
+  startUrl: string;
+  actions: RecordedBrowserAction[];
+}
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -12,6 +21,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "page.element.selected") {
     void chrome.storage.session.set({ selectedElement: message.element, selectedElementPageUrl: message.pageUrl });
     void chrome.runtime.sendMessage({ type: "ui.element.selected", element: message.element, pageUrl: message.pageUrl }).catch(() => undefined);
+    return false;
+  }
+  if (message?.type === "page.recording.ready") {
+    void resumeRecordingForSender(_sender.tab?.id);
+    return false;
+  }
+  if (message?.type === "page.recording.action") {
+    void appendRecordedAction(message.action as RecordedBrowserAction, _sender.tab?.id);
     return false;
   }
   if (message?.type === "ui.health") {
@@ -32,6 +49,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "ui.selection.start") {
     void startSelection().then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.screenshot.capture") {
+    void captureScreenshot().then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.recording.start") {
+    void startRecording().then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.recording.stop") {
+    void stopRecording().then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.recording.status") {
+    void getRecordingState().then((state) => sendResponse(state ?? { active: false, actions: [] })).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.recording.replay") {
+    void replayRecording(message.actions as RecordedBrowserAction[]).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.skill.save") {
+    void requestBridge({ id: crypto.randomUUID(), type: "skill.save", draft: message.draft as AutomationSkillDraft }).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.repository.analyze") {
@@ -62,6 +103,69 @@ async function analyzeRepository(element: InspectedElement, pageUrl: string): Pr
 async function executePlan(plan: BrowserActionPlan) {
   const tab = await getActiveTab();
   return chrome.tabs.sendMessage(tab.id, { type: "page.actions.execute", plan });
+}
+
+async function captureScreenshot() {
+  const tab = await getActiveTab();
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 82 });
+  return { ok: true, dataUrl, url: tab.url, title: tab.title, capturedAt: new Date().toISOString() };
+}
+
+async function startRecording() {
+  const tab = await getActiveTab();
+  const state: RecordingState = { active: true, tabId: tab.id, startedAt: Date.now(), startUrl: tab.url!, actions: [] };
+  await chrome.storage.session.set({ [RECORDING_KEY]: state });
+  await chrome.tabs.sendMessage(tab.id, { type: "page.recording.start" });
+  return state;
+}
+
+async function stopRecording() {
+  const state = await getRecordingState();
+  if (!state) return { active: false, actions: [] };
+  await chrome.tabs.sendMessage(state.tabId, { type: "page.recording.stop" }).catch(() => undefined);
+  const stopped = { ...state, active: false };
+  await chrome.storage.session.set({ [RECORDING_KEY]: stopped });
+  return stopped;
+}
+
+async function replayRecording(actions: RecordedBrowserAction[]) {
+  if (!Array.isArray(actions) || !actions.length) throw new Error("There are no recorded actions to replay.");
+  if (actions.length > 100) throw new Error("At most 100 actions can be replayed.");
+  const tab = await getActiveTab();
+  return chrome.tabs.sendMessage(tab.id, { type: "page.recording.replay", actions });
+}
+
+async function resumeRecordingForSender(tabId: number | undefined) {
+  if (typeof tabId !== "number") return;
+  const state = await getRecordingState();
+  if (state?.active && state.tabId === tabId) await chrome.tabs.sendMessage(tabId, { type: "page.recording.start" }).catch(() => undefined);
+}
+
+async function appendRecordedAction(action: RecordedBrowserAction, tabId: number | undefined) {
+  if (typeof tabId !== "number") return;
+  const state = await getRecordingState();
+  if (!state?.active || state.tabId !== tabId || state.actions.length >= 100) return;
+  const sanitized: RecordedBrowserAction = {
+    ...action,
+    id: crypto.randomUUID(),
+    value: action.sensitive ? undefined : action.value?.slice(0, 4_000),
+    timestamp: Date.now(),
+  };
+  const actions = [...state.actions];
+  const last = actions.at(-1);
+  const replaceLast = last && (
+    ((sanitized.action === "fill" || sanitized.action === "select") && last.action === sanitized.action && last.selector === sanitized.selector)
+    || (sanitized.action === "scroll" && last.action === "scroll" && sanitized.timestamp - last.timestamp < 2_000)
+  );
+  if (replaceLast) actions[actions.length - 1] = sanitized;
+  else actions.push(sanitized);
+  await chrome.storage.session.set({ [RECORDING_KEY]: { ...state, actions } });
+  void chrome.runtime.sendMessage({ type: "ui.recording.updated", actions }).catch(() => undefined);
+}
+
+async function getRecordingState(): Promise<RecordingState | undefined> {
+  const stored = await chrome.storage.session.get(RECORDING_KEY);
+  return stored[RECORDING_KEY] as RecordingState | undefined;
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number }> {
