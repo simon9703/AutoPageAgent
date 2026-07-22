@@ -3,7 +3,7 @@ import { WebSocketServer } from "ws";
 import type { ClientMessage, ServerMessage } from "@auto-page-agent/shared";
 import { CodexProvider } from "./agent.js";
 import { loadRepositoryRoots, LocalRepositoryProvider } from "./repositories.js";
-import { listSkillsForPage, loadSkills, saveAutomationSkill } from "./skills.js";
+import { configureAutomationSkill, listSkillsForPage, loadSkills, saveAutomationSkill } from "./skills.js";
 
 const host = "127.0.0.1";
 const port = Number(process.env.AUTO_PAGE_AGENT_PORT || 3210);
@@ -33,6 +33,7 @@ wss.on("connection", (socket, request) => {
       else if (requestMessage.type === "agent.run") response = { id: requestMessage.id, type: "agent.result", decision: await provider.run(requestMessage.task, requestMessage.snapshot) };
       else if (requestMessage.type === "repository.analyze") response = { id: requestMessage.id, type: "repository.result", analysis: await repositoryProvider.analyze(requestMessage.element, requestMessage.apiRequests) };
       else if (requestMessage.type === "skill.list") response = { id: requestMessage.id, type: "skill.list.result", pageUrl: requestMessage.pageUrl, skills: listSkillsForPage(requestMessage.pageUrl, await loadSkills()) };
+      else if (requestMessage.type === "skill.configure") response = { id: requestMessage.id, type: "skill.configured", skill: await configureAutomationSkill(requestMessage.slug, { enabled: requestMessage.enabled, pagePatterns: requestMessage.pagePatterns }) };
       else if (requestMessage.type === "skill.save") response = { id: requestMessage.id, type: "skill.saved", skill: await saveAutomationSkill(requestMessage.draft) };
       else throw new Error("Unknown bridge request.");
       socket.send(JSON.stringify(response));
