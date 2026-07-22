@@ -1,4 +1,4 @@
-import type { AutomationSkillDraft, BrowserActionPlan, InspectedElement, RecordedBrowserAction, RepositoryAnalysis, ServerMessage } from "@auto-page-agent/shared";
+import type { AutomationSkillDraft, BrowserActionPlan, InspectedElement, PageSkillSummary, RecordedBrowserAction, RepositoryAnalysis, ServerMessage } from "@auto-page-agent/shared";
 
 const status = document.querySelector<HTMLSpanElement>("#status")!;
 const result = document.querySelector<HTMLElement>("#result")!;
@@ -16,6 +16,7 @@ let recordingStartUrl = "";
 void checkHealth();
 void restoreSelectedElement();
 void restoreRecording();
+void loadPageSkills();
 document.querySelectorAll<HTMLButtonElement>("[data-prompt]").forEach((button) => {
   button.addEventListener("click", () => { task.value = button.dataset.prompt ?? ""; task.focus(); });
 });
@@ -32,12 +33,23 @@ document.querySelector("#close-screenshot")!.addEventListener("click", () => doc
 document.querySelector("#toggle-recording")!.addEventListener("click", () => void toggleRecording());
 document.querySelector("#replay-recording")!.addEventListener("click", () => void replayRecording());
 document.querySelector("#save-skill")!.addEventListener("click", () => void saveSkill());
+document.querySelector("#refresh-skills")!.addEventListener("click", () => void loadPageSkills());
+document.querySelector("#page-skills")!.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-skill-name]") : null;
+  if (!button) return;
+  const name = button.dataset.skillName ?? "";
+  const description = button.dataset.skillDescription ?? "";
+  task.value = `Use the “${name}” Skill on the current page. ${description}`.trim();
+  task.focus();
+  render(`Selected page Skill: ${name}. Review or add inputs, then run the agent.`);
+});
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "ui.element.selected") showSelectedElement(message.element as InspectedElement, String(message.pageUrl ?? ""));
   if (message?.type === "ui.recording.updated") {
     recordedActions = message.actions as RecordedBrowserAction[];
     renderRecording();
   }
+  if (message?.type === "ui.page.changed") void loadPageSkills();
 });
 
 async function checkHealth() {
@@ -63,6 +75,59 @@ async function restoreRecording() {
   recordedActions = state.actions ?? [];
   updateRecordingButton();
   if (recordingActive || recordedActions.length) renderRecording();
+}
+
+async function loadPageSkills() {
+  const scope = document.querySelector<HTMLElement>("#page-scope")!;
+  const container = document.querySelector<HTMLElement>("#page-skills")!;
+  scope.textContent = "Loading current-page functions…";
+  const response = await chrome.runtime.sendMessage({ type: "ui.skills.list" }) as ServerMessage;
+  if (response.type === "agent.error") {
+    scope.textContent = "Skill discovery unavailable";
+    container.replaceChildren(createHint(response.error));
+    return;
+  }
+  if (response.type !== "skill.list.result") {
+    scope.textContent = "Unexpected Skill response";
+    return;
+  }
+  try { scope.textContent = `${new URL(response.pageUrl).hostname} · ${response.skills.length} available`; }
+  catch { scope.textContent = `${response.skills.length} available`; }
+  if (!response.skills.length) {
+    container.replaceChildren(createHint("No Skill matches this page. Record a workflow to create one."));
+    return;
+  }
+  container.replaceChildren(...response.skills.map(createSkillItem));
+}
+
+function createSkillItem(skill: PageSkillSummary): HTMLElement {
+  const item = document.createElement("article");
+  item.className = "skill-item";
+  const title = document.createElement("strong");
+  title.textContent = skill.name;
+  const use = document.createElement("button");
+  use.className = "compact";
+  use.textContent = "Use";
+  use.dataset.skillName = skill.name;
+  use.dataset.skillDescription = skill.description;
+  const badge = document.createElement("span");
+  badge.className = `scope-badge ${skill.scope}`;
+  badge.textContent = skill.scope === "page" ? "Page" : "Global";
+  const meta = document.createElement("small");
+  meta.textContent = skill.stepCount
+    ? `${skill.stepCount} steps · ${skill.actions.join(" / ")}${skill.variableNames.length ? ` · inputs: ${skill.variableNames.join(", ")}` : ""}`
+    : "General page capability";
+  const description = document.createElement("p");
+  description.textContent = skill.description || skill.pagePattern || "Reusable browser capability";
+  item.append(title, use, badge, meta, description);
+  return item;
+}
+
+function createHint(text: string): HTMLElement {
+  const hint = document.createElement("span");
+  hint.className = "hint";
+  hint.textContent = text;
+  return hint;
 }
 
 async function captureScreenshot() {
@@ -143,6 +208,7 @@ async function saveSkill() {
   if (response.type === "agent.error") return render(`Skill save error: ${response.error}`);
   if (response.type !== "skill.saved") return render("Unexpected Skill save response.");
   render(`Skill saved: ${response.skill.skillPath}\nWorkflow: ${response.skill.workflowPath}\nRuntime inputs: ${response.skill.variableNames.join(", ") || "none"}`);
+  await loadPageSkills();
 }
 
 function defaultSkillName(url: string) {
