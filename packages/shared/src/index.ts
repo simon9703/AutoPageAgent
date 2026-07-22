@@ -126,6 +126,39 @@ export interface BrowserActionPlan {
   steps: BrowserActionStep[];
 }
 
+export type RecordedActionKind = "click" | "fill" | "select" | "scroll" | "submit";
+
+export interface RecordedBrowserAction {
+  id: string;
+  action: RecordedActionKind;
+  url: string;
+  selector?: string;
+  label?: string;
+  value?: string;
+  sensitive: boolean;
+  timestamp: number;
+  scrollX?: number;
+  scrollY?: number;
+}
+
+export interface AutomationSkillDraft {
+  name: string;
+  description: string;
+  startUrl: string;
+  createdAt: string;
+  requiresConfirmation: true;
+  steps: RecordedBrowserAction[];
+  // TODO(i18n): Add locale/page-language constraints when Skill localization enters scope.
+}
+
+export interface SavedAutomationSkill {
+  name: string;
+  slug: string;
+  skillPath: string;
+  workflowPath: string;
+  variableNames: string[];
+}
+
 export interface AgentAnswer {
   kind: "answer";
   content: string;
@@ -136,10 +169,12 @@ export type AgentDecision = BrowserActionPlan | AgentAnswer;
 export type ClientMessage =
   | { id: string; type: "health.check" }
   | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot }
-  | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement; apiRequests: ApiRequestSnapshot[] };
+  | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement; apiRequests: ApiRequestSnapshot[] }
+  | { id: string; type: "skill.save"; draft: AutomationSkillDraft };
 
 export type ServerMessage =
   | { id: string; type: "health.result"; ok: boolean; provider: string; repositories: string[]; codex: CodexRuntimeStatus }
   | { id: string; type: "agent.result"; decision: AgentDecision }
   | { id: string; type: "repository.result"; analysis: RepositoryAnalysis }
+  | { id: string; type: "skill.saved"; skill: SavedAutomationSkill }
   | { id: string; type: "agent.error"; error: string };
