@@ -5,10 +5,10 @@
 Auto Page Agent connects four evidence domains:
 
 ```text
-browser page <-> network activity <-> source repository <-> translation catalog
+browser page <-> network activity <-> source repository
 ```
 
-The MVP implements the browser-page domain, lightweight performance evidence, a local agent bridge, and reusable skills. The interfaces are intentionally small so local Codex can later coexist with a remote company Agent Server.
+The MVP implements the browser-page domain, lightweight performance evidence, local repository evidence search, a local agent bridge, and reusable skills. Translation-catalog analysis is deferred but marked with `TODO(i18n)` extension points.
 
 ## Runtime components
 
@@ -17,6 +17,7 @@ The MVP implements the browser-page domain, lightweight performance evidence, a 
 - **Side Panel** presents prompts, answers, plans, and approval controls.
 - **Background service worker** owns the localhost connection and routes messages to the active tab.
 - **Content script** creates a bounded snapshot and executes approved actions.
+- **Element picker** captures source metadata and stable textual/attribute clues for repository analysis.
 
 The snapshot contains page metadata, selected text, a limited body-text extraction, headings, at most 250 visible interactive elements, and at most 100 resource timing entries. DOM nodes remain inside the content script and are represented externally by ephemeral refs.
 
@@ -95,3 +96,13 @@ The future evidence resolver should combine, in descending confidence order:
 5. semantic inference, always labeled as inference.
 
 Every explanation should include its evidence and confidence rather than presenting repository search guesses as facts.
+
+## Local repository evidence search
+
+Repository roots come from `auto-page-agent.config.json` or `AUTO_PAGE_AGENT_REPOS`. The bridge validates absolute directory paths and invokes `rg` directly with argument arrays, fixed-string matching, bounded results, timeouts, and build/dependency exclusions. No selected text or model output is interpreted as a shell command.
+
+The current search returns evidence candidates; it does not yet claim an end-to-end data flow. The next resolver layer will use TypeScript symbols and imports to trace component -> hook -> API client -> response type.
+
+## Deferred translation analysis
+
+i18n is intentionally outside the current implementation. The shared protocol, element metadata collector, and repository query builder contain `TODO(i18n)` markers for a later `data-i18n-key` and translation-catalog provider without coupling that work to the current source/API flow.
