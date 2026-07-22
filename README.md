@@ -15,6 +15,7 @@ A lightweight Chrome side-panel agent that understands the current page, analyze
 - Capture the current viewport locally and preview it in the side panel.
 - Record current-tab clicks, form changes, submits, and scroll positions; test replay after confirmation.
 - Save a recording as a reusable `SKILL.md` plus declarative `workflow.json` with runtime variables.
+- Discover a page-specific Skill function list in the side panel and refresh it automatically on tab/navigation changes.
 
 ## Architecture
 
@@ -84,6 +85,8 @@ Restart the bridge, click **Pick element**, select an element on the page, then 
 4. Name the workflow and click **Save Skill**.
 
 The bridge creates `skills/<name>/SKILL.md` and `workflow.json`. Non-sensitive typed values are retained only in Chrome session storage for the immediate test replay; saved workflows replace them with `{{runtime_variables}}`. Password, token, OTP, payment, credential, and file fields never persist their values and stop automated replay for manual input.
+
+Generated Skills are page-scoped by origin and recorded start-path prefix. The **Page Skills** card shows matching page Skills first and global hand-written Skills second. Selecting **Use** prepares a Codex task; it does not execute browser actions until the normal plan and confirmation flow completes.
 
 ## Development
 
