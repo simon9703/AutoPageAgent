@@ -25,9 +25,12 @@ wss.on("connection", (socket, request) => {
     try {
       requestMessage = JSON.parse(String(raw)) as ClientMessage;
       let response: ServerMessage;
-      if (requestMessage.type === "health.check") response = { id: requestMessage.id, type: "health.result", ok: true, provider: provider.name, repositories: repositoryProvider.roots.map((root) => root.name) };
+      if (requestMessage.type === "health.check") {
+        const codex = await provider.status();
+        response = { id: requestMessage.id, type: "health.result", ok: codex.available && codex.authenticated, provider: provider.name, repositories: repositoryProvider.roots.map((root) => root.name), codex };
+      }
       else if (requestMessage.type === "agent.run") response = { id: requestMessage.id, type: "agent.result", decision: await provider.run(requestMessage.task, requestMessage.snapshot) };
-      else if (requestMessage.type === "repository.analyze") response = { id: requestMessage.id, type: "repository.result", analysis: await repositoryProvider.analyze(requestMessage.element) };
+      else if (requestMessage.type === "repository.analyze") response = { id: requestMessage.id, type: "repository.result", analysis: await repositoryProvider.analyze(requestMessage.element, requestMessage.apiRequests) };
       else throw new Error("Unknown bridge request.");
       socket.send(JSON.stringify(response));
     } catch (error) {
