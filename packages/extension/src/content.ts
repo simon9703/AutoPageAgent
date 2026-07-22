@@ -14,6 +14,7 @@ let currentSnapshotUrl = "";
 let selectionCleanup: (() => void) | null = null;
 let recordingActive = false;
 let scrollTimer: number | undefined;
+let aiPointer: HTMLElement | null = null;
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "page.snapshot") {
@@ -27,7 +28,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "page.selection.start") {
-    startElementSelection();
+    startElementSelection(message.mode === "image" ? "image" : "element");
     sendResponse({ ok: true });
     return false;
   }
@@ -97,7 +98,7 @@ function createPageSnapshot(): PageSnapshot {
   );
   const elements: PageElementSnapshot[] = [];
   for (const element of candidates) {
-    if (!isVisible(element) || isHiddenInput(element) || elements.length >= 250) continue;
+    if (!isVisible(element) || !isNearViewport(element, 700) || !isTopLayerElement(element) || isHiddenInput(element) || elements.length >= 160) continue;
     const ref = `element-${elements.length + 1}`;
     elementRefs.set(ref, element);
     const html = element as HTMLElement;
@@ -121,6 +122,8 @@ function createPageSnapshot(): PageSnapshot {
     });
   }
 
+  const pageInfo = collectPageInfo();
+  const simplifiedDom = elements.map((element, index) => simplifyElement(element, index + 1)).join("\n") || "<EMPTY>";
   return {
     snapshotId: currentSnapshotId,
     url: location.href,
@@ -131,7 +134,9 @@ function createPageSnapshot(): PageSnapshot {
       .filter(isVisible)
       .slice(0, 80)
       .map((heading) => ({ level: Number(heading.tagName[1]), text: cleanText(heading.textContent ?? "", 300) })),
-    mainText: cleanText((document.querySelector("main,article") ?? document.body).textContent ?? "", 30_000),
+    mainText: cleanText((document.querySelector("main,article") ?? document.body).textContent ?? "", 20_000),
+    simplifiedDom,
+    pageInfo,
     elements,
     performance: collectPerformance(),
   };
@@ -199,8 +204,9 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   if (isSensitiveElement(element) && (step.action === "fill" || step.action === "select")) throw new Error("Sensitive fields cannot be filled by the agent.");
   if ("disabled" in element && Boolean((element as HTMLInputElement).disabled)) throw new Error("Target is disabled.");
   element.scrollIntoView({ block: "center", behavior: "smooth" });
+  await showAiPointer(element, `AI · ${step.action}`);
   highlight(element);
-  if (step.action === "click") element.click();
+  if (step.action === "click") await simulateClick(element);
   if (step.action === "focus") element.focus();
   if (step.action === "submit") {
     const form = element.closest("form");
@@ -232,8 +238,9 @@ async function replayRecordedActions(actions: RecordedBrowserAction[]) {
       if (!(element instanceof HTMLElement) || !isVisible(element)) throw new Error(`Recorded target is unavailable: ${step.label || step.selector}`);
       if (isSensitiveElement(element)) throw new Error("Sensitive fields cannot be replayed.");
       element.scrollIntoView({ block: "center", behavior: "smooth" });
+      await showAiPointer(element, `AI · ${step.action}`);
       highlight(element);
-      if (step.action === "click") element.click();
+      if (step.action === "click") await simulateClick(element);
       if (step.action === "fill" || step.action === "select") setElementValue(element, step.value ?? "");
       if (step.action === "submit") {
         const form = element instanceof HTMLFormElement ? element : element.closest("form");
@@ -256,8 +263,15 @@ function recordAction(action: Omit<RecordedBrowserAction, "id" | "url" | "timest
 
 function delay(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-function startElementSelection() {
+function startElementSelection(mode: "element" | "image") {
   selectionCleanup?.();
+  ensureAgentStyles();
+  document.documentElement.classList.add("auto-page-agent-picking");
+  const notice = document.createElement("div");
+  notice.dataset.autoPageAgentOverlay = "true";
+  notice.className = "auto-page-agent-notice";
+  notice.textContent = mode === "image" ? "AI · Select an image · Esc to cancel" : "AI · Select an element · Esc to cancel";
+  document.documentElement.append(notice);
   let hovered: HTMLElement | null = null;
   let previousOutline = "";
   const restore = () => {
@@ -265,7 +279,9 @@ function startElementSelection() {
     hovered = null;
   };
   const onMove = (event: MouseEvent) => {
-    const next = event.target instanceof HTMLElement ? event.target : null;
+    const raw = event.target instanceof Element ? event.target : null;
+    const candidate = mode === "image" ? findImageTarget(raw) : raw;
+    const next = candidate instanceof HTMLElement ? candidate : null;
     if (!next || next === hovered) return;
     restore();
     hovered = next;
@@ -277,13 +293,17 @@ function startElementSelection() {
     document.removeEventListener("mousemove", onMove, true);
     document.removeEventListener("click", onClick, true);
     document.removeEventListener("keydown", onKey, true);
+    document.documentElement.classList.remove("auto-page-agent-picking");
+    notice.remove();
     selectionCleanup = null;
   };
   const onClick = (event: MouseEvent) => {
     if (!(event.target instanceof Element)) return;
+    const target = mode === "image" ? findImageTarget(event.target) : event.target;
+    if (!target) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    const selected = inspectElement(event.target);
+    const selected = inspectElement(target);
     cleanup();
     void chrome.runtime.sendMessage({ type: "page.element.selected", element: selected, pageUrl: location.href });
   };
@@ -316,6 +336,8 @@ function inspectElement(element: Element): InspectedElement {
     inputType: input.type || undefined,
     attributes,
     nearbyText: cleanText(element.parentElement?.innerText || "", 2_000),
+    selector: buildSelector(element),
+    image: getImageInfo(element),
     source: Object.values(source).some(Boolean) ? source : undefined,
   };
 }
@@ -343,6 +365,20 @@ function isVisible(element: Element): boolean {
   const rect = element.getBoundingClientRect();
   const style = getComputedStyle(element);
   return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+}
+
+function isNearViewport(element: Element, expansion: number): boolean {
+  const rect = element.getBoundingClientRect();
+  return rect.bottom >= -expansion && rect.top <= innerHeight + expansion && rect.right >= -expansion && rect.left <= innerWidth + expansion;
+}
+
+function isTopLayerElement(element: Element): boolean {
+  const rect = element.getBoundingClientRect();
+  if (rect.bottom < 0 || rect.top > innerHeight || rect.right < 0 || rect.left > innerWidth) return true;
+  const x = Math.min(Math.max(rect.left + rect.width / 2, 0), innerWidth - 1);
+  const y = Math.min(Math.max(rect.top + rect.height / 2, 0), innerHeight - 1);
+  const top = document.elementFromPoint(x, y);
+  return !top || top === element || element.contains(top) || top.contains(element);
 }
 
 function isHiddenInput(element: Element): boolean {
@@ -386,6 +422,106 @@ function buildSelector(element: Element): string {
     current = current.parentElement;
   }
   return path.join(" > ");
+}
+
+function simplifyElement(element: PageElementSnapshot, index: number): string {
+  const attributes = [
+    `data-ai-ref="${element.ref}"`,
+    element.role ? `role="${escapeDomText(element.role)}"` : "",
+    element.label ? `aria-label="${escapeDomText(element.label)}"` : "",
+    element.placeholder ? `placeholder="${escapeDomText(element.placeholder)}"` : "",
+    element.inputType ? `type="${escapeDomText(element.inputType)}"` : "",
+    element.disabled ? "disabled" : "",
+    element.sensitive ? 'data-sensitive="true"' : "",
+  ].filter(Boolean).join(" ");
+  const text = escapeDomText(cleanText(element.text || element.value || "", 180));
+  return `[${index}]<${element.tagName}${attributes ? ` ${attributes}` : ""}>${text}</${element.tagName}>`;
+}
+
+function collectPageInfo() {
+  const pageWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth || 0);
+  const pageHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight || 0);
+  return { viewportWidth: innerWidth, viewportHeight: innerHeight, pageWidth, pageHeight, scrollX, scrollY, pixelsAbove: scrollY, pixelsBelow: Math.max(0, pageHeight - (innerHeight + scrollY)) };
+}
+
+function getImageInfo(element: Element): InspectedElement["image"] {
+  const image = element instanceof HTMLImageElement ? element : element.querySelector("img");
+  if (image instanceof HTMLImageElement && image.currentSrc) {
+    const rect = image.getBoundingClientRect();
+    return { src: image.currentSrc, alt: cleanText(image.alt || getAccessibleLabel(image), 500), width: Math.round(rect.width), height: Math.round(rect.height) };
+  }
+  if (!(element instanceof HTMLElement)) return undefined;
+  const src = /^url\(["']?(.*?)["']?\)$/u.exec(getComputedStyle(element).backgroundImage)?.[1];
+  if (!src) return undefined;
+  const rect = element.getBoundingClientRect();
+  try { return { src: new URL(src, location.href).href, alt: getAccessibleLabel(element), width: Math.round(rect.width), height: Math.round(rect.height) }; }
+  catch { return undefined; }
+}
+
+function findImageTarget(element: Element | null): Element | null {
+  if (!element) return null;
+  const image = element.closest("img,[role='img']") ?? element.querySelector("img,[role='img']");
+  if (image) return image;
+  let current: Element | null = element;
+  while (current && current !== document.body) {
+    if (getImageInfo(current)) return current;
+    current = current.parentElement;
+  }
+  return null;
+}
+
+async function simulateClick(element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
+  const options = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, button: 0 };
+  element.dispatchEvent(new PointerEvent("pointerover", { ...options, pointerType: "mouse" }));
+  element.dispatchEvent(new MouseEvent("mouseover", options));
+  element.dispatchEvent(new PointerEvent("pointerdown", { ...options, pointerType: "mouse" }));
+  element.dispatchEvent(new MouseEvent("mousedown", options));
+  element.focus({ preventScroll: true });
+  element.dispatchEvent(new PointerEvent("pointerup", { ...options, pointerType: "mouse" }));
+  element.dispatchEvent(new MouseEvent("mouseup", options));
+  element.click();
+  await delay(180);
+}
+
+async function showAiPointer(element: HTMLElement, label: string) {
+  ensureAgentStyles();
+  if (!aiPointer) {
+    aiPointer = document.createElement("div");
+    aiPointer.dataset.autoPageAgentOverlay = "true";
+    aiPointer.className = "auto-page-agent-pointer";
+    aiPointer.innerHTML = '<span class="auto-page-agent-pointer-dot"></span><span class="auto-page-agent-pointer-label"></span>';
+    document.documentElement.append(aiPointer);
+  }
+  const rect = element.getBoundingClientRect();
+  aiPointer.querySelector<HTMLElement>(".auto-page-agent-pointer-label")!.textContent = label;
+  aiPointer.style.transform = `translate(${Math.round(rect.left + rect.width / 2)}px,${Math.round(rect.top + rect.height / 2)}px)`;
+  aiPointer.classList.add("visible");
+  element.classList.add("auto-page-agent-target-ring");
+  await delay(420);
+  element.classList.remove("auto-page-agent-target-ring");
+  setTimeout(() => aiPointer?.classList.remove("visible"), 500);
+}
+
+function ensureAgentStyles() {
+  if (document.querySelector("style[data-auto-page-agent-overlay]")) return;
+  const style = document.createElement("style");
+  style.dataset.autoPageAgentOverlay = "true";
+  style.textContent = `
+    html.auto-page-agent-picking, html.auto-page-agent-picking * { cursor: crosshair !important; }
+    .auto-page-agent-notice { position: fixed; z-index: 2147483647; top: 16px; left: 50%; transform: translateX(-50%); padding: 8px 13px; border-radius: 999px; color: white; background: #6d3bd1; box-shadow: 0 8px 28px #4c1d9566; font: 600 12px system-ui; pointer-events: none; }
+    .auto-page-agent-pointer { position: fixed; z-index: 2147483647; left: 0; top: 0; opacity: 0; pointer-events: none; transition: transform .38s cubic-bezier(.2,.8,.2,1), opacity .15s; }
+    .auto-page-agent-pointer.visible { opacity: 1; }
+    .auto-page-agent-pointer-dot { position: absolute; width: 24px; height: 24px; margin: -12px; border: 3px solid #8b5cf6; border-radius: 50%; background: #ffffff99; box-shadow: 0 0 0 7px #8b5cf633, 0 5px 18px #4c1d9566; }
+    .auto-page-agent-pointer-dot::after { content: ''; position: absolute; left: 7px; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: #6d3bd1; }
+    .auto-page-agent-pointer-label { position: absolute; left: 15px; top: 13px; width: max-content; max-width: 180px; padding: 4px 7px; border-radius: 7px; color: white; background: #6d3bd1; font: 600 10px system-ui; }
+    .auto-page-agent-target-ring { outline: 3px solid #8b5cf6 !important; outline-offset: 4px !important; box-shadow: 0 0 0 8px #8b5cf633 !important; }
+  `;
+  document.documentElement.append(style);
+}
+
+function escapeDomText(value: string): string {
+  return value.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;");
 }
 
 function highlight(element: HTMLElement) {
