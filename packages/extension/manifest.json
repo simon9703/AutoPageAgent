@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Page Agent",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Analyze and safely automate the current page with a local Codex agent.",
   "permissions": ["activeTab", "scripting", "sidePanel", "storage", "tabs"],
   "host_permissions": ["http://*/*", "https://*/*"],
