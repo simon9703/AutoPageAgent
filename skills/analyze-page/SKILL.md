@@ -1,6 +1,8 @@
 ---
 name: analyze-page
 description: Analyze the current page structure, fields, content, and performance evidence.
+category: page
+version: 1.0.0
 ---
 
 # Analyze page

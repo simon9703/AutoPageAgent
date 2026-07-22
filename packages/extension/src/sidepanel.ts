@@ -1,4 +1,4 @@
-import type { AgentEvent, AutomationSkillDraft, BrowserActionPlan, ChatMessage, InspectedElement, PageSkillSummary, RecordedBrowserAction, RepositoryAnalysis, ServerMessage } from "@auto-page-agent/shared";
+import type { AgentEvent, AutomationSkillDraft, BrowserActionPlan, ChatMessage, EditableAutomationSkill, InspectedElement, PageSkillSummary, RecordedBrowserAction, RepositoryAnalysis, ServerMessage, SkillCatalogItem } from "@auto-page-agent/shared";
 
 const status = document.querySelector<HTMLSpanElement>("#status")!;
 const result = document.querySelector<HTMLElement>("#result")!;
@@ -15,11 +15,13 @@ let recordingStartUrl = "";
 let conversationId: string = crypto.randomUUID();
 let chatMessages: ChatMessage[] = [];
 let agentEvents: AgentEvent[] = [];
+let editingSkillSlug = "";
 
 void checkHealth();
 void restoreSelectedElement();
 void restoreRecording();
 void loadPageSkills();
+void loadSkillCatalog();
 void restoreConversation();
 document.querySelectorAll<HTMLButtonElement>("[data-prompt]").forEach((button) => {
   button.addEventListener("click", () => { task.value = button.dataset.prompt ?? ""; task.focus(); });
@@ -37,10 +39,12 @@ document.querySelector("#capture-screenshot")!.addEventListener("click", () => v
 document.querySelector("#close-screenshot")!.addEventListener("click", () => document.querySelector("#screenshot-card")!.classList.add("hidden"));
 document.querySelector("#toggle-recording")!.addEventListener("click", () => void toggleRecording());
 document.querySelector("#replay-recording")!.addEventListener("click", () => void replayRecording());
-document.querySelector("#save-skill")!.addEventListener("click", () => void saveSkill());
-document.querySelector("#refresh-skills")!.addEventListener("click", () => void loadPageSkills());
+document.querySelector("#save-skill")!.addEventListener("click", () => void saveSkill("create"));
+document.querySelector("#update-skill")!.addEventListener("click", () => void saveSkill("update"));
+document.querySelector("#refresh-skills")!.addEventListener("click", () => void refreshSkills());
 document.querySelector("#new-chat")!.addEventListener("click", () => void startNewConversation());
-document.querySelector("#page-skills")!.addEventListener("click", (event) => {
+document.querySelectorAll<HTMLButtonElement>("[data-skill-tab]").forEach((button) => button.addEventListener("click", () => selectSkillTab(button.dataset.skillTab ?? "page")));
+document.querySelector("#page-skills-card")!.addEventListener("click", (event) => {
   const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-skill-action]") : null;
   if (!button) return;
   const action = button.dataset.skillAction;
@@ -51,6 +55,13 @@ document.querySelector("#page-skills")!.addEventListener("click", (event) => {
     task.focus();
     render(`Selected page Skill: ${name}. Review or add inputs, then run the agent.`);
   }
+  if (action === "debug") {
+    task.value = `Debug and run the “${name}” Skill on the current page. Explain each step, verify the result, and stop if the page no longer matches. ${description}`.trim();
+    task.focus();
+    render(`Debug mode prepared for ${name}. Add runtime inputs, then run the agent.`);
+  }
+  if (action === "edit") void editSkill(button.dataset.skillSlug ?? "");
+  if (action === "install") void installSkill(button.dataset.skillSlug ?? "", button.dataset.skillUpdate === "true");
   if (action === "toggle") void configurePageSkill(button.dataset.skillSlug ?? "", { enabled: button.dataset.skillEnabled !== "true" });
   if (action === "patterns") {
     const current = button.dataset.skillPatterns ?? "";
@@ -207,6 +218,120 @@ async function loadPageSkills() {
   container.replaceChildren(...response.skills.map(createSkillItem));
 }
 
+async function refreshSkills() {
+  await Promise.all([loadPageSkills(), loadSkillCatalog()]);
+}
+
+function selectSkillTab(tab: string) {
+  const selected = tab === "installed" || tab === "marketplace" ? tab : "page";
+  document.querySelectorAll<HTMLButtonElement>("[data-skill-tab]").forEach((button) => button.classList.toggle("active", button.dataset.skillTab === selected));
+  document.querySelector("#skill-page-panel")!.classList.toggle("hidden", selected !== "page");
+  document.querySelector("#skill-installed-panel")!.classList.toggle("hidden", selected !== "installed");
+  document.querySelector("#skill-marketplace-panel")!.classList.toggle("hidden", selected !== "marketplace");
+}
+
+async function loadSkillCatalog() {
+  const response = await chrome.runtime.sendMessage({ type: "ui.skills.catalog" }) as ServerMessage;
+  if (response.type === "agent.error") {
+    document.querySelector("#installed-skills")!.replaceChildren(createHint(response.error));
+    document.querySelector("#marketplace-skills")!.replaceChildren(createHint(response.error));
+    return;
+  }
+  if (response.type !== "skill.catalog.result") return;
+  document.querySelector<HTMLElement>("#skill-storage")!.textContent = `${response.installed.length} installed · durable local storage`;
+  const installed = document.querySelector<HTMLElement>("#installed-skills")!;
+  installed.replaceChildren(...(response.installed.length ? response.installed.map(createCatalogItem) : [createHint("No Skills installed yet. Open Marketplace to install one.")]));
+  const marketplace = document.querySelector<HTMLElement>("#marketplace-skills")!;
+  marketplace.replaceChildren(...(response.marketplace.length ? response.marketplace.map(createMarketplaceItem) : [createHint("No Marketplace templates are available.")]));
+}
+
+function createCatalogItem(skill: SkillCatalogItem): HTMLElement {
+  const item = createCatalogBase(skill);
+  const controls = item.querySelector<HTMLElement>(".skill-controls")!;
+  controls.append(createSkillButton("Use", "use", skill), createSkillButton("Debug", "debug", skill));
+  if (skill.stepCount) controls.append(createSkillButton("Edit", "edit", skill));
+  return item;
+}
+
+function createMarketplaceItem(skill: SkillCatalogItem): HTMLElement {
+  const item = createCatalogBase(skill);
+  const controls = item.querySelector<HTMLElement>(".skill-controls")!;
+  if (!skill.installed || skill.updateAvailable) {
+    const install = createSkillButton(skill.updateAvailable ? "Update" : "Install", "install", skill);
+    install.classList.add("primary");
+    install.dataset.skillUpdate = String(skill.updateAvailable);
+    controls.append(install);
+  } else {
+    const badge = document.createElement("span");
+    badge.className = "installed-label";
+    badge.textContent = "Installed";
+    controls.append(badge);
+  }
+  return item;
+}
+
+function createCatalogBase(skill: SkillCatalogItem): HTMLElement {
+  const item = document.createElement("article");
+  item.className = "skill-item catalog-item";
+  const title = document.createElement("strong");
+  title.textContent = skill.name;
+  const controls = document.createElement("div");
+  controls.className = "skill-controls";
+  const badge = document.createElement("span");
+  badge.className = `scope-badge ${skill.scope}`;
+  badge.textContent = `${skill.category} · v${skill.version}`;
+  const meta = document.createElement("small");
+  meta.textContent = skill.stepCount ? `${skill.stepCount} recorded steps${skill.variableNames.length ? ` · ${skill.variableNames.length} inputs` : ""}` : "Prompt-based Skill";
+  const description = document.createElement("p");
+  description.textContent = skill.description;
+  item.append(title, controls, badge, meta, description);
+  return item;
+}
+
+function createSkillButton(label: string, action: string, skill: Pick<SkillCatalogItem, "slug" | "name" | "description">): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = "compact";
+  button.textContent = label;
+  button.dataset.skillAction = action;
+  button.dataset.skillSlug = skill.slug;
+  button.dataset.skillName = skill.name;
+  button.dataset.skillDescription = skill.description;
+  return button;
+}
+
+async function installSkill(slug: string, updating: boolean) {
+  if (!slug) return;
+  if (updating && !confirm("Update this Marketplace Skill? The bundled template will replace its installed files. Custom Skills with other names are unaffected.")) return;
+  const response = await chrome.runtime.sendMessage({ type: "ui.skill.install", slug }) as ServerMessage;
+  if (response.type === "agent.error") return render(`Skill install error: ${response.error}`);
+  if (response.type !== "skill.installed") return render("Unexpected Skill install response.");
+  render(`${response.skill.name} v${response.skill.version} is installed and ready to use.`);
+  await refreshSkills();
+}
+
+async function editSkill(slug: string) {
+  if (!slug) return;
+  const response = await chrome.runtime.sendMessage({ type: "ui.skill.get", slug }) as ServerMessage;
+  if (response.type === "agent.error") return render(`Skill edit error: ${response.error}`);
+  if (response.type !== "skill.detail") return render("Unexpected Skill detail response.");
+  loadSkillIntoEditor(response.skill);
+}
+
+function loadSkillIntoEditor(skill: EditableAutomationSkill) {
+  editingSkillSlug = skill.slug;
+  recordingActive = false;
+  recordingStartUrl = skill.startUrl ?? "";
+  recordedActions = skill.steps;
+  document.querySelector<HTMLInputElement>("#skill-name")!.value = skill.name;
+  document.querySelector<HTMLTextAreaElement>("#skill-description")!.value = skill.description;
+  document.querySelector<HTMLButtonElement>("#update-skill")!.classList.remove("hidden");
+  updateRecordingButton();
+  renderRecording();
+  document.querySelector<HTMLElement>("#recording-title")!.textContent = `Editing ${skill.name} · v${skill.version}`;
+  document.querySelector("#recording-card")!.scrollIntoView({ behavior: "smooth", block: "start" });
+  render(`Editing ${skill.name}. Record a replacement workflow or update its name and description, then choose Update Skill.`);
+}
+
 function createSkillItem(skill: PageSkillSummary): HTMLElement {
   const item = document.createElement("article");
   item.className = `skill-item${skill.enabled ? "" : " disabled"}`;
@@ -222,6 +347,14 @@ function createSkillItem(skill: PageSkillSummary): HTMLElement {
   use.dataset.skillName = skill.name;
   use.dataset.skillDescription = skill.description;
   controls.append(use);
+  const debug = document.createElement("button");
+  debug.className = "compact";
+  debug.textContent = "Debug";
+  debug.disabled = !skill.enabled;
+  debug.dataset.skillAction = "debug";
+  debug.dataset.skillName = skill.name;
+  debug.dataset.skillDescription = skill.description;
+  controls.append(debug);
   if (skill.configurable) {
     const toggle = document.createElement("button");
     toggle.className = "compact";
@@ -235,7 +368,12 @@ function createSkillItem(skill: PageSkillSummary): HTMLElement {
     patterns.dataset.skillAction = "patterns";
     patterns.dataset.skillSlug = skill.slug;
     patterns.dataset.skillPatterns = skill.pagePatterns.join("\n");
-    controls.append(toggle, patterns);
+    const edit = document.createElement("button");
+    edit.className = "compact";
+    edit.textContent = "Edit";
+    edit.dataset.skillAction = "edit";
+    edit.dataset.skillSlug = skill.slug;
+    controls.append(edit, toggle, patterns);
   }
   const badge = document.createElement("span");
   badge.className = `scope-badge ${skill.enabled ? skill.scope : "disabled"}`;
@@ -326,9 +464,10 @@ async function replayRecording() {
   render(response.ok ? "Recorded workflow replay completed." : `Replay stopped: ${response.error ?? "Unknown error"}`);
 }
 
-async function saveSkill() {
+async function saveSkill(mode: "create" | "update") {
   if (recordingActive) return render("Stop recording before saving the Skill.");
   if (!recordedActions.length) return render("Record at least one action first.");
+  if (mode === "update" && !editingSkillSlug) return render("Choose an installed recorded Skill before updating it.");
   const name = document.querySelector<HTMLInputElement>("#skill-name")!.value.trim();
   const description = document.querySelector<HTMLTextAreaElement>("#skill-description")!.value.trim();
   if (!name) return render("Enter a Skill name.");
@@ -340,11 +479,13 @@ async function saveSkill() {
     requiresConfirmation: true,
     steps: recordedActions,
   };
-  const response = await chrome.runtime.sendMessage({ type: "ui.skill.save", draft }) as ServerMessage;
+  const response = await chrome.runtime.sendMessage({ type: "ui.skill.save", draft, ...(mode === "update" ? { existingSlug: editingSkillSlug } : {}) }) as ServerMessage;
   if (response.type === "agent.error") return render(`Skill save error: ${response.error}`);
   if (response.type !== "skill.saved") return render("Unexpected Skill save response.");
-  render(`Skill saved: ${response.skill.skillPath}\nWorkflow: ${response.skill.workflowPath}\nRuntime inputs: ${response.skill.variableNames.join(", ") || "none"}`);
-  await loadPageSkills();
+  editingSkillSlug = response.skill.slug;
+  document.querySelector<HTMLButtonElement>("#update-skill")!.classList.remove("hidden");
+  render(`Skill ${response.skill.operation}: ${response.skill.name} v${response.skill.version}\nRuntime inputs: ${response.skill.variableNames.join(", ") || "none"}\nStored outside the extension package, so future upgrades keep it.`);
+  await refreshSkills();
 }
 
 function defaultSkillName(url: string) {

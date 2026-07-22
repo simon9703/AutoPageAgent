@@ -213,12 +213,44 @@ export interface AutomationSkillDraft {
   steps: RecordedBrowserAction[];
 }
 
+export type SkillCategory = "productivity" | "release" | "translation" | "page" | "custom";
+
+export interface SkillCatalogItem {
+  name: string;
+  slug: string;
+  description: string;
+  category: SkillCategory;
+  version: string;
+  installed: boolean;
+  updateAvailable: boolean;
+  source: "marketplace" | "custom";
+  scope: "page" | "global";
+  pagePatterns: string[];
+  stepCount: number;
+  variableNames: string[];
+  updatedAt?: string;
+}
+
+export interface EditableAutomationSkill {
+  name: string;
+  slug: string;
+  description: string;
+  category: SkillCategory;
+  version: string;
+  startUrl?: string;
+  enabled: boolean;
+  pagePatterns: string[];
+  steps: RecordedBrowserAction[];
+}
+
 export interface SavedAutomationSkill {
   name: string;
   slug: string;
   skillPath: string;
   workflowPath: string;
   variableNames: string[];
+  operation: "created" | "updated";
+  version: string;
 }
 
 export interface PageSkillSummary {
@@ -282,8 +314,11 @@ export type ClientMessage =
   | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot; conversationId: string; history: ChatMessage[]; loop?: AgentLoopContext }
   | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement; apiRequests: ApiRequestSnapshot[] }
   | { id: string; type: "skill.list"; pageUrl: string; pageTitle: string }
+  | { id: string; type: "skill.catalog" }
+  | { id: string; type: "skill.get"; slug: string }
+  | { id: string; type: "skill.install"; slug: string }
   | { id: string; type: "skill.configure"; slug: string; enabled?: boolean; pagePatterns?: string[] }
-  | { id: string; type: "skill.save"; draft: AutomationSkillDraft };
+  | { id: string; type: "skill.save"; draft: AutomationSkillDraft; existingSlug?: string };
 
 export type ServerMessage =
   | { id: string; type: "health.result"; ok: boolean; provider: string; repositories: string[]; codex: CodexRuntimeStatus; agent: AgentRuntimeStatus }
@@ -291,6 +326,9 @@ export type ServerMessage =
   | { id: string; type: "agent.result"; decision: AgentDecision; provider: string; conversationId: string; selectedSkills: Omit<SkillSelection, "body">[] }
   | { id: string; type: "repository.result"; analysis: RepositoryAnalysis }
   | { id: string; type: "skill.list.result"; pageUrl: string; skills: PageSkillSummary[] }
+  | { id: string; type: "skill.catalog.result"; installed: SkillCatalogItem[]; marketplace: SkillCatalogItem[]; storagePath: string }
+  | { id: string; type: "skill.detail"; skill: EditableAutomationSkill }
+  | { id: string; type: "skill.installed"; skill: SkillCatalogItem }
   | { id: string; type: "skill.configured"; skill: ConfiguredAutomationSkill }
   | { id: string; type: "skill.saved"; skill: SavedAutomationSkill }
   | { id: string; type: "agent.error"; error: string };

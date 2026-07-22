@@ -3,7 +3,7 @@ import { WebSocketServer } from "ws";
 import type { ClientMessage, ServerMessage } from "@auto-page-agent/shared";
 import { AgentRouter } from "./agent.js";
 import { loadRepositoryRoots, LocalRepositoryProvider } from "./repositories.js";
-import { configureAutomationSkill, listSkillsForPage, loadSkills, saveAutomationSkill } from "./skills.js";
+import { configureAutomationSkill, getEditableSkill, installMarketplaceSkill, listSkillCatalog, listSkillsForPage, loadSkills, saveAutomationSkill } from "./skills.js";
 
 const host = "127.0.0.1";
 const port = Number(process.env.AUTO_PAGE_AGENT_PORT || 3210);
@@ -42,8 +42,11 @@ wss.on("connection", (socket, request) => {
       }
       else if (requestMessage.type === "repository.analyze") response = { id: requestMessage.id, type: "repository.result", analysis: await repositoryProvider.analyze(requestMessage.element, requestMessage.apiRequests) };
       else if (requestMessage.type === "skill.list") response = { id: requestMessage.id, type: "skill.list.result", pageUrl: requestMessage.pageUrl, skills: listSkillsForPage(requestMessage.pageUrl, await loadSkills()) };
+      else if (requestMessage.type === "skill.catalog") response = { id: requestMessage.id, type: "skill.catalog.result", ...await listSkillCatalog() };
+      else if (requestMessage.type === "skill.get") response = { id: requestMessage.id, type: "skill.detail", skill: await getEditableSkill(requestMessage.slug) };
+      else if (requestMessage.type === "skill.install") response = { id: requestMessage.id, type: "skill.installed", skill: await installMarketplaceSkill(requestMessage.slug) };
       else if (requestMessage.type === "skill.configure") response = { id: requestMessage.id, type: "skill.configured", skill: await configureAutomationSkill(requestMessage.slug, { enabled: requestMessage.enabled, pagePatterns: requestMessage.pagePatterns }) };
-      else if (requestMessage.type === "skill.save") response = { id: requestMessage.id, type: "skill.saved", skill: await saveAutomationSkill(requestMessage.draft) };
+      else if (requestMessage.type === "skill.save") response = { id: requestMessage.id, type: "skill.saved", skill: await saveAutomationSkill(requestMessage.draft, undefined, requestMessage.existingSlug) };
       else throw new Error("Unknown bridge request.");
       socket.send(JSON.stringify(response));
     } catch (error) {

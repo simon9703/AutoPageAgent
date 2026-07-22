@@ -22,8 +22,23 @@
         <button id="toggle-recording">Record workflow</button>
       </section>
       <section id="page-skills-card" class="page-skills-card">
-        <div><div><strong>Page Skills</strong><p id="page-scope">Loading current-page functions…</p></div><button id="refresh-skills" class="compact">Refresh</button></div>
-        <div id="page-skills" class="page-skills"><span class="hint">Connect the local bridge to discover Skills.</span></div>
+        <div><div><strong>Skill Registry</strong><p id="skill-storage">Local, reusable, and preserved across extension updates</p></div><button id="refresh-skills" class="compact">Refresh</button></div>
+        <nav class="skill-tabs" aria-label="Skill views">
+          <button class="active" data-skill-tab="page">Current page</button>
+          <button data-skill-tab="installed">My Skills</button>
+          <button data-skill-tab="marketplace">Marketplace</button>
+        </nav>
+        <div id="skill-page-panel" class="skill-panel">
+          <p id="page-scope">Loading current-page functions…</p>
+          <div id="page-skills" class="page-skills"><span class="hint">Connect the local bridge to discover Skills.</span></div>
+        </div>
+        <div id="skill-installed-panel" class="skill-panel hidden">
+          <div id="installed-skills" class="page-skills"><span class="hint">Loading installed Skills…</span></div>
+        </div>
+        <div id="skill-marketplace-panel" class="skill-panel hidden">
+          <p>Built-in templates can be installed locally, then customized or updated.</p>
+          <div id="marketplace-skills" class="page-skills"><span class="hint">Loading Marketplace…</span></div>
+        </div>
       </section>
       <section id="screenshot-card" class="capture-card hidden">
         <div><strong>Current viewport</strong><button id="close-screenshot" class="compact">Close</button></div>
@@ -41,7 +56,7 @@
         <ol id="recorded-steps"></ol>
         <label>Skill name<input id="skill-name" maxlength="80" placeholder="e.g. Create release draft" /></label>
         <label>Description<textarea id="skill-description" rows="2" maxlength="240" placeholder="When and why this workflow should run"></textarea></label>
-        <div class="approval-actions"><button id="replay-recording">Test replay</button><button id="save-skill" class="primary">Save Skill</button></div>
+        <div class="approval-actions"><button id="replay-recording">Test replay</button><button id="save-skill">Save as new</button><button id="update-skill" class="primary hidden">Update Skill</button></div>
         <p class="hint">Typed values stay in this browser session. Saved Skills replace them with runtime variables; sensitive values are never stored.</p>
       </section>
       <section id="chat-thread" class="chat-thread"><div class="chat-empty">Select page context or send a message to start.</div></section>

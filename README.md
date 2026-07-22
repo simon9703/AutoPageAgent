@@ -24,6 +24,10 @@ A lightweight Chrome side-panel agent that understands the current page, analyze
 - Stream provider and runtime events into a real-time execution timeline.
 - Track stable element fingerprints, occlusion, viewport, read-only, checked, expanded, and busy state.
 - Rank page Skills with explicit match reasons and keep their context active across loop iterations.
+- Browse Current page, My Skills, and Marketplace views in one local Skill Registry.
+- Install built-in daily-report, release, translation, and page-assistant templates.
+- Debug a selected Skill through the same observable agent loop, then save a new Skill or explicitly update an existing version.
+- Keep user Skills in durable local storage outside the extension/repository package.
 
 ## Architecture
 
@@ -73,6 +77,8 @@ Optional environment variables:
 | `OPENAI_MODEL` | Responses model override (default `gpt-5.6-sol`). |
 | `AUTO_PAGE_AGENT_PORT` | Change the localhost bridge port (default `3210`). |
 | `AUTO_PAGE_AGENT_MOCK=1` | Return deterministic page analysis without Codex. |
+| `AUTO_PAGE_AGENT_DATA_DIR` | Override durable user data storage (default `~/.auto-page-agent`). |
+| `AUTO_PAGE_AGENT_BUNDLED_SKILLS` | Override the bundled Marketplace template directory. |
 
 Examples:
 
@@ -105,11 +111,11 @@ Restart the bridge, click **Pick element**, select an element on the page, then 
 1. Click **Record workflow** and operate the current tab normally.
 2. Click **Stop recording** and review the captured steps.
 3. Use **Test replay** for a confirmation-gated replay on the current page.
-4. Name the workflow and click **Save Skill**.
+4. Name the workflow and click **Save as new**, or load an existing recorded Skill and choose **Update Skill**.
 
-The bridge creates `skills/<name>/SKILL.md` and `workflow.json`. Non-sensitive typed values are retained only in Chrome session storage for the immediate test replay; saved workflows replace them with `{{runtime_variables}}`. Password, token, OTP, payment, credential, and file fields never persist their values and stop automated replay for manual input.
+The bridge stores user Skills in `~/.auto-page-agent/skills/<name>/` by default. On the first V3 run it migrates existing repository Skills into that durable directory; later extension and repository upgrades do not replace them. Non-sensitive typed values are retained only in Chrome session storage for the immediate test replay; saved workflows replace them with `{{runtime_variables}}`. Password, token, OTP, payment, credential, and file fields never persist their values and stop automated replay for manual input.
 
-Generated Skills are page-scoped by origin and recorded start-path prefix. The **Page Skills** card shows matching page Skills first and global hand-written Skills second. Selecting **Use** prepares a Codex task; it does not execute browser actions until the normal plan and confirmation flow completes.
+Generated Skills are page-scoped by origin and recorded start-path prefix. The **Skill Registry** provides **Current page**, **My Skills**, and **Marketplace** views. **Use** prepares a normal task; **Debug** asks the agent to explain and verify each Skill step. Neither bypasses the normal plan and confirmation flow.
 
 Recorded Skills can be enabled, disabled, or assigned custom page patterns from the same card. Patterns require a fixed HTTP(S) origin and accept `*` for one path segment or `**` for multiple segments. Disabled Skills remain visible on matching pages for management but are excluded from Codex selection and cannot be run.
 
@@ -129,7 +135,7 @@ npm run build
 - Resource Timing cannot expose all cross-origin sizes unless the resource sends `Timing-Allow-Origin`.
 - The localhost bridge is intended for local development. Packaged releases should use an install-time secret or Chrome Native Messaging.
 - Repository evidence search is implemented; deeper TypeScript reference tracing, API response-field tracing, source maps, and React component correlation remain planned.
-- Translation/i18n analysis is deliberately deferred. `TODO(i18n)` extension markers are preserved in the protocol, collector, and repository analyzer.
+- The translation Marketplace Skill preserves placeholders and supports visible translation-page workflows; repository-level i18n tracing remains deferred.
 
 See [docs/architecture.md](docs/architecture.md), [docs/roadmap.md](docs/roadmap.md), and [docs/security.md](docs/security.md).
 

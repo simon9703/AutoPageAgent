@@ -1,6 +1,8 @@
 ---
 name: fill-form
 description: Safely fill visible fields on the current page without publishing or submitting by default.
+category: page
+version: 1.0.0
 ---
 
 # Fill form

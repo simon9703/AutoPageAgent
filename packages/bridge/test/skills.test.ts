@@ -113,3 +113,29 @@ test("V2 Skill selection prefers page-scoped matches and explains why", () => {
   assert.equal(selected[0]?.scope, "page");
   assert.match(selected[0]?.reason ?? "", /current page/u);
 });
+
+test("V3 Skill save requires an explicit update and increments its version", async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-page-agent-skills-"));
+  const draft: AutomationSkillDraft = {
+    name: "Daily report",
+    description: "Fill a daily report draft.",
+    startUrl: "https://work.example.com/report",
+    createdAt: new Date().toISOString(),
+    requiresConfirmation: true,
+    steps: [{ id: "1", action: "fill", url: "https://work.example.com/report", selector: "#summary", label: "Summary", value: "Done", sensitive: false, timestamp: 1 }],
+  };
+  try {
+    const created = await saveAutomationSkill(draft, root);
+    assert.equal(created.operation, "created");
+    assert.equal(created.version, "1.0.0");
+    await assert.rejects(() => saveAutomationSkill(draft, root), /already exists/u);
+    const updated = await saveAutomationSkill({ ...draft, description: "Updated report workflow." }, root, created.slug);
+    assert.equal(updated.operation, "updated");
+    assert.equal(updated.version, "1.0.1");
+    const markdown = await readFile(join(root, created.slug, "SKILL.md"), "utf8");
+    assert.match(markdown, /version: 1\.0\.1/u);
+    assert.match(markdown, /Updated report workflow/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

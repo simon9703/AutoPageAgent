@@ -30,6 +30,10 @@ button:hover { border-color: #8b5cf6; }
 .compact { padding: 4px 7px; font-size: 11px; }
 .page-skills-card > div:first-child { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .page-skills-card p { color: #777188; font-size: 11px; margin: 2px 0 0; word-break: break-all; }
+.skill-tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 4px; margin-top: 12px; padding: 3px; border-radius: 10px; background: #f1eef7; }
+.skill-tabs button { padding: 6px 4px; border-color: transparent; color: #6b6577; background: transparent; font-size: 10px; }
+.skill-tabs button.active { color: #5b21b6; border-color: #ddd6fe; background: white; box-shadow: 0 1px 3px #d9d4e4; }
+.skill-panel > p { margin-top: 9px; }
 .page-skills { display: grid; gap: 8px; margin-top: 10px; }
 .skill-item { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px 8px; align-items: center; padding: 9px; border-radius: 10px; background: #f8f6fc; }
 .skill-item.disabled { opacity: .67; }
@@ -37,6 +41,8 @@ button:hover { border-color: #8b5cf6; }
 .skill-item p { grid-column: 1 / -1; margin: 0; }
 .skill-item small { color: #6d3bd1; font-size: 10px; }
 .skill-controls { display: flex; gap: 4px; }
+.catalog-item .scope-badge { text-transform: none; }
+.installed-label { align-self: center; color: #087443; font-size: 10px; }
 .skill-controls button:disabled { cursor: not-allowed; opacity: .55; }
 .scope-badge { justify-self: start; border-radius: 999px; padding: 2px 6px; color: #5b21b6; background: #ede9fe; font-size: 9px; text-transform: uppercase; }
 .scope-badge.global { color: #475569; background: #e2e8f0; }

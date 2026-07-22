@@ -1,5 +1,43 @@
 # Roadmap
 
+## Version 0.3 — Skill Marketplace and Local Registry
+
+Goal: turn recorded workflows and prompt instructions into durable, discoverable, editable browser capabilities.
+
+### Skill Hub
+
+- [x] Current page / My Skills / Marketplace views
+- [x] Daily report, release, translation, and page-assistant templates
+- [x] Category, version, source, scope, input, and step metadata
+- [x] Explicit Skill selection with Use and Debug actions
+- [x] Install and template-update actions
+
+### Create and Debug
+
+- [x] Record and test a workflow on the current page
+- [x] Save as a new Skill without silently replacing an existing one
+- [x] Load a recorded Skill into the editor
+- [x] Update an existing Skill with patch-version increments
+- [x] Run a selected Skill through the V2 observe-act-verify timeline
+- [ ] Edit, reorder, disable, or delete individual recorded steps
+- [ ] Persist execution metrics and failed-step diagnostics
+
+### Durable Local Registry
+
+- [x] Store user Skills under `~/.auto-page-agent/skills`
+- [x] One-time migration from the repository `skills/` directory
+- [x] Preserve installed and custom Skills across extension/repository upgrades
+- [x] Support `AUTO_PAGE_AGENT_DATA_DIR` and `AUTO_PAGE_AGENT_BUNDLED_SKILLS` overrides
+- [ ] Export/import a portable Skill bundle
+- [ ] Signed remote/team registry and update channels
+- [ ] Conflict-aware three-way updates for customized Marketplace Skills
+
+### V3 Safety Boundary
+
+- Installing a Marketplace Skill copies declarative instructions/workflows only; it does not grant new browser permissions.
+- A selected Skill still uses the V2 constrained action protocol, approval gate, step/time budget, and result verification.
+- Updating a Skill is explicit. Saving a duplicate name never silently overwrites the installed copy.
+
 ## Version 0.2 — Browser Agent Runtime
 
 Goal: upgrade from single action execution to a reliable observe-plan-act-verify browser agent.
