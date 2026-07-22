@@ -1,3 +1,5 @@
+export * from "./agent-events.js";
+
 export type BrowserActionKind = "click" | "fill" | "select" | "scroll" | "focus" | "submit";
 
 export interface ViewportRect {
@@ -44,11 +46,9 @@ export interface InspectedElement {
     component?: string;
     file?: string;
     repository?: string;
-    // TODO(i18n): Add i18nKey when translation-catalog correlation enters scope.
   };
 }
 
-// TODO(i18n): Extend with an "i18n" evidence kind when translation analysis is implemented.
 export type RepositoryEvidenceKind = "source" | "api" | "text" | "symbol";
 
 export interface RepositoryEvidence {
@@ -163,80 +163,9 @@ export interface BrowserActionPlan {
   steps: BrowserActionStep[];
 }
 
-export type RecordedActionKind = "click" | "fill" | "select" | "scroll" | "submit";
-
-export interface RecordedBrowserAction {
-  id: string;
-  action: RecordedActionKind;
-  url: string;
-  selector?: string;
-  label?: string;
-  value?: string;
-  sensitive: boolean;
-  timestamp: number;
-  scrollX?: number;
-  scrollY?: number;
-}
-
-export interface AutomationSkillDraft {
-  name: string;
-  description: string;
-  startUrl: string;
-  createdAt: string;
-  requiresConfirmation: true;
-  steps: RecordedBrowserAction[];
-  // TODO(i18n): Add locale/page-language constraints when Skill localization enters scope.
-}
-
-export interface SavedAutomationSkill {
-  name: string;
-  slug: string;
-  skillPath: string;
-  workflowPath: string;
-  variableNames: string[];
-}
-
-export interface PageSkillSummary {
-  name: string;
-  slug: string;
-  description: string;
-  enabled: boolean;
-  configurable: boolean;
-  scope: "page" | "global";
-  match: "origin" | "path-prefix" | "wildcard" | "global";
-  pagePattern?: string;
-  pagePatterns: string[];
-  stepCount: number;
-  actions: RecordedActionKind[];
-  variableNames: string[];
-}
-
-export interface ConfiguredAutomationSkill {
-  slug: string;
-  enabled: boolean;
-  pagePatterns: string[];
-}
-
 export interface AgentAnswer {
   kind: "answer";
   content: string;
 }
 
 export type AgentDecision = BrowserActionPlan | AgentAnswer;
-
-export type ClientMessage =
-  | { id: string; type: "health.check" }
-  | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot; conversationId: string; history: ChatMessage[] }
-  | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement; apiRequests: ApiRequestSnapshot[] }
-  | { id: string; type: "skill.list"; pageUrl: string; pageTitle: string }
-  | { id: string; type: "skill.configure"; slug: string; enabled?: boolean; pagePatterns?: string[] }
-  | { id: string; type: "skill.save"; draft: AutomationSkillDraft };
-
-export type ServerMessage =
-  | { id: string; type: "health.result"; ok: boolean; provider: string; repositories: string[]; codex: CodexRuntimeStatus; agent: AgentRuntimeStatus }
-  | { id: string; type: "agent.result"; decision: AgentDecision; provider: string; conversationId: string }
-  | { id: string; type: "repository.result"; analysis: RepositoryAnalysis }
-  | { id: string; type: "skill.list.result"; pageUrl: string; skills: PageSkillSummary[] }
-  | { id: string; type: "skill.configured"; skill: ConfiguredAutomationSkill }
-  | { id: string; type: "skill.saved"; skill: SavedAutomationSkill }
-  | { id: string; type: "agent.error"; error: string };
