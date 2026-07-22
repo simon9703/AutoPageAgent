@@ -85,7 +85,7 @@ export class CodexAppServerClient {
     });
     try {
       await this.#requestWithRetry("initialize", {
-        clientInfo: { name: "auto-page-agent", title: "Auto Page Agent", version: "0.3.0" },
+        clientInfo: { name: "auto-page-agent", title: "Auto Page Agent", version: "0.4.0" },
         capabilities: {},
       });
       this.#write({ method: "initialized", params: {} });
