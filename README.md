@@ -1,6 +1,6 @@
 # Auto Page Agent
 
-A lightweight Chrome side-panel agent that understands the current page, analyzes browser performance, and executes a small set of explicit, reviewable DOM actions through a local Codex runtime.
+A lightweight Chrome side-panel agent that understands the current page, analyzes browser performance, and executes explicit, reviewable DOM actions through local Codex or the OpenAI Responses API.
 
 ## MVP capabilities
 
@@ -16,6 +16,10 @@ A lightweight Chrome side-panel agent that understands the current page, analyze
 - Record current-tab clicks, form changes, submits, and scroll positions; test replay after confirmation.
 - Save a recording as a reusable `SKILL.md` plus declarative `workflow.json` with runtime variables.
 - Discover a page-specific Skill function list in the side panel and refresh it automatically on tab/navigation changes.
+- Continue a conversation in the side panel, with a reusable Codex thread or Responses `previous_response_id`.
+- Select a page element or image and send it as explicit message context.
+- Send a Page Agent-inspired compact, indexed DOM instead of the full page tree.
+- Show an AI pointer, target ring, and action label while approved DOM actions execute.
 
 ## Architecture
 
@@ -24,14 +28,16 @@ Chrome Side Panel
   -> MV3 background service worker
   -> content script (snapshot + safe actions)
   -> localhost WebSocket bridge
-  -> codex app-server over JSON-RPC/stdin
+  -> provider router
+      -> codex app-server over JSON-RPC/stdin
+      -> OpenAI Responses API
 ```
 
 The model never receives arbitrary JavaScript execution. It produces either an answer or a constrained JSON action plan. The bridge validates the plan, and the content script resolves only element references belonging to the latest snapshot.
 
 ## Quick start
 
-Requirements: Node.js 20+, Chrome, and a working Codex CLI login.
+Requirements: Node.js 20+, Chrome, and either a working Codex CLI login or an OpenAI API key available to the local bridge.
 
 ```bash
 npm install
@@ -58,8 +64,21 @@ Optional environment variables:
 | Variable | Purpose |
 | --- | --- |
 | `CODEX_PATH` | Override the detected `codex` executable. |
+| `AUTO_PAGE_AGENT_PROVIDER` | `auto` (default), `codex`, or `openai`. |
+| `OPENAI_API_KEY` | Enables the Responses API provider in the local bridge. Never stored by the extension. |
+| `OPENAI_MODEL` | Responses model override (default `gpt-5.6-sol`). |
 | `AUTO_PAGE_AGENT_PORT` | Change the localhost bridge port (default `3210`). |
 | `AUTO_PAGE_AGENT_MOCK=1` | Return deterministic page analysis without Codex. |
+
+Examples:
+
+```bash
+# Prefer local Codex and its ChatGPT-managed login
+AUTO_PAGE_AGENT_PROVIDER=codex npm run dev:bridge
+
+# Use the Responses API; export the key in your shell or secret manager
+AUTO_PAGE_AGENT_PROVIDER=openai OPENAI_API_KEY=... npm run dev:bridge
+```
 
 To enable local repository analysis, copy the example configuration and use absolute paths:
 
@@ -100,8 +119,8 @@ npm run build
 
 ## Current limits
 
-- The MVP performs one analysis/plan turn at a time; iterative observe-act loops are on the roadmap.
-- Screenshot capture currently provides local visual evidence and preview only; sending image input to Codex is planned separately.
+- Conversation continuity is implemented, but response/event streaming and iterative observe-act loops remain on the roadmap.
+- A selected public image URL is sent as `input_image` in Responses API mode. Local Codex currently receives its URL, alt text, dimensions, and surrounding DOM context rather than binary image data.
 - Recorded replay targets the current page. Navigation-aware and cross-tab replay remain planned.
 - Resource Timing cannot expose all cross-origin sizes unless the resource sends `Timing-Allow-Origin`.
 - The localhost bridge is intended for local development. Packaged releases should use an install-time secret or Chrome Native Messaging.
