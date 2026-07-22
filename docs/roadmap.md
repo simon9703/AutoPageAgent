@@ -14,7 +14,8 @@
 - [x] basic `SKILL.md` discovery and selection
 - [ ] streaming assistant output
 - [ ] observe-act loop with a maximum-step budget
-- [ ] screenshot fallback when DOM evidence is insufficient
+- [x] local current-viewport screenshot capture and preview
+- [ ] screenshot input to Codex when DOM evidence is insufficient
 
 ## Phase 2 — local repository intelligence
 
@@ -51,6 +52,10 @@ Remote repository access must be checked server-side for every operation; the ex
 
 ## Phase 4 — workflow Skill library
 
+- [x] current-tab operation recorder
+- [x] confirmation-gated same-page debug replay
+- [x] generate `SKILL.md` and parameterized `workflow.json`
+- [x] sensitive-value redaction and manual-input checkpoint
 - [ ] host/page-pattern matching
 - [ ] declarative required tools and permissions
 - [ ] step-specific confirmation policies
