@@ -88,6 +88,8 @@ The bridge creates `skills/<name>/SKILL.md` and `workflow.json`. Non-sensitive t
 
 Generated Skills are page-scoped by origin and recorded start-path prefix. The **Page Skills** card shows matching page Skills first and global hand-written Skills second. Selecting **Use** prepares a Codex task; it does not execute browser actions until the normal plan and confirmation flow completes.
 
+Recorded Skills can be enabled, disabled, or assigned custom page patterns from the same card. Patterns require a fixed HTTP(S) origin and accept `*` for one path segment or `**` for multiple segments. Disabled Skills remain visible on matching pages for management but are excluded from Codex selection and cannot be run.
+
 ## Development
 
 ```bash
