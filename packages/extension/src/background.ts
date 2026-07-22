@@ -85,6 +85,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void requestBridge({ id: crypto.randomUUID(), type: "skill.save", draft: message.draft as AutomationSkillDraft }).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
+  if (message?.type === "ui.skill.configure") {
+    void requestBridge({
+      id: crypto.randomUUID(),
+      type: "skill.configure",
+      slug: String(message.slug ?? ""),
+      ...(typeof message.enabled === "boolean" ? { enabled: message.enabled } : {}),
+      ...(Array.isArray(message.pagePatterns) ? { pagePatterns: message.pagePatterns.map(String) } : {}),
+    }).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
   if (message?.type === "ui.skills.list") {
     void listPageSkills().then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
