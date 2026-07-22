@@ -35,13 +35,22 @@ document.querySelector("#replay-recording")!.addEventListener("click", () => voi
 document.querySelector("#save-skill")!.addEventListener("click", () => void saveSkill());
 document.querySelector("#refresh-skills")!.addEventListener("click", () => void loadPageSkills());
 document.querySelector("#page-skills")!.addEventListener("click", (event) => {
-  const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-skill-name]") : null;
+  const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-skill-action]") : null;
   if (!button) return;
+  const action = button.dataset.skillAction;
   const name = button.dataset.skillName ?? "";
   const description = button.dataset.skillDescription ?? "";
-  task.value = `Use the “${name}” Skill on the current page. ${description}`.trim();
-  task.focus();
-  render(`Selected page Skill: ${name}. Review or add inputs, then run the agent.`);
+  if (action === "use") {
+    task.value = `Use the “${name}” Skill on the current page. ${description}`.trim();
+    task.focus();
+    render(`Selected page Skill: ${name}. Review or add inputs, then run the agent.`);
+  }
+  if (action === "toggle") void configurePageSkill(button.dataset.skillSlug ?? "", { enabled: button.dataset.skillEnabled !== "true" });
+  if (action === "patterns") {
+    const current = button.dataset.skillPatterns ?? "";
+    const entered = prompt("Page URL patterns (one per line). The origin must be fixed; * and ** are allowed only in paths.", current);
+    if (entered !== null) void configurePageSkill(button.dataset.skillSlug ?? "", { pagePatterns: entered.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean) });
+  }
 });
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "ui.element.selected") showSelectedElement(message.element as InspectedElement, String(message.pageUrl ?? ""));
@@ -102,25 +111,54 @@ async function loadPageSkills() {
 
 function createSkillItem(skill: PageSkillSummary): HTMLElement {
   const item = document.createElement("article");
-  item.className = "skill-item";
+  item.className = `skill-item${skill.enabled ? "" : " disabled"}`;
   const title = document.createElement("strong");
   title.textContent = skill.name;
+  const controls = document.createElement("div");
+  controls.className = "skill-controls";
   const use = document.createElement("button");
   use.className = "compact";
   use.textContent = "Use";
+  use.disabled = !skill.enabled;
+  use.dataset.skillAction = "use";
   use.dataset.skillName = skill.name;
   use.dataset.skillDescription = skill.description;
+  controls.append(use);
+  if (skill.configurable) {
+    const toggle = document.createElement("button");
+    toggle.className = "compact";
+    toggle.textContent = skill.enabled ? "Disable" : "Enable";
+    toggle.dataset.skillAction = "toggle";
+    toggle.dataset.skillSlug = skill.slug;
+    toggle.dataset.skillEnabled = String(skill.enabled);
+    const patterns = document.createElement("button");
+    patterns.className = "compact";
+    patterns.textContent = "Match";
+    patterns.dataset.skillAction = "patterns";
+    patterns.dataset.skillSlug = skill.slug;
+    patterns.dataset.skillPatterns = skill.pagePatterns.join("\n");
+    controls.append(toggle, patterns);
+  }
   const badge = document.createElement("span");
-  badge.className = `scope-badge ${skill.scope}`;
-  badge.textContent = skill.scope === "page" ? "Page" : "Global";
+  badge.className = `scope-badge ${skill.enabled ? skill.scope : "disabled"}`;
+  badge.textContent = skill.enabled ? skill.scope === "page" ? "Page" : "Global" : "Disabled";
   const meta = document.createElement("small");
   meta.textContent = skill.stepCount
     ? `${skill.stepCount} steps · ${skill.actions.join(" / ")}${skill.variableNames.length ? ` · inputs: ${skill.variableNames.join(", ")}` : ""}`
     : "General page capability";
   const description = document.createElement("p");
   description.textContent = skill.description || skill.pagePattern || "Reusable browser capability";
-  item.append(title, use, badge, meta, description);
+  item.append(title, controls, badge, meta, description);
   return item;
+}
+
+async function configurePageSkill(slug: string, changes: { enabled?: boolean; pagePatterns?: string[] }) {
+  if (!slug) return render("Skill configuration error: missing Skill identifier.");
+  const response = await chrome.runtime.sendMessage({ type: "ui.skill.configure", slug, ...changes }) as ServerMessage;
+  if (response.type === "agent.error") return render(`Skill configuration error: ${response.error}`);
+  if (response.type !== "skill.configured") return render("Unexpected Skill configuration response.");
+  render(`Skill updated: ${response.skill.slug}\nStatus: ${response.skill.enabled ? "enabled" : "disabled"}\nMatches: ${response.skill.pagePatterns.join("\n")}`);
+  await loadPageSkills();
 }
 
 function createHint(text: string): HTMLElement {
