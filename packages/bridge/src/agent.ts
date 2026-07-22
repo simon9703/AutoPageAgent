@@ -1,4 +1,4 @@
-import type { AgentDecision, BrowserActionPlan, PageSnapshot } from "@auto-page-agent/shared";
+import type { AgentDecision, BrowserActionPlan, CodexRuntimeStatus, PageSnapshot } from "@auto-page-agent/shared";
 import { CodexAppServerClient } from "./codex-app-server.js";
 import { loadSkills, selectSkills } from "./skills.js";
 
@@ -6,6 +6,7 @@ const ACTIONS = new Set(["click", "fill", "select", "scroll", "focus", "submit"]
 
 export interface AgentProvider {
   readonly name: string;
+  status(): Promise<CodexRuntimeStatus>;
   run(task: string, snapshot: PageSnapshot): Promise<AgentDecision>;
 }
 
@@ -13,8 +14,27 @@ export class CodexProvider implements AgentProvider {
   readonly name = "Local Codex";
   #client = new CodexAppServerClient();
 
+  async status(): Promise<CodexRuntimeStatus> {
+    if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return { available: true, authenticated: true, authMode: "chatgpt", command: "mock" };
+    const runtime = await this.#client.inspectRuntime();
+    if (!runtime.available) return { available: false, authenticated: false, authMode: null, error: runtime.configuredCommandInvalid ? "Invalid CODEX_PATH." : "Codex CLI not found." };
+    try {
+      const account = await this.#client.request<{ requiresOpenaiAuth?: boolean; account?: { type?: string } }>("account/read", { refreshToken: false });
+      const authMode = account.account?.type === "chatgpt" ? "chatgpt" : account.account?.type === "apiKey" ? "apikey" : null;
+      if (authMode === "apikey") {
+        return { available: true, command: runtime.command, authenticated: false, authMode, error: "Main browser-agent requests do not use Codex API-key sessions yet. Sign in with ChatGPT/Codex OAuth." };
+      }
+      const authenticated = Boolean(account.account) || account.requiresOpenaiAuth === false;
+      return { available: true, command: runtime.command, authenticated, authMode, ...(!authenticated ? { error: "Codex is not signed in. Run codex login." } : {}) };
+    } catch (error) {
+      return { available: true, command: runtime.command, authenticated: false, authMode: null, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   async run(task: string, snapshot: PageSnapshot): Promise<AgentDecision> {
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return mockDecision(task, snapshot);
+    const status = await this.status();
+    if (!status.available || !status.authenticated) throw new Error(status.error || "Local Codex is unavailable.");
     const skills = selectSkills(task, await loadSkills());
     const thread = await this.#client.request<{ thread?: { id?: string } }>("thread/start", {
       approvalPolicy: "never",
@@ -38,11 +58,20 @@ export class CodexProvider implements AgentProvider {
         if (String(params.threadId ?? "") !== threadId) return;
         if (turnId && params.turnId && String(params.turnId) !== turnId) return;
         if (notification.method === "item/completed") {
-          const item = params.item as { type?: string; text?: string } | undefined;
-          if (item?.type === "agentMessage") text = item.text ?? text;
+          const item = params.item as { type?: string; text?: string; content?: unknown } | undefined;
+          if (item?.type === "agentMessage") text = extractAgentMessageText(item) || text;
         }
-        if (notification.method === "turn/completed") { unsubscribe(); resolve(); }
-        if (notification.method === "turn/failed") { unsubscribe(); reject(new Error("Codex turn failed.")); }
+        if (notification.method === "error") { unsubscribe(); reject(new Error(readErrorMessage(params.error) || "Codex app-server reported an error.")); }
+        if (notification.method === "turn/completed") {
+          const turn = params.turn as { error?: unknown; items?: unknown[] } | undefined;
+          const turnError = readErrorMessage(turn?.error);
+          if (!text && Array.isArray(turn?.items)) {
+            for (const item of turn.items) text = extractAgentMessageText(item) || text;
+          }
+          unsubscribe();
+          if (turnError) reject(new Error(turnError)); else resolve();
+        }
+        if (notification.method === "turn/failed") { unsubscribe(); reject(new Error(readErrorMessage(params.error) || "Codex turn failed.")); }
       });
     });
     try {
@@ -59,6 +88,26 @@ export class CodexProvider implements AgentProvider {
       unsubscribe();
     }
   }
+}
+
+function extractAgentMessageText(value: unknown): string {
+  const item = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  if (item.type !== "agentMessage") return "";
+  if (typeof item.text === "string") return item.text.trim();
+  if (!Array.isArray(item.content)) return "";
+  return item.content.flatMap((part) => {
+    if (typeof part === "string") return [part];
+    if (!part || typeof part !== "object") return [];
+    const record = part as Record<string, unknown>;
+    return typeof record.text === "string" ? [record.text] : [];
+  }).join("").trim();
+}
+
+function readErrorMessage(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  return typeof record.message === "string" ? record.message : typeof record.error === "string" ? record.error : "";
 }
 
 export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: string[]): string {
