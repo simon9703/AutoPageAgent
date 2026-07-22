@@ -11,12 +11,18 @@ type JsonRpcMessage = {
 
 export class CodexAppServerClient {
   #process: ChildProcessWithoutNullStreams | null = null;
+  #startPromise: Promise<void> | null = null;
+  #initialized = false;
   #nextId = 1;
   #pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   #notifications = new Set<(message: JsonRpcMessage) => void>();
 
   async request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-    await this.#start();
+    await this.#ensureStarted();
+    return this.#requestInternal<T>(method, params);
+  }
+
+  #requestInternal<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     const id = this.#nextId++;
     return new Promise<T>((resolve, reject) => {
       this.#pending.set(id, { resolve: (value) => resolve(value as T), reject });
@@ -26,11 +32,16 @@ export class CodexAppServerClient {
 
   onNotification(handler: (message: JsonRpcMessage) => void) {
     this.#notifications.add(handler);
-    return () => this.#notifications.delete(handler);
+    return () => { this.#notifications.delete(handler); };
+  }
+
+  async #ensureStarted() {
+    if (this.#initialized) return;
+    if (!this.#startPromise) this.#startPromise = this.#start().finally(() => { this.#startPromise = null; });
+    await this.#startPromise;
   }
 
   async #start() {
-    if (this.#process) return;
     const command = process.env.CODEX_PATH || "codex";
     const child = spawn(command, ["app-server", "--listen", "stdio://"], {
       stdio: ["pipe", "pipe", "pipe"],
@@ -45,11 +56,19 @@ export class CodexAppServerClient {
       child.once("spawn", resolve);
       child.once("error", reject);
     });
-    await this.request("initialize", {
-      clientInfo: { name: "auto-page-agent", title: "Auto Page Agent", version: "0.1.0" },
-      capabilities: {},
-    });
-    this.#write({ method: "initialized", params: {} });
+    try {
+      await this.#requestInternal("initialize", {
+        clientInfo: { name: "auto-page-agent", title: "Auto Page Agent", version: "0.2.0" },
+        capabilities: {},
+      });
+      this.#write({ method: "initialized", params: {} });
+      this.#initialized = true;
+    } catch (error) {
+      child.kill();
+      const startupError = error instanceof Error ? error : new Error(String(error));
+      this.#failAll(startupError);
+      throw startupError;
+    }
   }
 
   #write(message: JsonRpcMessage) {
@@ -75,6 +94,7 @@ export class CodexAppServerClient {
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
     this.#process = null;
+    this.#initialized = false;
   }
 }
 
