@@ -1,18 +1,18 @@
-import type { AgentDecision, BrowserActionPlan, CodexRuntimeStatus, PageSnapshot } from "@auto-page-agent/shared";
+import type { AgentDecision, AgentRuntimeStatus, BrowserActionPlan, ChatMessage, CodexRuntimeStatus, PageSnapshot } from "@auto-page-agent/shared";
 import { CodexAppServerClient } from "./codex-app-server.js";
 import { loadSkills, selectSkills } from "./skills.js";
 
 const ACTIONS = new Set(["click", "fill", "select", "scroll", "focus", "submit"]);
 
-export interface AgentProvider {
-  readonly name: string;
-  status(): Promise<CodexRuntimeStatus>;
-  run(task: string, snapshot: PageSnapshot): Promise<AgentDecision>;
+export interface AgentRunContext {
+  conversationId: string;
+  history: ChatMessage[];
 }
 
-export class CodexProvider implements AgentProvider {
+export class CodexProvider {
   readonly name = "Local Codex";
   #client = new CodexAppServerClient();
+  #threads = new Map<string, string>();
 
   async status(): Promise<CodexRuntimeStatus> {
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return { available: true, authenticated: true, authMode: "chatgpt", command: "mock" };
@@ -31,20 +31,25 @@ export class CodexProvider implements AgentProvider {
     }
   }
 
-  async run(task: string, snapshot: PageSnapshot): Promise<AgentDecision> {
+  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext): Promise<AgentDecision> {
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return mockDecision(task, snapshot);
     const status = await this.status();
     if (!status.available || !status.authenticated) throw new Error(status.error || "Local Codex is unavailable.");
     const skills = selectSkills(task, await loadSkills(), snapshot.url);
-    const thread = await this.#client.request<{ thread?: { id?: string } }>("thread/start", {
-      approvalPolicy: "never",
-      personality: "pragmatic",
-      ephemeral: true,
-      persistExtendedHistory: false,
-    });
-    const threadId = thread.thread?.id;
-    if (!threadId) throw new Error("Codex did not return a thread id.");
-    const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body));
+    let threadId = this.#threads.get(context.conversationId);
+    const isNewThread = !threadId;
+    if (!threadId) {
+      const thread = await this.#client.request<{ thread?: { id?: string } }>("thread/start", {
+        approvalPolicy: "never",
+        personality: "pragmatic",
+        ephemeral: true,
+        persistExtendedHistory: false,
+      });
+      threadId = thread.thread?.id;
+      if (!threadId) throw new Error("Codex did not return a thread id.");
+      this.#threads.set(context.conversationId, threadId);
+    }
+    const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), isNewThread ? context.history : []);
     return this.#runTurn(threadId, prompt, snapshot);
   }
 
@@ -90,6 +95,133 @@ export class CodexProvider implements AgentProvider {
   }
 }
 
+export class OpenAIResponsesProvider {
+  readonly name = "OpenAI Responses API";
+  readonly model: string;
+  readonly #apiKey: string;
+  readonly #fetch: typeof fetch;
+  readonly #previousResponses = new Map<string, string>();
+
+  constructor(options: { apiKey?: string; model?: string; fetchImpl?: typeof fetch } = {}) {
+    this.#apiKey = options.apiKey ?? process.env.OPENAI_API_KEY ?? "";
+    this.model = options.model ?? process.env.OPENAI_MODEL ?? "gpt-5.6-sol";
+    this.#fetch = options.fetchImpl ?? fetch;
+  }
+
+  status(): AgentRuntimeStatus {
+    return {
+      id: "openai",
+      name: this.name,
+      model: this.model,
+      available: Boolean(this.#apiKey),
+      authenticated: Boolean(this.#apiKey),
+      ...(!this.#apiKey ? { error: "Set OPENAI_API_KEY in the local bridge environment." } : {}),
+    };
+  }
+
+  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext): Promise<AgentDecision> {
+    if (!this.#apiKey) throw new Error("OPENAI_API_KEY is not configured in the local bridge.");
+    if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return mockDecision(task, snapshot);
+    const skills = selectSkills(task, await loadSkills(), snapshot.url);
+    const previousResponseId = this.#previousResponses.get(context.conversationId);
+    const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), previousResponseId ? [] : context.history);
+    const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: prompt }];
+    const imageUrl = snapshot.context?.selectedElement?.image?.src;
+    if (imageUrl && /^(?:https?:|data:image\/)/iu.test(imageUrl)) userContent.push({ type: "input_image", image_url: imageUrl, detail: "auto" });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+    try {
+      const response = await this.#fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${this.#apiKey}` },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: this.model,
+          input: [{ role: "user", content: userContent }],
+          ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
+          store: true,
+          reasoning: { effort: "low" },
+          text: { format: { type: "json_schema", name: "browser_decision", strict: false, schema: responsesDecisionSchema } },
+        }),
+      });
+      const payload = await response.json() as Record<string, unknown>;
+      if (!response.ok) throw new Error(readResponsesError(payload) || `OpenAI Responses API failed with HTTP ${response.status}.`);
+      if (typeof payload.id === "string") this.#previousResponses.set(context.conversationId, payload.id);
+      return normalizeDecision(extractJson(extractResponsesText(payload)), snapshot);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw new Error("OpenAI Responses API timed out.");
+      throw error;
+    } finally { clearTimeout(timeout); }
+  }
+}
+
+export class AgentRouter {
+  readonly codex = new CodexProvider();
+  readonly openai: OpenAIResponsesProvider;
+
+  constructor(openai = new OpenAIResponsesProvider()) { this.openai = openai; }
+
+  async status(codexStatus?: CodexRuntimeStatus): Promise<AgentRuntimeStatus> {
+    const preference = normalizeProviderPreference(process.env.AUTO_PAGE_AGENT_PROVIDER);
+    const local = codexStatus ?? await this.codex.status();
+    const api = this.openai.status();
+    if (preference === "openai") return api;
+    if (preference === "codex") return toCodexAgentStatus(local);
+    return local.available && local.authenticated ? toCodexAgentStatus(local) : api.available ? api : toCodexAgentStatus(local);
+  }
+
+  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext): Promise<{ decision: AgentDecision; provider: string }> {
+    const status = await this.status();
+    if (!status.available || !status.authenticated) throw new Error(status.error || "No agent provider is available.");
+    const decision = status.id === "openai"
+      ? await this.openai.run(task, snapshot, context)
+      : await this.codex.run(task, snapshot, context);
+    return { decision, provider: status.name };
+  }
+}
+
+function normalizeProviderPreference(value: string | undefined): "auto" | "codex" | "openai" {
+  return value === "codex" || value === "openai" ? value : "auto";
+}
+
+function toCodexAgentStatus(status: CodexRuntimeStatus): AgentRuntimeStatus {
+  return { id: "codex", name: "Local Codex", available: status.available, authenticated: status.authenticated, error: status.error };
+}
+
+export const responsesDecisionSchema = {
+  type: "object",
+  properties: {
+    kind: { type: "string", enum: ["answer", "action_plan"] },
+    content: { type: "string" },
+    summary: { type: "string" },
+    snapshotId: { type: "string" },
+    requiresConfirmation: { type: "boolean" },
+    confidence: { type: "number" },
+    steps: { type: "array", items: { type: "object", additionalProperties: true } },
+  },
+  required: ["kind"],
+  additionalProperties: true,
+} as const;
+
+export function extractResponsesText(value: unknown): string {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  if (typeof record.output_text === "string") return record.output_text;
+  if (!Array.isArray(record.output)) return "";
+  return record.output.flatMap((item) => {
+    const output = item && typeof item === "object" ? item as Record<string, unknown> : {};
+    if (!Array.isArray(output.content)) return [];
+    return output.content.flatMap((part) => {
+      const content = part && typeof part === "object" ? part as Record<string, unknown> : {};
+      return typeof content.text === "string" ? [content.text] : [];
+    });
+  }).join("\n").trim();
+}
+
+function readResponsesError(value: Record<string, unknown>): string {
+  const error = value.error && typeof value.error === "object" ? value.error as Record<string, unknown> : {};
+  return typeof error.message === "string" ? error.message : "";
+}
+
 function extractAgentMessageText(value: unknown): string {
   const item = value && typeof value === "object" ? value as Record<string, unknown> : {};
   if (item.type !== "agentMessage") return "";
@@ -110,17 +242,18 @@ function readErrorMessage(value: unknown): string {
   return typeof record.message === "string" ? record.message : typeof record.error === "string" ? record.error : "";
 }
 
-export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: string[]): string {
+export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: string[], history: ChatMessage[] = []): string {
   return [
     "You are a current-page analysis and browser-action planner.",
     "Return exactly one JSON object without Markdown.",
     "For analysis or questions return: {\"kind\":\"answer\",\"content\":\"...\"}.",
     "For an explicit browser action return: {\"kind\":\"action_plan\",\"summary\":\"...\",\"snapshotId\":\"...\",\"requiresConfirmation\":true,\"confidence\":0.8,\"steps\":[{\"action\":\"click|fill|select|scroll|focus|submit\",\"targetRef\":\"element-1\",\"value\":\"...\",\"reason\":\"...\"}]}.",
-    "Use only targetRef values present in the snapshot. Never output JavaScript, CSS selectors, XPath, payment, purchase, credential, or destructive actions.",
+    "Use only data-ai-ref values present in simplifiedDom as targetRef. Never output JavaScript, CSS selectors, XPath, payment, purchase, credential, or destructive actions.",
     "If the user only requests a draft, analysis, or explanation, do not create an action plan.",
     skills.length ? `Applicable skills:\n${skills.join("\n\n")}` : "",
+    history.length ? `Recent conversation:\n${history.slice(-12).map((message) => `${message.role}: ${message.content}`).join("\n")}` : "",
     `User task:\n${task}`,
-    `Page snapshot:\n${JSON.stringify(snapshot)}`,
+    `Page snapshot:\n${JSON.stringify({ ...snapshot, elements: undefined })}`,
   ].filter(Boolean).join("\n\n");
 }
 
