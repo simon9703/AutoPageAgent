@@ -33,6 +33,13 @@ export interface InspectedElement {
   inputType?: string;
   attributes: Record<string, string>;
   nearbyText: string;
+  selector?: string;
+  image?: {
+    src: string;
+    alt: string;
+    width: number;
+    height: number;
+  };
   source?: {
     component?: string;
     file?: string;
@@ -96,6 +103,33 @@ export interface CodexRuntimeStatus {
   error?: string;
 }
 
+export interface AgentRuntimeStatus {
+  id: "codex" | "openai";
+  name: string;
+  available: boolean;
+  authenticated: boolean;
+  model?: string;
+  error?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
+export interface PageInfoSnapshot {
+  viewportWidth: number;
+  viewportHeight: number;
+  pageWidth: number;
+  pageHeight: number;
+  scrollX: number;
+  scrollY: number;
+  pixelsAbove: number;
+  pixelsBelow: number;
+}
+
 export interface PageSnapshot {
   snapshotId: string;
   url: string;
@@ -104,6 +138,9 @@ export interface PageSnapshot {
   selectedText: string;
   headings: Array<{ level: number; text: string }>;
   mainText: string;
+  simplifiedDom: string;
+  pageInfo: PageInfoSnapshot;
+  context?: { selectedElement?: InspectedElement };
   elements: PageElementSnapshot[];
   performance: PerformanceSnapshot;
 }
@@ -189,15 +226,15 @@ export type AgentDecision = BrowserActionPlan | AgentAnswer;
 
 export type ClientMessage =
   | { id: string; type: "health.check" }
-  | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot }
+  | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot; conversationId: string; history: ChatMessage[] }
   | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement; apiRequests: ApiRequestSnapshot[] }
   | { id: string; type: "skill.list"; pageUrl: string; pageTitle: string }
   | { id: string; type: "skill.configure"; slug: string; enabled?: boolean; pagePatterns?: string[] }
   | { id: string; type: "skill.save"; draft: AutomationSkillDraft };
 
 export type ServerMessage =
-  | { id: string; type: "health.result"; ok: boolean; provider: string; repositories: string[]; codex: CodexRuntimeStatus }
-  | { id: string; type: "agent.result"; decision: AgentDecision }
+  | { id: string; type: "health.result"; ok: boolean; provider: string; repositories: string[]; codex: CodexRuntimeStatus; agent: AgentRuntimeStatus }
+  | { id: string; type: "agent.result"; decision: AgentDecision; provider: string; conversationId: string }
   | { id: string; type: "repository.result"; analysis: RepositoryAnalysis }
   | { id: string; type: "skill.list.result"; pageUrl: string; skills: PageSkillSummary[] }
   | { id: string; type: "skill.configured"; skill: ConfiguredAutomationSkill }
