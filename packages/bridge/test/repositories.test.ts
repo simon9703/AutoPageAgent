@@ -32,7 +32,14 @@ test("repository analysis reports a clear warning without configured roots", asy
 
 test("repository analysis finds direct source and API evidence", async () => {
   const root = fileURLToPath(new URL("./fixtures/sample-repo", import.meta.url));
-  const result = await new LocalRepositoryProvider([{ name: "payments-web", path: root }]).analyze(element);
+  const result = await new LocalRepositoryProvider([{ name: "payments-web", path: root }]).analyze(element, [{
+    url: "https://example.com/api/v2/withdrawal/detail",
+    pathname: "/api/v2/withdrawal/detail",
+    initiatorType: "fetch",
+    duration: 320,
+    transferSize: 1024,
+  }]);
   assert.ok(result.evidence.some((item) => item.kind === "source" && item.confidence === "high"));
   assert.ok(result.evidence.some((item) => item.kind === "api"));
+  assert.ok(result.queryTerms.includes("/api/v2/withdrawal/detail"));
 });
