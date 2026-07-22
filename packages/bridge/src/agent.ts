@@ -1,13 +1,18 @@
-import type { AgentDecision, AgentRuntimeStatus, BrowserActionPlan, ChatMessage, CodexRuntimeStatus, PageSnapshot } from "@auto-page-agent/shared";
+import type { AgentDecision, AgentEvent, AgentLoopContext, AgentRuntimeStatus, BrowserActionPlan, ChatMessage, CodexRuntimeStatus, PageSnapshot, SkillSelection } from "@auto-page-agent/shared";
 import { CodexAppServerClient } from "./codex-app-server.js";
-import { loadSkills, selectSkills } from "./skills.js";
+import { loadSkills, selectSkillContext } from "./skills.js";
 
 const ACTIONS = new Set(["click", "fill", "select", "scroll", "focus", "submit"]);
 
 export interface AgentRunContext {
   conversationId: string;
   history: ChatMessage[];
+  loop?: AgentLoopContext;
 }
+
+export type AgentEventSink = (event: AgentEvent) => void;
+type EventWithoutMeta<T> = T extends unknown ? Omit<T, "id" | "timestamp"> : never;
+type AgentEventInput = EventWithoutMeta<AgentEvent>;
 
 export class CodexProvider {
   readonly name = "Local Codex";
@@ -31,11 +36,11 @@ export class CodexProvider {
     }
   }
 
-  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext): Promise<AgentDecision> {
+  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext, onEvent?: AgentEventSink): Promise<AgentDecision> {
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return mockDecision(task, snapshot);
     const status = await this.status();
     if (!status.available || !status.authenticated) throw new Error(status.error || "Local Codex is unavailable.");
-    const skills = selectSkills(task, await loadSkills(), snapshot.url);
+    const skills = selectSkillContext(task, await loadSkills(), snapshot.url);
     let threadId = this.#threads.get(context.conversationId);
     const isNewThread = !threadId;
     if (!threadId) {
@@ -49,11 +54,11 @@ export class CodexProvider {
       if (!threadId) throw new Error("Codex did not return a thread id.");
       this.#threads.set(context.conversationId, threadId);
     }
-    const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), isNewThread ? context.history : []);
-    return this.#runTurn(threadId, prompt, snapshot);
+    const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), isNewThread ? context.history : [], context.loop, skills);
+    return this.#runTurn(threadId, prompt, snapshot, onEvent);
   }
 
-  async #runTurn(threadId: string, prompt: string, snapshot: PageSnapshot): Promise<AgentDecision> {
+  async #runTurn(threadId: string, prompt: string, snapshot: PageSnapshot, onEvent?: AgentEventSink): Promise<AgentDecision> {
     let turnId = "";
     let text = "";
     let unsubscribe: () => void = () => undefined;
@@ -65,6 +70,10 @@ export class CodexProvider {
         if (notification.method === "item/completed") {
           const item = params.item as { type?: string; text?: string; content?: unknown } | undefined;
           if (item?.type === "agentMessage") text = extractAgentMessageText(item) || text;
+        }
+        if (notification.method === "item/agentMessage/delta" || notification.method === "item/outputText/delta") {
+          const delta = typeof params.delta === "string" ? params.delta : "";
+          if (delta) { text += delta; emit(onEvent, { type: "thinking", content: delta, delta: true }); }
         }
         if (notification.method === "error") { unsubscribe(); reject(new Error(readErrorMessage(params.error) || "Codex app-server reported an error.")); }
         if (notification.method === "turn/completed") {
@@ -119,12 +128,12 @@ export class OpenAIResponsesProvider {
     };
   }
 
-  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext): Promise<AgentDecision> {
+  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext, onEvent?: AgentEventSink): Promise<AgentDecision> {
     if (!this.#apiKey) throw new Error("OPENAI_API_KEY is not configured in the local bridge.");
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return mockDecision(task, snapshot);
-    const skills = selectSkills(task, await loadSkills(), snapshot.url);
+    const skills = selectSkillContext(task, await loadSkills(), snapshot.url);
     const previousResponseId = this.#previousResponses.get(context.conversationId);
-    const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), previousResponseId ? [] : context.history);
+    const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), previousResponseId ? [] : context.history, context.loop, skills);
     const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: prompt }];
     const imageUrl = snapshot.context?.selectedElement?.image?.src;
     if (imageUrl && /^(?:https?:|data:image\/)/iu.test(imageUrl)) userContent.push({ type: "input_image", image_url: imageUrl, detail: "auto" });
@@ -141,13 +150,17 @@ export class OpenAIResponsesProvider {
           ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
           store: true,
           reasoning: { effort: "low" },
+          stream: true,
           text: { format: { type: "json_schema", name: "browser_decision", strict: false, schema: responsesDecisionSchema } },
         }),
       });
-      const payload = await response.json() as Record<string, unknown>;
-      if (!response.ok) throw new Error(readResponsesError(payload) || `OpenAI Responses API failed with HTTP ${response.status}.`);
-      if (typeof payload.id === "string") this.#previousResponses.set(context.conversationId, payload.id);
-      return normalizeDecision(extractJson(extractResponsesText(payload)), snapshot);
+      if (!response.ok) {
+        const payload = await response.json() as Record<string, unknown>;
+        throw new Error(readResponsesError(payload) || `OpenAI Responses API failed with HTTP ${response.status}.`);
+      }
+      const streamed = await readResponsesStream(response, onEvent);
+      if (streamed.responseId) this.#previousResponses.set(context.conversationId, streamed.responseId);
+      return normalizeDecision(extractJson(streamed.text), snapshot);
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw new Error("OpenAI Responses API timed out.");
       throw error;
@@ -170,14 +183,23 @@ export class AgentRouter {
     return local.available && local.authenticated ? toCodexAgentStatus(local) : api.available ? api : toCodexAgentStatus(local);
   }
 
-  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext): Promise<{ decision: AgentDecision; provider: string }> {
+  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext, onEvent?: AgentEventSink): Promise<{ decision: AgentDecision; provider: string; selectedSkills: Omit<SkillSelection, "body">[] }> {
     const status = await this.status();
     if (!status.available || !status.authenticated) throw new Error(status.error || "No agent provider is available.");
+    emit(onEvent, { type: "observe", snapshotId: snapshot.snapshotId, summary: context.loop ? `Observed loop step ${context.loop.iteration + 1}` : "Observed current page" });
+    emit(onEvent, { type: "thinking", content: "Planning the next safe browser step…" });
+    const selectedSkills = selectSkillContext(task, await loadSkills(), snapshot.url);
     const decision = status.id === "openai"
-      ? await this.openai.run(task, snapshot, context)
-      : await this.codex.run(task, snapshot, context);
-    return { decision, provider: status.name };
+      ? await this.openai.run(task, snapshot, context, onEvent)
+      : await this.codex.run(task, snapshot, context, onEvent);
+    if (decision.kind === "action_plan") emit(onEvent, { type: "plan", summary: decision.summary, stepCount: decision.steps.length });
+    else emit(onEvent, { type: "complete", summary: decision.content.slice(0, 240) });
+    return { decision, provider: status.name, selectedSkills: selectedSkills.map(({ body: _body, ...skill }) => skill) };
   }
+}
+
+function emit(sink: AgentEventSink | undefined, event: AgentEventInput): void {
+  sink?.({ ...event, id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, timestamp: new Date().toISOString() } as AgentEvent);
 }
 
 function normalizeProviderPreference(value: string | undefined): "auto" | "codex" | "openai" {
@@ -217,6 +239,44 @@ export function extractResponsesText(value: unknown): string {
   }).join("\n").trim();
 }
 
+export async function readResponsesStream(response: Response, onEvent?: AgentEventSink): Promise<{ text: string; responseId?: string }> {
+  if (!response.headers.get("content-type")?.includes("text/event-stream")) {
+    const payload = await response.json() as Record<string, unknown>;
+    return { text: extractResponsesText(payload), ...(typeof payload.id === "string" ? { responseId: payload.id } : {}) };
+  }
+  if (!response.body) throw new Error("OpenAI Responses API returned no stream body.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  let responseId: string | undefined;
+  const consume = (frame: string) => {
+    const data = frame.split(/\r?\n/u).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+    if (!data || data === "[DONE]") return;
+    let event: Record<string, unknown>;
+    try { event = JSON.parse(data) as Record<string, unknown>; } catch { return; }
+    if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+      text += event.delta;
+      emit(onEvent, { type: "thinking", content: event.delta, delta: true });
+    }
+    const completed = event.response && typeof event.response === "object" ? event.response as Record<string, unknown> : undefined;
+    if (completed) {
+      if (typeof completed.id === "string") responseId = completed.id;
+      if (!text) text = extractResponsesText(completed);
+    }
+  };
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const frames = buffer.split(/\r?\n\r?\n/u);
+    buffer = frames.pop() ?? "";
+    frames.forEach(consume);
+    if (done) break;
+  }
+  if (buffer.trim()) consume(buffer);
+  return { text, ...(responseId ? { responseId } : {}) };
+}
+
 function readResponsesError(value: Record<string, unknown>): string {
   const error = value.error && typeof value.error === "object" ? value.error as Record<string, unknown> : {};
   return typeof error.message === "string" ? error.message : "";
@@ -242,16 +302,20 @@ function readErrorMessage(value: unknown): string {
   return typeof record.message === "string" ? record.message : typeof record.error === "string" ? record.error : "";
 }
 
-export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: string[], history: ChatMessage[] = []): string {
+export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: string[], history: ChatMessage[] = [], loop?: AgentLoopContext, selectedSkills: SkillSelection[] = []): string {
+  const loopState = loop ? { iteration: loop.iteration, maxSteps: loop.maxSteps, elapsedMs: Date.now() - loop.startedAt, lastAction: loop.lastAction, lastVerification: loop.lastVerification } : undefined;
   return [
-    "You are a current-page analysis and browser-action planner.",
+    "You are a current-page observe-plan-act-verify browser agent.",
     "Return exactly one JSON object without Markdown.",
-    "For analysis or questions return: {\"kind\":\"answer\",\"content\":\"...\"}.",
-    "For an explicit browser action return: {\"kind\":\"action_plan\",\"summary\":\"...\",\"snapshotId\":\"...\",\"requiresConfirmation\":true,\"confidence\":0.8,\"steps\":[{\"action\":\"click|fill|select|scroll|focus|submit\",\"targetRef\":\"element-1\",\"value\":\"...\",\"reason\":\"...\"}]}.",
-    "Use only data-ai-ref values present in simplifiedDom as targetRef. Never output JavaScript, CSS selectors, XPath, payment, purchase, credential, or destructive actions.",
-    "If the user only requests a draft, analysis, or explanation, do not create an action plan.",
+    "For analysis, completion, or questions return: {\"kind\":\"answer\",\"content\":\"...\"}.",
+    "For an explicit browser action return: {\"kind\":\"action_plan\",\"summary\":\"...\",\"snapshotId\":\"...\",\"requiresConfirmation\":true,\"confidence\":0.8,\"steps\":[{\"action\":\"click|fill|select|scroll|focus|submit\",\"targetRef\":\"element-ref\",\"value\":\"...\",\"reason\":\"...\"}]}.",
+    "Plan exactly one next action. The runtime observes and verifies the page again before asking for another action.",
+    "Use only data-ai-ref values present in simplifiedDom as targetRef. Prefer visible, unoccluded, enabled elements. Never output JavaScript, CSS selectors, XPath, payment, purchase, credential, destructive, or final irreversible actions.",
+    "If the goal is already satisfied, verification failed without a safe recovery, or the user only requested analysis, return an answer instead of an action plan.",
+    selectedSkills.length ? `Selected Skill context:\n${selectedSkills.map((skill) => `${skill.name} (${skill.scope}): ${skill.reason}`).join("\n")}` : "",
     skills.length ? `Applicable skills:\n${skills.join("\n\n")}` : "",
     history.length ? `Recent conversation:\n${history.slice(-12).map((message) => `${message.role}: ${message.content}`).join("\n")}` : "",
+    loopState ? `Loop state:\n${JSON.stringify(loopState)}` : "",
     `User task:\n${task}`,
     `Page snapshot:\n${JSON.stringify({ ...snapshot, elements: undefined })}`,
   ].filter(Boolean).join("\n\n");
@@ -260,8 +324,8 @@ export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: 
 export function normalizeDecision(value: unknown, snapshot: PageSnapshot): AgentDecision {
   const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
   if (raw.kind !== "action_plan") return { kind: "answer", content: String(raw.content || "The agent returned no answer.") };
-  const validRefs = new Set(snapshot.elements.map((element) => element.ref));
-  const writableRefs = new Set(snapshot.elements.filter((element) => !element.disabled && !element.sensitive).map((element) => element.ref));
+  const validRefs = new Set(snapshot.elements.filter((element) => !element.occluded).map((element) => element.ref));
+  const writableRefs = new Set(snapshot.elements.filter((element) => !element.disabled && !element.readonly && !element.sensitive && !element.occluded).map((element) => element.ref));
   const steps = Array.isArray(raw.steps) ? raw.steps.flatMap((value) => {
     const step = value && typeof value === "object" ? value as Record<string, unknown> : {};
     if (!ACTIONS.has(String(step.action))) return [];
@@ -274,7 +338,7 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
       ...(typeof step.amountPx === "number" ? { amountPx: Math.min(Math.max(step.amountPx, 0), 2_000) } : {}),
       reason: String(step.reason || "User-requested action.").slice(0, 240),
     }];
-  }).slice(0, 4) : [];
+  }).slice(0, 1) : [];
   if (!steps.length) return { kind: "answer", content: "No safe action could be matched to the current page." };
   return {
     kind: "action_plan",

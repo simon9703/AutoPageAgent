@@ -1,4 +1,5 @@
 export * from "./agent-events.js";
+import type { AgentEvent } from "./agent-events.js";
 
 export type BrowserActionKind = "click" | "fill" | "select" | "scroll" | "focus" | "submit";
 
@@ -23,6 +24,13 @@ export interface PageElementSnapshot {
   disabled: boolean;
   sensitive: boolean;
   contentEditable: boolean;
+  fingerprint: string;
+  inViewport: boolean;
+  occluded: boolean;
+  readonly: boolean;
+  checked?: boolean;
+  expanded?: boolean;
+  busy?: boolean;
   viewportRect: ViewportRect;
 }
 
@@ -143,6 +151,17 @@ export interface PageSnapshot {
   context?: { selectedElement?: InspectedElement };
   elements: PageElementSnapshot[];
   performance: PerformanceSnapshot;
+  capturedAt: string;
+  domVersion: number;
+}
+
+export interface PageSnapshotDiff {
+  urlChanged: boolean;
+  titleChanged: boolean;
+  addedFingerprints: string[];
+  removedFingerprints: string[];
+  changedFingerprints: string[];
+  summary: string[];
 }
 
 export interface BrowserActionStep {
@@ -169,3 +188,109 @@ export interface AgentAnswer {
 }
 
 export type AgentDecision = BrowserActionPlan | AgentAnswer;
+
+export type RecordedActionKind = "click" | "fill" | "select" | "scroll" | "submit";
+
+export interface RecordedBrowserAction {
+  id: string;
+  action: RecordedActionKind;
+  url: string;
+  selector?: string;
+  label?: string;
+  value?: string;
+  sensitive: boolean;
+  timestamp: number;
+  scrollX?: number;
+  scrollY?: number;
+}
+
+export interface AutomationSkillDraft {
+  name: string;
+  description: string;
+  startUrl: string;
+  createdAt: string;
+  requiresConfirmation: true;
+  steps: RecordedBrowserAction[];
+}
+
+export interface SavedAutomationSkill {
+  name: string;
+  slug: string;
+  skillPath: string;
+  workflowPath: string;
+  variableNames: string[];
+}
+
+export interface PageSkillSummary {
+  name: string;
+  slug: string;
+  description: string;
+  enabled: boolean;
+  configurable: boolean;
+  scope: "page" | "global";
+  match: "origin" | "path-prefix" | "wildcard" | "global";
+  pagePattern?: string;
+  pagePatterns: string[];
+  stepCount: number;
+  actions: RecordedActionKind[];
+  variableNames: string[];
+}
+
+export interface ConfiguredAutomationSkill {
+  slug: string;
+  enabled: boolean;
+  pagePatterns: string[];
+}
+
+export interface SkillSelection {
+  name: string;
+  slug: string;
+  reason: string;
+  score: number;
+  scope: "page" | "global";
+  body: string;
+}
+
+export interface AgentLoopContext {
+  runId: string;
+  iteration: number;
+  maxSteps: number;
+  timeoutMs: number;
+  startedAt: number;
+  previousSnapshot?: PageSnapshot;
+  lastAction?: BrowserActionStep;
+  lastVerification?: ActionVerification;
+}
+
+export interface ActionVerification {
+  success: boolean;
+  summary: string;
+  changes: string[];
+  diff: PageSnapshotDiff;
+}
+
+export interface ActionExecutionResult {
+  ok: boolean;
+  results?: Array<{ action: string; ok: true }>;
+  snapshot?: PageSnapshot;
+  verification?: ActionVerification;
+  error?: string;
+}
+
+export type ClientMessage =
+  | { id: string; type: "health.check" }
+  | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot; conversationId: string; history: ChatMessage[]; loop?: AgentLoopContext }
+  | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement; apiRequests: ApiRequestSnapshot[] }
+  | { id: string; type: "skill.list"; pageUrl: string; pageTitle: string }
+  | { id: string; type: "skill.configure"; slug: string; enabled?: boolean; pagePatterns?: string[] }
+  | { id: string; type: "skill.save"; draft: AutomationSkillDraft };
+
+export type ServerMessage =
+  | { id: string; type: "health.result"; ok: boolean; provider: string; repositories: string[]; codex: CodexRuntimeStatus; agent: AgentRuntimeStatus }
+  | { id: string; type: "agent.event"; event: AgentEvent }
+  | { id: string; type: "agent.result"; decision: AgentDecision; provider: string; conversationId: string; selectedSkills: Omit<SkillSelection, "body">[] }
+  | { id: string; type: "repository.result"; analysis: RepositoryAnalysis }
+  | { id: string; type: "skill.list.result"; pageUrl: string; skills: PageSkillSummary[] }
+  | { id: string; type: "skill.configured"; skill: ConfiguredAutomationSkill }
+  | { id: string; type: "skill.saved"; skill: SavedAutomationSkill }
+  | { id: string; type: "agent.error"; error: string };

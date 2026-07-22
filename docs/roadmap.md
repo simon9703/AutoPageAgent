@@ -6,34 +6,34 @@ Goal: upgrade from single action execution to a reliable observe-plan-act-verify
 
 ### Agent Loop
 
-- [ ] Observe → Plan → Act → Verify execution loop
-- [ ] Maximum step budget and timeout control
-- [ ] Snapshot refresh after every action
-- [ ] Action result validation
-- [ ] Failure recovery and retry strategy
+- [x] Observe → Plan → Act → Verify execution loop
+- [x] Maximum step budget and timeout control
+- [x] Snapshot refresh after every action
+- [x] Action result validation
+- [x] Failure recovery and retry strategy (bounded re-plan plus navigation recovery)
 
 ### Agent Interaction UI
 
-- [ ] Agent execution timeline
-- [ ] Streaming assistant events
-- [ ] Real-time action status
-- [ ] Enhanced AI cursor / target overlay
-- [ ] Action explanation labels
+- [x] Agent execution timeline
+- [x] Streaming assistant events
+- [x] Real-time action status
+- [x] Enhanced AI cursor / target overlay
+- [x] Action explanation labels
 - [ ] Step-by-step execution replay
 
 ### Page Understanding
 
-- [ ] Snapshot diff between actions
-- [ ] Detect DOM changes after execution
-- [ ] Element state change tracking
-- [ ] Better hidden/loading/disabled element handling
+- [x] Snapshot diff between actions
+- [x] Detect DOM changes after execution
+- [x] Element state change tracking
+- [x] Better occluded/loading/disabled/read-only element handling
 
 ### Skill Runtime
 
-- [ ] Skill execution state machine
-- [ ] Skill step visualization
-- [ ] Skill failure recovery
-- [ ] Skill variables and runtime context
+- [x] Skill execution through the shared agent loop state machine
+- [x] Skill step visualization through the agent timeline
+- [x] Skill failure recovery through verify/re-plan
+- [x] Skill variables and runtime context
 - [ ] Skill execution metrics
 
 ### v0.2 Demo Targets
@@ -63,8 +63,8 @@ Goal: upgrade from single action execution to a reliable observe-plan-act-verify
 - [x] element and image message context
 - [x] compact indexed DOM with viewport pruning
 - [x] AI pointer, target ring, and action status label
-- [ ] streaming assistant output
-- [ ] observe-act loop with a maximum-step budget
+- [x] streaming assistant output
+- [x] observe-act loop with a maximum-step budget
 - [x] local current-viewport screenshot capture and preview
 - [x] selected public image input in Responses API mode
 - [ ] screenshot/binary image input to local Codex

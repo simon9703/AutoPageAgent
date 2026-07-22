@@ -1,4 +1,4 @@
-import type { AutomationSkillDraft, BrowserActionPlan, ChatMessage, InspectedElement, PageSkillSummary, RecordedBrowserAction, RepositoryAnalysis, ServerMessage } from "@auto-page-agent/shared";
+import type { AgentEvent, AutomationSkillDraft, BrowserActionPlan, ChatMessage, InspectedElement, PageSkillSummary, RecordedBrowserAction, RepositoryAnalysis, ServerMessage } from "@auto-page-agent/shared";
 
 const status = document.querySelector<HTMLSpanElement>("#status")!;
 const result = document.querySelector<HTMLElement>("#result")!;
@@ -14,6 +14,7 @@ let recordedActions: RecordedBrowserAction[] = [];
 let recordingStartUrl = "";
 let conversationId: string = crypto.randomUUID();
 let chatMessages: ChatMessage[] = [];
+let agentEvents: AgentEvent[] = [];
 
 void checkHealth();
 void restoreSelectedElement();
@@ -64,7 +65,49 @@ chrome.runtime.onMessage.addListener((message) => {
     renderRecording();
   }
   if (message?.type === "ui.page.changed") void loadPageSkills();
+  if (message?.type === "ui.agent.event") appendAgentEvent(message.event as AgentEvent);
 });
+
+function appendAgentEvent(event: AgentEvent) {
+  const last = agentEvents.at(-1);
+  if (event.type === "thinking" && event.delta && last?.type === "thinking" && last.delta) {
+    last.content = `${last.content}${event.content}`.slice(-1_000);
+    last.timestamp = event.timestamp;
+  } else {
+    agentEvents.push(event);
+    if (agentEvents.length > 80) agentEvents = agentEvents.slice(-80);
+  }
+  renderAgentTimeline();
+}
+
+function renderAgentTimeline() {
+  const card = document.querySelector<HTMLElement>("#agent-timeline-card")!;
+  const list = document.querySelector<HTMLOListElement>("#agent-timeline")!;
+  card.classList.toggle("hidden", !agentEvents.length);
+  list.replaceChildren(...agentEvents.map((event) => {
+    const item = document.createElement("li");
+    const statusClass = event.type === "action" ? event.status : event.type === "verify" ? event.success ? "success" : "failed" : event.type;
+    item.className = `timeline-event ${statusClass}`;
+    const content = document.createElement("span");
+    content.textContent = eventLabel(event);
+    const meta = document.createElement("small");
+    meta.textContent = new Date(event.timestamp).toLocaleTimeString();
+    content.append(meta);
+    item.append(content);
+    return item;
+  }));
+  list.scrollTop = list.scrollHeight;
+}
+
+function eventLabel(event: AgentEvent): string {
+  if (event.type === "observe") return `Observe · ${event.summary || event.snapshotId}`;
+  if (event.type === "thinking") return event.delta ? `Streaming · ${truncate(event.content.replace(/\s+/gu, " "), 100)}` : event.content;
+  if (event.type === "plan") return `Plan · ${event.summary}`;
+  if (event.type === "action") return `${event.status === "running" ? "Act" : "Action"} · ${event.action}${event.detail ? ` · ${event.detail}` : ""}`;
+  if (event.type === "verify") return `Verify · ${event.summary}`;
+  if (event.type === "complete") return `Complete · ${event.summary}`;
+  return `Error · ${event.error}`;
+}
 
 async function checkHealth() {
   const response = await chrome.runtime.sendMessage({ type: "ui.health" }) as ServerMessage;
@@ -359,6 +402,8 @@ async function runTask() {
   const userText = task.value.trim();
   if (!userText) return render("Enter a message first.");
   const history = chatMessages.slice(-20);
+  agentEvents = [];
+  renderAgentTimeline();
   appendChat("user", userText);
   task.value = "";
   setBusy(true);
@@ -367,6 +412,7 @@ async function runTask() {
   const response = await chrome.runtime.sendMessage({ type: "ui.run", task: userText, conversationId, history }) as ServerMessage;
   setBusy(false);
   if (response.type === "agent.error") {
+    appendAgentEvent({ id: crypto.randomUUID(), type: "error", timestamp: new Date().toISOString(), error: response.error, recoverable: true });
     appendChat("assistant", `Error: ${response.error}`);
     return render(`Error: ${response.error}`);
   }
@@ -377,7 +423,7 @@ async function runTask() {
   }
   pendingPlan = response.decision;
   appendChat("assistant", `${response.decision.summary}\n\nProposed ${response.decision.steps.length} browser action(s).`, response.provider);
-  render(`Plan from ${response.provider} · confidence ${Math.round(response.decision.confidence * 100)}%`);
+  render(`Plan from ${response.provider} · confidence ${Math.round(response.decision.confidence * 100)}%${response.selectedSkills.length ? `\nSkills: ${response.selectedSkills.map((skill) => `${skill.name} — ${skill.reason}`).join("; ")}` : ""}`);
   steps.replaceChildren(...response.decision.steps.map((step) => {
     const item = document.createElement("li");
     item.textContent = `${step.action} ${step.targetRef ?? "page"}: ${step.reason}`;
@@ -390,7 +436,7 @@ async function executePlan() {
   if (!pendingPlan) return;
   approval.classList.add("hidden");
   const response = await chrome.runtime.sendMessage({ type: "ui.execute", plan: pendingPlan });
-  const message = response?.ok ? "Actions completed. The page may have changed; send another message to continue." : `Action failed: ${response?.error ?? "Unknown error"}`;
+  const message = response?.ok ? `${response.answer ?? "Task completed."}\n\nCompleted in ${response.steps ?? 1} agent step(s).` : `Action failed: ${response?.error ?? "Unknown error"}`;
   appendChat("assistant", message);
   render(message);
   pendingPlan = null;

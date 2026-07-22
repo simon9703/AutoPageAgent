@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PageSnapshot } from "@auto-page-agent/shared";
-import { createAgentPrompt, extractJson, extractResponsesText, normalizeDecision, OpenAIResponsesProvider } from "../src/agent.js";
+import { createAgentPrompt, extractJson, extractResponsesText, normalizeDecision, OpenAIResponsesProvider, readResponsesStream } from "../src/agent.js";
 
 const snapshot = {
   snapshotId: "snapshot-1", url: "https://example.com", title: "Example", language: "en", selectedText: "", headings: [], mainText: "", simplifiedDom: "[1]<button>Save</button>",
@@ -32,6 +32,32 @@ test("normalizeDecision binds the current snapshot and requires confirmation", (
     assert.equal(result.snapshotId, "snapshot-1");
     assert.equal(result.requiresConfirmation, true);
   }
+});
+
+test("V2 planner accepts only one action before re-observation", () => {
+  const result = normalizeDecision({ kind: "action_plan", steps: [
+    { action: "focus", targetRef: "element-1" },
+    { action: "click", targetRef: "element-1" },
+  ] }, snapshot);
+  assert.equal(result.kind, "action_plan");
+  if (result.kind === "action_plan") assert.equal(result.steps.length, 1);
+});
+
+test("Responses SSE emits text deltas and returns the completed response id", async () => {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({ start(controller) {
+    controller.enqueue(encoder.encode('event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"{\\"kind\\":\\"answer\\","}\n\n'));
+    controller.enqueue(encoder.encode('event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"\\"content\\":\\"ok\\"}"}\n\n'));
+    controller.enqueue(encoder.encode('event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp-1"}}\n\n'));
+    controller.close();
+  } });
+  const events: string[] = [];
+  const streamed = await readResponsesStream(new Response(body, { headers: { "content-type": "text/event-stream" } }), (event) => {
+    if (event.type === "thinking") events.push(event.content);
+  });
+  assert.equal(streamed.text, '{"kind":"answer","content":"ok"}');
+  assert.equal(streamed.responseId, "resp-1");
+  assert.equal(events.length, 2);
 });
 
 test("Responses API provider sends selected images and parses structured output", async () => {

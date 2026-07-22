@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { AutomationSkillDraft, ConfiguredAutomationSkill, PageSkillSummary, RecordedActionKind, RecordedBrowserAction, SavedAutomationSkill } from "@auto-page-agent/shared";
+import type { AutomationSkillDraft, ConfiguredAutomationSkill, PageSkillSummary, RecordedActionKind, RecordedBrowserAction, SavedAutomationSkill, SkillSelection } from "@auto-page-agent/shared";
 
 interface LoadedWorkflow {
   schemaVersion?: number;
@@ -41,14 +41,47 @@ export async function loadSkills(root = resolve(process.cwd(), "skills")): Promi
 }
 
 export function selectSkills(task: string, skills: LoadedSkill[], pageUrl?: string): LoadedSkill[] {
-  const eligible = pageUrl ? skills.filter((skill) => skillMatchesPage(skill, pageUrl)) : skills;
-  const normalized = task.toLowerCase();
-  const scored = eligible.map((skill) => ({
-    skill,
-    score: `${skill.name} ${skill.description}`.toLowerCase().split(/[^a-z0-9\u4e00-\u9fff]+/u).filter((token) => token.length > 1 && normalized.includes(token)).length,
+  const selected = selectSkillContext(task, skills, pageUrl);
+  const slugs = new Set(selected.map((item) => item.slug));
+  return skills.filter((skill) => slugs.has(skill.slug));
+}
+
+export function selectSkillContext(task: string, skills: LoadedSkill[], pageUrl?: string): SkillSelection[] {
+  const eligible = pageUrl ? skills.filter((skill) => skillMatchesPage(skill, pageUrl)) : skills.filter((skill) => skill.workflow?.enabled !== false);
+  const normalizedTask = normalizeSearchText(task);
+  const taskTokens = tokenize(normalizedTask);
+  const ranked = eligible.map((skill) => {
+    const searchable = normalizeSearchText(`${skill.name} ${skill.description}`);
+    const skillTokens = tokenize(searchable);
+    const tokenHits = skillTokens.filter((token) => taskTokens.some((candidate) => candidate.includes(token) || token.includes(candidate))).length;
+    const phraseHit = normalizedTask.includes(normalizeSearchText(skill.name));
+    const pageScoped = Boolean(skill.workflow?.startUrl);
+    const score = tokenHits * 2 + (phraseHit ? 6 : 0) + (pageScoped ? 3 : 0);
+    return { skill, score, tokenHits, pageScoped };
+  }).sort((a, b) => b.score - a.score || Number(b.pageScoped) - Number(a.pageScoped));
+  let matched = ranked.filter((item) => item.score > (item.pageScoped ? 2 : 0)).slice(0, 3);
+  if (!matched.length) matched = ranked.filter((item) => item.skill.slug === "analyze-page").slice(0, 1);
+  return matched.map(({ skill, score, tokenHits, pageScoped }) => ({
+    name: skill.name,
+    slug: skill.slug,
+    description: skill.description,
+    body: skill.body.slice(0, 24_000),
+    score,
+    scope: pageScoped ? "page" : "global",
+    reason: pageScoped
+      ? `Matched the current page${tokenHits ? ` and ${tokenHits} task keyword(s)` : ""}.`
+      : `Matched ${Math.max(1, tokenHits)} task keyword(s).`,
   }));
-  const matched = scored.filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 2).map((item) => item.skill);
-  return matched.length ? matched : eligible.filter((skill) => skill.name === "analyze-page").slice(0, 1);
+}
+
+function normalizeSearchText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/gu, " ").trim();
+}
+
+function tokenize(value: string): string[] {
+  const words = value.split(/\s+/u).filter((token) => token.length > 1);
+  const chinese = Array.from(value.matchAll(/[\u4e00-\u9fff]{2,}/gu), (match) => match[0]!);
+  return Array.from(new Set([...words, ...chinese])).slice(0, 80);
 }
 
 export function listSkillsForPage(pageUrl: string, skills: LoadedSkill[]): PageSkillSummary[] {

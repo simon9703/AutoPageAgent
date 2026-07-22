@@ -1,9 +1,12 @@
-import type { AutomationSkillDraft, BrowserActionPlan, ChatMessage, ClientMessage, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
+import type { ActionExecutionResult, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ClientMessage, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
 
 const BRIDGE_URL = "ws://127.0.0.1:3210";
 let socket: WebSocket | null = null;
 let connecting: Promise<WebSocket> | null = null;
 const RECORDING_KEY = "automationRecording";
+let pendingAgentRun: { task: string; conversationId: string; history: ChatMessage[] } | null = null;
+type EventWithoutMeta<T> = T extends unknown ? Omit<T, "id" | "timestamp"> : never;
+type AgentEventInput = EventWithoutMeta<AgentEvent>;
 
 interface RecordingState {
   active: boolean;
@@ -54,7 +57,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "ui.execute") {
-    void executePlan(message.plan as BrowserActionPlan).then(sendResponse).catch(toErrorResponse(sendResponse));
+    void runAgentLoop(message.plan as BrowserActionPlan).then(sendResponse).catch((error) => {
+      emitUiEvent(createEvent({ type: "error", error: error instanceof Error ? error.message : String(error), recoverable: false }));
+      toErrorResponse(sendResponse)(error);
+    });
     return true;
   }
   if (message?.type === "ui.selection.start") {
@@ -112,7 +118,8 @@ async function runTask(task: string, conversationId: string, history: ChatMessag
   const snapshot = await chrome.tabs.sendMessage(tab.id, { type: "page.snapshot" }) as PageSnapshot;
   const stored = await chrome.storage.session.get(["selectedElement", "selectedElementPageUrl"]);
   if (stored.selectedElement && stored.selectedElementPageUrl === tab.url) snapshot.context = { selectedElement: stored.selectedElement as InspectedElement };
-  return requestBridge({ id: crypto.randomUUID(), type: "agent.run", task, snapshot, conversationId: conversationId || crypto.randomUUID(), history: history.slice(-20) });
+  pendingAgentRun = { task, conversationId: conversationId || crypto.randomUUID(), history: history.slice(-20) };
+  return requestBridge({ id: crypto.randomUUID(), type: "agent.run", task, snapshot, conversationId: pendingAgentRun.conversationId, history: pendingAgentRun.history }, emitUiEvent);
 }
 
 async function startSelection(mode: "element" | "image") {
@@ -129,6 +136,88 @@ async function analyzeRepository(element: InspectedElement, pageUrl: string): Pr
 async function executePlan(plan: BrowserActionPlan) {
   const tab = await getActiveTab();
   return chrome.tabs.sendMessage(tab.id, { type: "page.actions.execute", plan });
+}
+
+async function runAgentLoop(initialPlan: BrowserActionPlan) {
+  if (!pendingAgentRun) throw new Error("The original agent task expired. Run the task again.");
+  const runId = crypto.randomUUID();
+  const startedAt = Date.now();
+  const maxSteps = 8;
+  const timeoutMs = 90_000;
+  let iteration = 0;
+  let failures = 0;
+  let plan = initialPlan;
+  let latestAnswer = "Task completed.";
+  while (iteration < maxSteps && Date.now() - startedAt < timeoutMs) {
+    const step = plan.steps[0];
+    if (!step) throw new Error("The agent returned an empty action plan.");
+    emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: "running", step: iteration + 1, detail: step.reason }));
+    let execution = await executePlanResilient({ ...plan, steps: [step] });
+    if (!execution.snapshot) execution = { ...execution, snapshot: await readCurrentSnapshot() };
+    const observedSnapshot = execution.snapshot!;
+    emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: execution.ok ? "success" : "failed", step: iteration + 1, detail: execution.error }));
+    const verification = execution.verification;
+    emitUiEvent(createEvent({ type: "verify", success: Boolean(verification?.success ?? execution.ok), summary: verification?.summary ?? execution.error ?? "Action observation completed.", changes: verification?.changes, changedRefs: verification?.diff.changedFingerprints, step: iteration + 1 }));
+    if (!execution.ok) failures += 1;
+    else failures = 0;
+    iteration += 1;
+    if (failures >= 2) throw new Error("The agent stopped after two consecutive verification failures.");
+    const loop: AgentLoopContext = {
+      runId, iteration, maxSteps, timeoutMs, startedAt,
+      previousSnapshot: observedSnapshot,
+      lastAction: step,
+      ...(verification ? { lastVerification: verification } : {}),
+    };
+    const response = await requestBridge({
+      id: crypto.randomUUID(), type: "agent.run", task: pendingAgentRun.task, snapshot: observedSnapshot,
+      conversationId: pendingAgentRun.conversationId, history: pendingAgentRun.history, loop,
+    }, emitUiEvent);
+    if (response.type === "agent.error") throw new Error(response.error);
+    if (response.type !== "agent.result") throw new Error("Unexpected agent loop response.");
+    if (response.decision.kind === "answer") {
+      latestAnswer = response.decision.content;
+      return { ok: true, answer: latestAnswer, steps: iteration };
+    }
+    if (iteration >= maxSteps || Date.now() - startedAt >= timeoutMs) throw new Error(`The agent stopped at its ${iteration >= maxSteps ? "step" : "time"} budget.`);
+    plan = response.decision;
+  }
+  return { ok: true, answer: latestAnswer, steps: iteration };
+}
+
+async function executePlanResilient(plan: BrowserActionPlan): Promise<ActionExecutionResult> {
+  try { return await executePlan(plan) as ActionExecutionResult; }
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/message port closed|receiving end does not exist|context invalidated|frame was removed/iu.test(message)) throw error;
+    await waitForActiveTabReady();
+    const snapshot = await readCurrentSnapshot();
+    const diff = { urlChanged: true, titleChanged: false, addedFingerprints: [], removedFingerprints: [], changedFingerprints: [], summary: ["The page navigated and a new document was observed."] };
+    return { ok: true, results: [{ action: plan.steps[0]?.action ?? "click", ok: true }], snapshot, verification: { success: true, summary: diff.summary[0]!, changes: diff.summary, diff } };
+  }
+}
+
+async function waitForActiveTabReady(timeoutMs = 8_000): Promise<void> {
+  const tab = await getActiveTab();
+  if (tab.status === "complete") return;
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(done, timeoutMs);
+    function done() { clearTimeout(timeout); chrome.tabs.onUpdated.removeListener(onUpdated); resolve(); }
+    function onUpdated(tabId: number, info: chrome.tabs.TabChangeInfo) { if (tabId === tab.id && info.status === "complete") done(); }
+    chrome.tabs.onUpdated.addListener(onUpdated);
+  });
+}
+
+async function readCurrentSnapshot(): Promise<PageSnapshot> {
+  const tab = await getActiveTab();
+  return chrome.tabs.sendMessage(tab.id, { type: "page.snapshot" }) as Promise<PageSnapshot>;
+}
+
+function emitUiEvent(event: AgentEvent) {
+  void chrome.runtime.sendMessage({ type: "ui.agent.event", event }).catch(() => undefined);
+}
+
+function createEvent(event: AgentEventInput): AgentEvent {
+  return { ...event, id: crypto.randomUUID(), timestamp: new Date().toISOString() } as AgentEvent;
 }
 
 async function listPageSkills(): Promise<ServerMessage> {
@@ -207,18 +296,19 @@ async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number }> {
   return tab as chrome.tabs.Tab & { id: number };
 }
 
-async function requestBridge(message: ClientMessage): Promise<ServerMessage> {
+async function requestBridge(message: ClientMessage, onEvent?: (event: AgentEvent) => void): Promise<ServerMessage> {
   const ws = await connect();
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       ws.removeEventListener("message", onMessage);
       reject(new Error("Local bridge timed out."));
-    }, 45_000);
+    }, 75_000);
     const onMessage = (event: MessageEvent<string>) => {
       let response: ServerMessage;
       try { response = JSON.parse(event.data) as ServerMessage; }
       catch { clearTimeout(timeout); ws.removeEventListener("message", onMessage); reject(new Error("Local bridge returned malformed JSON.")); return; }
       if (response.id !== message.id) return;
+      if (response.type === "agent.event") { onEvent?.(response.event); return; }
       clearTimeout(timeout);
       ws.removeEventListener("message", onMessage);
       resolve(response);

@@ -11,7 +11,7 @@
 - Only visible snapshot refs can be acted on.
 - The model receives a compact indexed DOM without CSS selectors; selectors and live DOM references remain in the content script.
 - Refs are scoped to one snapshot version.
-- Every MVP action plan requires confirmation.
+- Every single-plan MVP action requires confirmation. V2 requires explicit consent before starting the clearly labeled bounded loop; subsequent safe steps are visible in real time, individually validated, and stop at the configured step/time/failure budgets.
 - Payment, credential, destructive, and hidden-element operations are outside the tool set.
 - Password, file, token-like, OTP, and payment-like fields are marked sensitive; their values are excluded and agent filling is rejected.
 - Repository queries run through direct `rg` process arguments with fixed strings, limits, timeouts, and no shell interpolation.

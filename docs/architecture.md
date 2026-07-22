@@ -36,6 +36,8 @@ The bridge listens only on `127.0.0.1`. It:
 5. parses and validates the JSON decision;
 6. returns an answer or confirmation-required action plan.
 
+After the initial plan is confirmed, the extension owns the V2 runtime loop. It executes one constrained action, waits for the DOM to settle, captures a fresh snapshot, computes a fingerprint-based diff, verifies the expected state, and sends the observation back to the provider. The loop stops on completion, two consecutive verification failures, eight actions, or 90 seconds. Provider deltas and runtime lifecycle events share the `AgentEvent` protocol and are rendered by the side-panel timeline.
+
 ### Agent provider router
 
 `AgentRouter` supports `auto`, `codex`, and `openai` modes. `auto` prefers an authenticated local Codex app-server and falls back to the Responses API only when `OPENAI_API_KEY` is configured. Provider secrets stay in the bridge process and are never sent to the extension or page.

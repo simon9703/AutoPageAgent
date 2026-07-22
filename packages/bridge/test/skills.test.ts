@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { AutomationSkillDraft } from "@auto-page-agent/shared";
-import { configureAutomationSkill, listSkillsForPage, loadSkills, saveAutomationSkill, selectSkills } from "../src/skills.js";
+import { configureAutomationSkill, listSkillsForPage, loadSkills, saveAutomationSkill, selectSkillContext, selectSkills } from "../src/skills.js";
 
 test("recorded Skills parameterize values and never persist sensitive input", async () => {
   const root = await mkdtemp(join(tmpdir(), "auto-page-agent-skills-"));
@@ -102,4 +102,14 @@ test("recorded Skill configuration supports path wildcards and enabled state", a
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("V2 Skill selection prefers page-scoped matches and explains why", () => {
+  const selected = selectSkillContext("create release draft", [
+    { name: "Release draft", slug: "release", description: "Create release draft", body: "release", workflow: { enabled: true, startUrl: "https://example.com/releases/new", steps: [] } },
+    { name: "Analyze page", slug: "analyze-page", description: "Analyze any page", body: "analyze" },
+  ], "https://example.com/releases/new");
+  assert.equal(selected[0]?.slug, "release");
+  assert.equal(selected[0]?.scope, "page");
+  assert.match(selected[0]?.reason ?? "", /current page/u);
 });

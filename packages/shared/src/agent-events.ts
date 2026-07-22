@@ -22,6 +22,7 @@ export interface ObserveEvent extends AgentEventBase {
 export interface ThinkingEvent extends AgentEventBase {
   type: "thinking";
   content: string;
+  delta?: boolean;
 }
 
 export interface PlanEvent extends AgentEventBase {
@@ -35,6 +36,8 @@ export interface ActionEvent extends AgentEventBase {
   action: string;
   targetRef?: string;
   status: "pending" | "running" | "success" | "failed";
+  step?: number;
+  detail?: string;
 }
 
 export interface VerifyEvent extends AgentEventBase {
@@ -42,6 +45,8 @@ export interface VerifyEvent extends AgentEventBase {
   success: boolean;
   summary: string;
   changedRefs?: string[];
+  changes?: string[];
+  step?: number;
 }
 
 export interface CompleteEvent extends AgentEventBase {
@@ -52,6 +57,7 @@ export interface CompleteEvent extends AgentEventBase {
 export interface ErrorEvent extends AgentEventBase {
   type: "error";
   error: string;
+  recoverable?: boolean;
 }
 
 export type AgentEvent =

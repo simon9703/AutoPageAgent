@@ -20,6 +20,10 @@ A lightweight Chrome side-panel agent that understands the current page, analyze
 - Select a page element or image and send it as explicit message context.
 - Send a Page Agent-inspired compact, indexed DOM instead of the full page tree.
 - Show an AI pointer, target ring, and action label while approved DOM actions execute.
+- Run a bounded observe-plan-act-verify loop with a fresh snapshot and verification after every action.
+- Stream provider and runtime events into a real-time execution timeline.
+- Track stable element fingerprints, occlusion, viewport, read-only, checked, expanded, and busy state.
+- Rank page Skills with explicit match reasons and keep their context active across loop iterations.
 
 ## Architecture
 
@@ -119,7 +123,7 @@ npm run build
 
 ## Current limits
 
-- Conversation continuity is implemented, but response/event streaming and iterative observe-act loops remain on the roadmap.
+- The V2 loop is intentionally bounded to 8 actions and 90 seconds; cross-tab execution and unrestricted final-submit actions remain out of scope.
 - A selected public image URL is sent as `input_image` in Responses API mode. Local Codex currently receives its URL, alt text, dimensions, and surrounding DOM context rather than binary image data.
 - Recorded replay targets the current page. Navigation-aware and cross-tab replay remain planned.
 - Resource Timing cannot expose all cross-origin sizes unless the resource sends `Timing-Allow-Origin`.

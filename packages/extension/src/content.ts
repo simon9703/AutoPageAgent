@@ -1,4 +1,6 @@
 import type {
+  ActionExecutionResult,
+  ActionVerification,
   BrowserActionPlan,
   BrowserActionStep,
   PageElementSnapshot,
@@ -6,15 +8,22 @@ import type {
   PerformanceSnapshot,
   InspectedElement,
   RecordedBrowserAction,
+  PageSnapshotDiff,
 } from "@auto-page-agent/shared";
 
 const elementRefs = new Map<string, Element>();
 let currentSnapshotId = "";
 let currentSnapshotUrl = "";
+let currentSnapshot: PageSnapshot | null = null;
 let selectionCleanup: (() => void) | null = null;
 let recordingActive = false;
 let scrollTimer: number | undefined;
 let aiPointer: HTMLElement | null = null;
+let domVersion = 0;
+
+new MutationObserver((records) => {
+  if (records.some((record) => !(record.target instanceof Element) || !record.target.closest("[data-auto-page-agent-overlay]"))) domVersion += 1;
+}).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "page.snapshot") {
@@ -97,9 +106,13 @@ function createPageSnapshot(): PageSnapshot {
     'button,a[href],input,textarea,select,[contenteditable="true"],[role="button"],[role="textbox"],[role="tab"],[role="checkbox"],[role="radio"]',
   );
   const elements: PageElementSnapshot[] = [];
+  const fingerprintCounts = new Map<string, number>();
   for (const element of candidates) {
-    if (!isVisible(element) || !isNearViewport(element, 700) || !isTopLayerElement(element) || isHiddenInput(element) || elements.length >= 160) continue;
-    const ref = `element-${elements.length + 1}`;
+    if (!isVisible(element) || !isNearViewport(element, 700) || isHiddenInput(element) || elements.length >= 200) continue;
+    const fingerprint = createElementFingerprint(element);
+    const occurrence = (fingerprintCounts.get(fingerprint) ?? 0) + 1;
+    fingerprintCounts.set(fingerprint, occurrence);
+    const ref = `el-${fingerprint}-${occurrence}`;
     elementRefs.set(ref, element);
     const html = element as HTMLElement;
     const input = element as HTMLInputElement;
@@ -118,13 +131,20 @@ function createPageSnapshot(): PageSnapshot {
       disabled: "disabled" in input && Boolean(input.disabled),
       sensitive: isSensitiveElement(element),
       contentEditable: html.isContentEditable,
+      fingerprint: `${fingerprint}-${occurrence}`,
+      inViewport: isNearViewport(element, 0),
+      occluded: !isTopLayerElement(element),
+      readonly: "readOnly" in input && Boolean(input.readOnly),
+      ...(element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type) ? { checked: element.checked } : {}),
+      ...(element.hasAttribute("aria-expanded") ? { expanded: element.getAttribute("aria-expanded") === "true" } : {}),
+      ...(element.hasAttribute("aria-busy") ? { busy: element.getAttribute("aria-busy") === "true" } : {}),
       viewportRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
     });
   }
 
   const pageInfo = collectPageInfo();
-  const simplifiedDom = elements.map((element, index) => simplifyElement(element, index + 1)).join("\n") || "<EMPTY>";
-  return {
+  const simplifiedDom = buildSimplifiedDom(elements);
+  const snapshot: PageSnapshot = {
     snapshotId: currentSnapshotId,
     url: location.href,
     title: document.title,
@@ -139,7 +159,11 @@ function createPageSnapshot(): PageSnapshot {
     pageInfo,
     elements,
     performance: collectPerformance(),
+    capturedAt: new Date().toISOString(),
+    domVersion,
   };
+  currentSnapshot = snapshot;
+  return snapshot;
 }
 
 function collectPerformance(): PerformanceSnapshot {
@@ -180,15 +204,70 @@ function collectPerformance(): PerformanceSnapshot {
   };
 }
 
-async function executePlan(plan: BrowserActionPlan) {
+async function executePlan(plan: BrowserActionPlan): Promise<ActionExecutionResult> {
   if (plan.snapshotId !== currentSnapshotId) throw new Error("Page snapshot expired. Read the page again.");
   if (location.href !== currentSnapshotUrl) throw new Error("Page URL changed after the snapshot. Read the page again.");
-  const results = [];
-  for (const step of plan.steps) {
-    results.push(await executeStep(step));
-    await new Promise((resolve) => setTimeout(resolve, 250));
+  const before = currentSnapshot;
+  if (!before) throw new Error("No current page snapshot is available.");
+  const step = plan.steps[0];
+  if (!step) throw new Error("The action plan is empty.");
+  const targetFingerprint = step.targetRef ? before.elements.find((element) => element.ref === step.targetRef)?.fingerprint : undefined;
+  const results = [await executeStep(step)];
+  await waitForDomSettled();
+  const after = createPageSnapshot();
+  const diff = diffSnapshots(before, after);
+  const verification = verifyAction(step, after, diff, targetFingerprint);
+  return { ok: verification.success, results, snapshot: after, verification, ...(!verification.success ? { error: verification.summary } : {}) };
+}
+
+async function waitForDomSettled(maxWaitMs = 1_800, quietMs = 250): Promise<void> {
+  const start = Date.now();
+  let lastVersion = domVersion;
+  let quietSince = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    await delay(80);
+    if (domVersion !== lastVersion) { lastVersion = domVersion; quietSince = Date.now(); }
+    if (Date.now() - quietSince >= quietMs) return;
   }
-  return { ok: true, results };
+}
+
+export function diffSnapshots(before: PageSnapshot, after: PageSnapshot): PageSnapshotDiff {
+  const beforeById = new Map(before.elements.map((element) => [element.fingerprint, element]));
+  const afterById = new Map(after.elements.map((element) => [element.fingerprint, element]));
+  const addedFingerprints = [...afterById.keys()].filter((key) => !beforeById.has(key));
+  const removedFingerprints = [...beforeById.keys()].filter((key) => !afterById.has(key));
+  const changedFingerprints = [...afterById.keys()].filter((key) => {
+    const previous = beforeById.get(key);
+    const next = afterById.get(key);
+    return previous && next && JSON.stringify([previous.value, previous.disabled, previous.checked, previous.expanded, previous.busy, previous.occluded]) !== JSON.stringify([next.value, next.disabled, next.checked, next.expanded, next.busy, next.occluded]);
+  });
+  const summary = [
+    before.url !== after.url ? `URL changed to ${after.url}` : "",
+    before.title !== after.title ? "Page title changed" : "",
+    addedFingerprints.length ? `${addedFingerprints.length} interactive element(s) added` : "",
+    removedFingerprints.length ? `${removedFingerprints.length} interactive element(s) removed` : "",
+    changedFingerprints.length ? `${changedFingerprints.length} element state(s) changed` : "",
+  ].filter(Boolean);
+  return { urlChanged: before.url !== after.url, titleChanged: before.title !== after.title, addedFingerprints, removedFingerprints, changedFingerprints, summary };
+}
+
+function verifyAction(step: BrowserActionStep, snapshot: PageSnapshot, diff: PageSnapshotDiff, targetFingerprint?: string): ActionVerification {
+  const target = targetFingerprint ? snapshot.elements.find((element) => element.fingerprint === targetFingerprint) : undefined;
+  let success = true;
+  let summary = "Action dispatched and page observation completed.";
+  if (step.action === "fill" || step.action === "select") {
+    success = Boolean(target && target.value === (step.value ?? ""));
+    summary = success ? "The target value matches the requested value." : "The target value did not match after the action.";
+  } else if (step.action === "focus") {
+    const active = document.activeElement;
+    success = Boolean(active && createElementFingerprint(active) === targetFingerprint?.split("-")[0]);
+    summary = success ? "The target received focus." : "The target did not retain focus.";
+  } else if (step.action === "scroll") {
+    summary = "The viewport position was observed after scrolling.";
+  } else if (diff.summary.length) {
+    summary = diff.summary.join("; ");
+  }
+  return { success, summary, changes: diff.summary, diff };
 }
 
 async function executeStep(step: BrowserActionStep): Promise<{ action: string; ok: true }> {
@@ -204,6 +283,8 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   if (isSensitiveElement(element) && (step.action === "fill" || step.action === "select")) throw new Error("Sensitive fields cannot be filled by the agent.");
   if ("disabled" in element && Boolean((element as HTMLInputElement).disabled)) throw new Error("Target is disabled.");
   element.scrollIntoView({ block: "center", behavior: "smooth" });
+  await delay(220);
+  if (!isTopLayerElement(element)) throw new Error("Target is covered by another page element.");
   await showAiPointer(element, `AI · ${step.action}`);
   highlight(element);
   if (step.action === "click") await simulateClick(element);
@@ -424,6 +505,40 @@ function buildSelector(element: Element): string {
   return path.join(" > ");
 }
 
+function createElementFingerprint(element: Element): string {
+  const raw = [
+    element.tagName.toLowerCase(),
+    element.getAttribute("role") || inferRole(element),
+    element.id,
+    element.getAttribute("name"),
+    element.getAttribute("data-testid"),
+    element.getAttribute("aria-label") || getAccessibleLabel(element),
+    element.getAttribute("placeholder"),
+    cleanText(element.textContent || "", 80),
+  ].filter(Boolean).join("|").toLowerCase();
+  let hash = 2166136261;
+  for (let index = 0; index < raw.length; index += 1) hash = Math.imul(hash ^ raw.charCodeAt(index), 16777619);
+  return (hash >>> 0).toString(36);
+}
+
+function buildSimplifiedDom(elements: PageElementSnapshot[]): string {
+  if (!elements.length) return "<EMPTY>";
+  const groups = new Map<string, PageElementSnapshot[]>();
+  for (const element of elements) {
+    const domElement = elementRefs.get(element.ref);
+    const landmark = domElement?.closest("main,nav,header,footer,aside,form,dialog,[role='dialog'],[role='navigation']");
+    const name = landmark?.getAttribute("role") || landmark?.tagName.toLowerCase() || "page";
+    const group = groups.get(name) ?? [];
+    group.push(element);
+    groups.set(name, group);
+  }
+  return Array.from(groups, ([name, group]) => [
+    `<${name} data-ai-group=\"${name}\">`,
+    ...group.map((element, index) => `  ${simplifyElement(element, index + 1)}`),
+    `</${name}>`,
+  ].join("\n")).join("\n");
+}
+
 function simplifyElement(element: PageElementSnapshot, index: number): string {
   const attributes = [
     `data-ai-ref="${element.ref}"`,
@@ -432,6 +547,12 @@ function simplifyElement(element: PageElementSnapshot, index: number): string {
     element.placeholder ? `placeholder="${escapeDomText(element.placeholder)}"` : "",
     element.inputType ? `type="${escapeDomText(element.inputType)}"` : "",
     element.disabled ? "disabled" : "",
+    element.readonly ? "readonly" : "",
+    element.occluded ? 'data-occluded="true"' : "",
+    !element.inViewport ? 'data-offscreen="true"' : "",
+    typeof element.checked === "boolean" ? `aria-checked="${element.checked}"` : "",
+    typeof element.expanded === "boolean" ? `aria-expanded="${element.expanded}"` : "",
+    element.busy ? 'aria-busy="true"' : "",
     element.sensitive ? 'data-sensitive="true"' : "",
   ].filter(Boolean).join(" ");
   const text = escapeDomText(cleanText(element.text || element.value || "", 180));

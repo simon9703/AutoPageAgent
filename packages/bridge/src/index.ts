@@ -32,8 +32,13 @@ wss.on("connection", (socket, request) => {
         response = { id: requestMessage.id, type: "health.result", ok: agent.available && agent.authenticated, provider: agent.name, repositories: repositoryProvider.roots.map((root) => root.name), codex, agent };
       }
       else if (requestMessage.type === "agent.run") {
-        const result = await provider.run(requestMessage.task, requestMessage.snapshot, { conversationId: requestMessage.conversationId, history: requestMessage.history });
-        response = { id: requestMessage.id, type: "agent.result", decision: result.decision, provider: result.provider, conversationId: requestMessage.conversationId };
+        const result = await provider.run(
+          requestMessage.task,
+          requestMessage.snapshot,
+          { conversationId: requestMessage.conversationId, history: requestMessage.history, loop: requestMessage.loop },
+          (event) => socket.send(JSON.stringify({ id: requestMessage!.id, type: "agent.event", event } satisfies ServerMessage)),
+        );
+        response = { id: requestMessage.id, type: "agent.result", decision: result.decision, provider: result.provider, conversationId: requestMessage.conversationId, selectedSkills: result.selectedSkills };
       }
       else if (requestMessage.type === "repository.analyze") response = { id: requestMessage.id, type: "repository.result", analysis: await repositoryProvider.analyze(requestMessage.element, requestMessage.apiRequests) };
       else if (requestMessage.type === "skill.list") response = { id: requestMessage.id, type: "skill.list.result", pageUrl: requestMessage.pageUrl, skills: listSkillsForPage(requestMessage.pageUrl, await loadSkills()) };

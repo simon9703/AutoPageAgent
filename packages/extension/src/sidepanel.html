@@ -46,10 +46,15 @@
       </section>
       <section id="chat-thread" class="chat-thread"><div class="chat-empty">Select page context or send a message to start.</div></section>
       <section id="result" class="result empty">Ready.</section>
+      <section id="agent-timeline-card" class="timeline-card hidden">
+        <div><strong>Agent execution</strong><span id="timeline-budget">Observe → Act → Verify</span></div>
+        <ol id="agent-timeline"></ol>
+      </section>
       <section id="approval" class="approval hidden">
         <strong>Proposed browser actions</strong>
         <ol id="steps"></ol>
-        <div class="approval-actions"><button id="cancel">Cancel</button><button id="execute" class="primary">Execute</button></div>
+        <p class="hint">Approval starts a bounded agent loop (maximum 8 steps / 90 seconds). Every next action is shown live and verified; unsafe or final irreversible actions remain blocked.</p>
+        <div class="approval-actions"><button id="cancel">Cancel</button><button id="execute" class="primary">Start agent loop</button></div>
       </section>
       <form id="composer">
         <textarea id="task" rows="4" placeholder="Analyze this page, fill a field, or inspect performance…"></textarea>
