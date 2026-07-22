@@ -5,9 +5,11 @@
 - The bridge binds to loopback only.
 - WebSocket connections with a non-extension origin are rejected.
 - API keys are not stored in extension storage.
+- Responses API keys are read only from the local bridge process environment and sent only to `api.openai.com`.
 - API-key environment variables are stripped before Codex is spawned.
 - The model cannot submit JavaScript, XPath, or new selectors.
 - Only visible snapshot refs can be acted on.
+- The model receives a compact indexed DOM without CSS selectors; selectors and live DOM references remain in the content script.
 - Refs are scoped to one snapshot version.
 - Every MVP action plan requires confirmation.
 - Payment, credential, destructive, and hidden-element operations are outside the tool set.
