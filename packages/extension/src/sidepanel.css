@@ -11,7 +11,10 @@ h1 { font-size: 16px; margin: 0; } header p { color: #777188; font-size: 11px; m
 .suggestions { display: flex; gap: 7px; flex-wrap: wrap; }
 button { border: 1px solid #ded9ea; border-radius: 9px; padding: 8px 10px; background: white; cursor: pointer; }
 button:hover { border-color: #8b5cf6; }
-.result, .approval { border: 1px solid #e4e0ec; border-radius: 14px; background: white; padding: 14px; line-height: 1.55; white-space: pre-wrap; }
+.result, .approval, .element-card { border: 1px solid #e4e0ec; border-radius: 14px; background: white; padding: 14px; line-height: 1.55; white-space: pre-wrap; }
+.element-card > div { display: flex; align-items: center; justify-content: space-between; }
+.element-card p { color: #625d70; margin: 8px 0 12px; max-height: 70px; overflow: auto; }
+#element-tag { color: #6d3bd1; background: #f0eafe; border-radius: 6px; padding: 2px 7px; font: 11px ui-monospace, monospace; }
 .result { min-height: 180px; flex: 1; overflow: auto; }
 .result.empty { color: #827d90; display: grid; place-items: center; text-align: center; }
 .approval ol { padding-left: 20px; }
