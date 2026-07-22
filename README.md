@@ -12,6 +12,9 @@ A lightweight Chrome side-panel agent that understands the current page, analyze
 - Connect to local `codex app-server` without storing API keys in extension storage.
 - Load simple reusable workflows from `skills/*/SKILL.md`.
 - Pick any page element and search configured local repositories for source, symbol, text, and API evidence.
+- Capture the current viewport locally and preview it in the side panel.
+- Record current-tab clicks, form changes, submits, and scroll positions; test replay after confirmation.
+- Save a recording as a reusable `SKILL.md` plus declarative `workflow.json` with runtime variables.
 
 ## Architecture
 
@@ -73,6 +76,15 @@ cp auto-page-agent.config.example.json auto-page-agent.config.json
 
 Restart the bridge, click **Pick element**, select an element on the page, then click **Find in repositories**. Repository search uses `rg` with fixed-string arguments; model output is never executed as a shell command.
 
+## Record an automation Skill
+
+1. Click **Record workflow** and operate the current tab normally.
+2. Click **Stop recording** and review the captured steps.
+3. Use **Test replay** for a confirmation-gated replay on the current page.
+4. Name the workflow and click **Save Skill**.
+
+The bridge creates `skills/<name>/SKILL.md` and `workflow.json`. Non-sensitive typed values are retained only in Chrome session storage for the immediate test replay; saved workflows replace them with `{{runtime_variables}}`. Password, token, OTP, payment, credential, and file fields never persist their values and stop automated replay for manual input.
+
 ## Development
 
 ```bash
@@ -84,6 +96,8 @@ npm run build
 ## Current limits
 
 - The MVP performs one analysis/plan turn at a time; iterative observe-act loops are on the roadmap.
+- Screenshot capture currently provides local visual evidence and preview only; sending image input to Codex is planned separately.
+- Recorded replay targets the current page. Navigation-aware and cross-tab replay remain planned.
 - Resource Timing cannot expose all cross-origin sizes unless the resource sends `Timing-Allow-Origin`.
 - The localhost bridge is intended for local development. Packaged releases should use an install-time secret or Chrome Native Messaging.
 - Repository evidence search is implemented; deeper TypeScript reference tracing, API response-field tracing, source maps, and React component correlation remain planned.
