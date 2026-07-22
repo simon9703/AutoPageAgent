@@ -56,7 +56,9 @@ Remote repository access must be checked server-side for every operation; the ex
 - [x] confirmation-gated same-page debug replay
 - [x] generate `SKILL.md` and parameterized `workflow.json`
 - [x] sensitive-value redaction and manual-input checkpoint
-- [ ] host/page-pattern matching
+- [x] origin and path-prefix page matching
+- [x] per-page Skill function list with tab/navigation refresh
+- [ ] configurable wildcard and page-fingerprint matching
 - [ ] declarative required tools and permissions
 - [ ] step-specific confirmation policies
 - [ ] versioned team Skill registry
