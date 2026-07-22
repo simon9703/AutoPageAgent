@@ -28,6 +28,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
+  if (message?.type === "page.performance") {
+    sendResponse(collectPerformance());
+    return false;
+  }
   return false;
 });
 
@@ -101,6 +105,15 @@ function collectPerformance(): PerformanceSnapshot {
         }
       : undefined,
     resources,
+    apiRequests: resources
+      .filter((resource): resource is typeof resource & { initiatorType: "fetch" | "xmlhttprequest" } => resource.initiatorType === "fetch" || resource.initiatorType === "xmlhttprequest")
+      .flatMap((resource) => {
+        try {
+          const url = new URL(resource.name);
+          return [{ url: `${url.origin}${url.pathname}`, pathname: url.pathname, initiatorType: resource.initiatorType, duration: resource.duration, transferSize: resource.transferSize }];
+        } catch { return []; }
+      })
+      .slice(0, 30),
     summary: {
       requestCount: resources.length,
       totalTransferSize: resources.reduce((total, resource) => total + resource.transferSize, 0),
