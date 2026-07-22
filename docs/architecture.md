@@ -21,7 +21,9 @@ The MVP implements the browser-page domain, lightweight performance evidence, lo
 - **Screenshot capture** uses `captureVisibleTab` and keeps the JPEG data URL inside the extension side panel.
 - **Workflow recorder** captures bounded declarative actions in Chrome session storage and never records sensitive values.
 
-The snapshot contains page metadata, selected text, a limited body-text extraction, headings, at most 250 visible interactive elements, and at most 100 resource timing entries. DOM nodes remain inside the content script and are represented externally by ephemeral refs.
+The snapshot contains page metadata, selected text, a limited body-text extraction, headings, at most 160 interactive elements near the viewport, a Page Agent-inspired simplified DOM, page/scroll geometry, and at most 100 resource timing entries. DOM nodes remain inside the content script and are represented externally by ephemeral refs. Candidate elements are bounded to a 700-pixel expansion around the viewport and checked against the browser's top-layer hit target before inclusion.
+
+The side panel can attach one inspected element or image to the current conversation. A selected image remains local metadata for the local Codex prompt; the Responses provider can additionally send a public HTTP(S) or `data:image` source as an image input. Normal screenshots remain local previews and are not uploaded automatically.
 
 ### Local bridge
 
@@ -29,14 +31,22 @@ The bridge listens only on `127.0.0.1`. It:
 
 1. accepts a page snapshot and user task;
 2. selects applicable `SKILL.md` workflows;
-3. opens an ephemeral Codex thread;
-4. sends a constrained planning prompt;
+3. routes the request to authenticated local Codex or the configured Responses API;
+4. reuses provider conversation state and sends a constrained planning prompt;
 5. parses and validates the JSON decision;
 6. returns an answer or confirmation-required action plan.
 
+### Agent provider router
+
+`AgentRouter` supports `auto`, `codex`, and `openai` modes. `auto` prefers an authenticated local Codex app-server and falls back to the Responses API only when `OPENAI_API_KEY` is configured. Provider secrets stay in the bridge process and are never sent to the extension or page.
+
 ### Codex app-server adapter
 
-The bridge discovers the Codex executable, launches `codex app-server --listen stdio://`, initializes it, checks `account/read`, sends JSON-RPC requests, and consumes newline-delimited notifications. Provider API-key environment variables are removed from the spawned process; primary agent authentication uses the user's existing ChatGPT/Codex OAuth login. API-key Codex sessions are not used for main agent prompts, matching Chromex's boundary.
+The bridge discovers the Codex executable, launches `codex app-server --listen stdio://`, initializes it, checks `account/read`, sends JSON-RPC requests, and consumes newline-delimited notifications. Provider API-key environment variables are removed from the spawned process; primary agent authentication uses the user's existing ChatGPT/Codex OAuth login. API-key Codex sessions are not used for main agent prompts, matching Chromex's boundary. A bridge-process conversation id maps to a reusable Codex thread.
+
+### Responses API adapter
+
+`OpenAIResponsesProvider` reads `OPENAI_API_KEY` only from the bridge environment, requests schema-constrained decisions, and chains turns with `previous_response_id`. The default model can be overridden with `OPENAI_MODEL`. This is a separate provider rather than API-key authentication for `codex app-server`, preserving Chromex's authentication boundary while supporting the requested direct API mode.
 
 ## Agent decision protocol
 
@@ -70,22 +80,26 @@ Invariant rules:
 - values are length-limited;
 - all MVP plans require explicit confirmation.
 
-## Future provider interface
+## Provider interface
 
 Both local and remote runtimes should implement:
 
 ```ts
 interface AgentProvider {
-  readonly name: string;
-  run(task: string, snapshot: PageSnapshot): Promise<AgentDecision>;
+  status(): Promise<AgentRuntimeStatus>;
+  run(
+    task: string,
+    snapshot: PageSnapshot,
+    context: { conversationId: string; history: ChatMessage[] },
+  ): Promise<AgentDecision>;
 }
 ```
 
-Planned implementations:
+Implementations:
 
-- `CodexProvider`: local Codex app-server and local skills/MCP.
-- `OpenAIResponsesProvider`: company backend using Responses API function tools.
-- `CompanyAgentProvider`: authenticated remote repository and internal platform access.
+- `CodexProvider`: local Codex app-server with reusable threads and local Skill context.
+- `OpenAIResponsesProvider`: direct Responses API with structured decisions and response chaining.
+- `CompanyAgentProvider`: planned authenticated remote repository and internal platform access.
 
 ## Page-to-code correlation
 
