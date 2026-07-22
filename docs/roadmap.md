@@ -12,10 +12,17 @@
 - [x] click, fill, select, scroll, focus, and submit actions
 - [x] mandatory approval UI
 - [x] basic `SKILL.md` discovery and selection
+- [x] side-panel conversation history
+- [x] local Codex thread continuity
+- [x] Responses API provider and response continuity
+- [x] element and image message context
+- [x] compact indexed DOM with viewport pruning
+- [x] AI pointer, target ring, and action status label
 - [ ] streaming assistant output
 - [ ] observe-act loop with a maximum-step budget
 - [x] local current-viewport screenshot capture and preview
-- [ ] screenshot input to Codex when DOM evidence is insufficient
+- [x] selected public image input in Responses API mode
+- [ ] screenshot/binary image input to local Codex
 
 ## Phase 2 — local repository intelligence
 
