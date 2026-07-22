@@ -4,10 +4,13 @@ import type {
   PageElementSnapshot,
   PageSnapshot,
   PerformanceSnapshot,
+  InspectedElement,
 } from "@auto-page-agent/shared";
 
 const elementRefs = new Map<string, Element>();
 let currentSnapshotId = "";
+let currentSnapshotUrl = "";
+let selectionCleanup: (() => void) | null = null;
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "page.snapshot") {
@@ -20,18 +23,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     });
     return true;
   }
+  if (message?.type === "page.selection.start") {
+    startElementSelection();
+    sendResponse({ ok: true });
+    return false;
+  }
   return false;
 });
 
 function createPageSnapshot(): PageSnapshot {
   currentSnapshotId = `${Date.now()}-${crypto.randomUUID()}`;
+  currentSnapshotUrl = location.href;
   elementRefs.clear();
   const candidates = document.querySelectorAll(
     'button,a[href],input,textarea,select,[contenteditable="true"],[role="button"],[role="textbox"],[role="tab"],[role="checkbox"],[role="radio"]',
   );
   const elements: PageElementSnapshot[] = [];
   for (const element of candidates) {
-    if (!isVisible(element) || elements.length >= 250) continue;
+    if (!isVisible(element) || isHiddenInput(element) || elements.length >= 250) continue;
     const ref = `element-${elements.length + 1}`;
     elementRefs.set(ref, element);
     const html = element as HTMLElement;
@@ -44,11 +53,12 @@ function createPageSnapshot(): PageSnapshot {
       label: getAccessibleLabel(element),
       text: cleanText(html.innerText || element.textContent || "", 300),
       selector: buildSelector(element),
-      value: "value" in input ? cleanText(String(input.value ?? ""), 500) : undefined,
+      value: shouldExposeValue(input) ? cleanText(String(input.value ?? ""), 500) : undefined,
       href: element instanceof HTMLAnchorElement ? element.href : undefined,
       placeholder: input.placeholder || undefined,
       inputType: input.type || undefined,
       disabled: "disabled" in input && Boolean(input.disabled),
+      sensitive: isSensitiveElement(element),
       contentEditable: html.isContentEditable,
       viewportRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
     });
@@ -101,6 +111,7 @@ function collectPerformance(): PerformanceSnapshot {
 
 async function executePlan(plan: BrowserActionPlan) {
   if (plan.snapshotId !== currentSnapshotId) throw new Error("Page snapshot expired. Read the page again.");
+  if (location.href !== currentSnapshotUrl) throw new Error("Page URL changed after the snapshot. Read the page again.");
   const results = [];
   for (const step of plan.steps) {
     results.push(await executeStep(step));
@@ -110,6 +121,7 @@ async function executePlan(plan: BrowserActionPlan) {
 }
 
 async function executeStep(step: BrowserActionStep): Promise<{ action: string; ok: true }> {
+  if (!["click", "fill", "select", "scroll", "focus", "submit"].includes(step.action)) throw new Error("Unsupported browser action.");
   if (step.action === "scroll") {
     const amount = Math.min(Math.max(step.amountPx ?? 600, 0), 2_000);
     const sign = step.direction === "up" || step.direction === "left" ? -1 : 1;
@@ -118,14 +130,88 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   }
   const element = step.targetRef ? elementRefs.get(step.targetRef) : undefined;
   if (!(element instanceof HTMLElement) || !isVisible(element)) throw new Error(`Target is unavailable: ${step.targetRef ?? "missing"}`);
+  if (isSensitiveElement(element) && (step.action === "fill" || step.action === "select")) throw new Error("Sensitive fields cannot be filled by the agent.");
+  if ("disabled" in element && Boolean((element as HTMLInputElement).disabled)) throw new Error("Target is disabled.");
   element.scrollIntoView({ block: "center", behavior: "smooth" });
   highlight(element);
   if (step.action === "click") element.click();
   if (step.action === "focus") element.focus();
-  if (step.action === "submit") element.closest("form")?.requestSubmit();
+  if (step.action === "submit") {
+    const form = element.closest("form");
+    if (!form) throw new Error("No form is associated with the submit target.");
+    form.requestSubmit();
+  }
   if (step.action === "fill") setElementValue(element, step.value ?? "");
   if (step.action === "select") setElementValue(element, step.value ?? "");
   return { action: step.action, ok: true };
+}
+
+function startElementSelection() {
+  selectionCleanup?.();
+  let hovered: HTMLElement | null = null;
+  let previousOutline = "";
+  const restore = () => {
+    if (hovered) hovered.style.outline = previousOutline;
+    hovered = null;
+  };
+  const onMove = (event: MouseEvent) => {
+    const next = event.target instanceof HTMLElement ? event.target : null;
+    if (!next || next === hovered) return;
+    restore();
+    hovered = next;
+    previousOutline = next.style.outline;
+    next.style.outline = "3px solid #7c5cff";
+  };
+  const cleanup = () => {
+    restore();
+    document.removeEventListener("mousemove", onMove, true);
+    document.removeEventListener("click", onClick, true);
+    document.removeEventListener("keydown", onKey, true);
+    selectionCleanup = null;
+  };
+  const onClick = (event: MouseEvent) => {
+    if (!(event.target instanceof Element)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const selected = inspectElement(event.target);
+    cleanup();
+    void chrome.runtime.sendMessage({ type: "page.element.selected", element: selected, pageUrl: location.href });
+  };
+  const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") cleanup(); };
+  document.addEventListener("mousemove", onMove, true);
+  document.addEventListener("click", onClick, true);
+  document.addEventListener("keydown", onKey, true);
+  selectionCleanup = cleanup;
+}
+
+function inspectElement(element: Element): InspectedElement {
+  const attributes = Object.fromEntries(Array.from(element.attributes)
+    .filter((attribute) => /^(?:id|name|role|type|placeholder|data-[\w-]+|aria-[\w-]+)$/u.test(attribute.name))
+    .slice(0, 30)
+    .map((attribute) => [attribute.name, cleanText(attribute.value, 500)]));
+  const html = element as HTMLElement;
+  const input = element as HTMLInputElement;
+  const source = {
+    component: findMetadata(element, "data-component"),
+    file: findMetadata(element, "data-source"),
+    repository: findMetadata(element, "data-repo"),
+    // TODO(i18n): Read data-i18n-key here when translation analysis is enabled.
+  };
+  return {
+    tagName: element.tagName.toLowerCase(),
+    role: element.getAttribute("role") ?? inferRole(element),
+    label: getAccessibleLabel(element),
+    text: cleanText(html.innerText || element.textContent || "", 1_000),
+    placeholder: input.placeholder || undefined,
+    inputType: input.type || undefined,
+    attributes,
+    nearbyText: cleanText(element.parentElement?.innerText || "", 2_000),
+    source: Object.values(source).some(Boolean) ? source : undefined,
+  };
+}
+
+function findMetadata(element: Element, name: string): string | undefined {
+  return element.closest(`[${name}]`)?.getAttribute(name) || undefined;
 }
 
 function setElementValue(element: HTMLElement, value: string) {
@@ -149,9 +235,22 @@ function isVisible(element: Element): boolean {
   return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
 }
 
+function isHiddenInput(element: Element): boolean {
+  return element instanceof HTMLInputElement && element.type === "hidden";
+}
+
+function isSensitiveElement(element: Element): boolean {
+  if (!(element instanceof HTMLInputElement)) return false;
+  return ["password", "file"].includes(element.type) || /password|secret|token|otp|card|cvv|credential/iu.test(`${element.name} ${element.autocomplete}`);
+}
+
+function shouldExposeValue(element: Element): element is HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement {
+  return (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) && !isSensitiveElement(element);
+}
+
 function getAccessibleLabel(element: Element): string {
   const labelledBy = element.getAttribute("aria-labelledby");
-  const labelledText = labelledBy ? document.getElementById(labelledBy)?.textContent : "";
+  const labelledText = labelledBy ? labelledBy.split(/\s+/u).map((id) => document.getElementById(id)?.textContent ?? "").join(" ") : "";
   const inputLabel = element instanceof HTMLElement && element.id ? document.querySelector(`label[for="${CSS.escape(element.id)}"]`)?.textContent : "";
   return cleanText(element.getAttribute("aria-label") || labelledText || inputLabel || element.getAttribute("title") || "", 300);
 }
