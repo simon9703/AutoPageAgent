@@ -17,11 +17,26 @@
         <button data-prompt="Analyze page performance. List the slowest and largest resources with recommendations.">Performance</button>
         <button data-prompt="Find the main form on this page and explain its fields. Do not change anything.">Explain fields</button>
         <button id="pick-element">Pick element</button>
+        <button id="capture-screenshot">Screenshot</button>
+        <button id="toggle-recording">Record workflow</button>
+      </section>
+      <section id="screenshot-card" class="capture-card hidden">
+        <div><strong>Current viewport</strong><button id="close-screenshot" class="compact">Close</button></div>
+        <img id="screenshot-preview" alt="Captured current browser viewport" />
+        <p id="screenshot-meta"></p>
       </section>
       <section id="element-card" class="element-card hidden">
         <div><strong>Selected element</strong><span id="element-tag"></span></div>
         <p id="element-summary"></p>
         <button id="analyze-code" class="primary">Find in repositories</button>
+      </section>
+      <section id="recording-card" class="recording-card hidden">
+        <div><strong id="recording-title">Recorded workflow</strong><span id="recording-count">0 steps</span></div>
+        <ol id="recorded-steps"></ol>
+        <label>Skill name<input id="skill-name" maxlength="80" placeholder="e.g. Create release draft" /></label>
+        <label>Description<textarea id="skill-description" rows="2" maxlength="240" placeholder="When and why this workflow should run"></textarea></label>
+        <div class="approval-actions"><button id="replay-recording">Test replay</button><button id="save-skill" class="primary">Save Skill</button></div>
+        <p class="hint">Typed values stay in this browser session. Saved Skills replace them with runtime variables; sensitive values are never stored.</p>
       </section>
       <section id="result" class="result empty">Ask about the current page or request a safe browser action.</section>
       <section id="approval" class="approval hidden">
