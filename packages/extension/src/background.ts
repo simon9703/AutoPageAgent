@@ -54,7 +54,9 @@ async function startSelection() {
 }
 
 async function analyzeRepository(element: InspectedElement, pageUrl: string): Promise<ServerMessage> {
-  return requestBridge({ id: crypto.randomUUID(), type: "repository.analyze", pageUrl, element });
+  const tab = await getActiveTab();
+  const performance = await chrome.tabs.sendMessage(tab.id, { type: "page.performance" }) as PageSnapshot["performance"];
+  return requestBridge({ id: crypto.randomUUID(), type: "repository.analyze", pageUrl, element, apiRequests: performance.apiRequests });
 }
 
 async function executePlan(plan: BrowserActionPlan) {
