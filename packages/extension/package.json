@@ -1,0 +1,13 @@
+{
+  "name": "@auto-page-agent/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts.build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@auto-page-agent/shared": "0.1.0"
+  }
+}
