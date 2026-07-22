@@ -1,0 +1,17 @@
+{
+  "name": "@auto-page-agent/bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@auto-page-agent/shared": "0.1.0",
+    "ws": "^8.18.2"
+  }
+}
