@@ -91,6 +91,8 @@ npm run build
 
 See [docs/architecture.md](docs/architecture.md), [docs/roadmap.md](docs/roadmap.md), and [docs/security.md](docs/security.md).
 
+For the exact boundary between local Codex, OpenAI API keys, and webpage business APIs, see [docs/chromex-comparison.md](docs/chromex-comparison.md).
+
 ## License
 
 MIT
