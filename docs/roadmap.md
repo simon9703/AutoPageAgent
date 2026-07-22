@@ -22,11 +22,15 @@
 - [x] bounded fixed-string repository evidence search
 - [x] visual page-element picker
 - [x] source/symbol/text/API evidence classification with confidence levels
+- [x] fetch/XHR Resource Timing URL extraction and repository correlation
+- [x] Codex executable discovery and account status
+- [x] app-server overload retry and structured error handling
 - [ ] `repo.read_file` and TypeScript-aware `repo.find_references` tools
 - [ ] Git revision and current branch awareness
 - [ ] TypeScript language-service symbol lookup
 - [ ] optional build transform injecting component/source metadata
 - [ ] correlate request URLs with API clients and hooks
+- [ ] prove selected element -> component -> hook -> request relationship
 - [ ] field trace: DOM -> component -> prop -> hook -> API response type
 
 Target demo:
