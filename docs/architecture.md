@@ -18,6 +18,8 @@ The MVP implements the browser-page domain, lightweight performance evidence, lo
 - **Background service worker** owns the localhost connection and routes messages to the active tab.
 - **Content script** creates a bounded snapshot and executes approved actions.
 - **Element picker** captures source metadata and stable textual/attribute clues for repository analysis.
+- **Screenshot capture** uses `captureVisibleTab` and keeps the JPEG data URL inside the extension side panel.
+- **Workflow recorder** captures bounded declarative actions in Chrome session storage and never records sensitive values.
 
 The snapshot contains page metadata, selected text, a limited body-text extraction, headings, at most 250 visible interactive elements, and at most 100 resource timing entries. DOM nodes remain inside the content script and are represented externally by ephemeral refs.
 
@@ -104,6 +106,12 @@ Repository roots come from `auto-page-agent.config.json` or `AUTO_PAGE_AGENT_REP
 The current search returns evidence candidates; it does not yet claim an end-to-end data flow. The next resolver layer will use TypeScript symbols and imports to trace component -> hook -> API client -> response type.
 
 Resource Timing entries initiated by `fetch` or `xmlhttprequest` are normalized without query strings and used as low-confidence API-path search terms. This provides endpoint candidates without claiming that a page-level request belongs to the selected element.
+
+## Recorded automation Skills
+
+The content script records supported user interactions as declarative steps: action, sanitized selector, page URL, accessible label, scroll position, and an optional non-sensitive session value. The background worker owns recorder state so a same-tab navigation can re-arm recording. A test replay is explicit and confirmation-gated.
+
+When saved, the bridge validates every URL and action, bounds the workflow to 100 steps, removes all recorded values, and replaces non-sensitive form values with named `{{variables}}`. Each generated folder contains instructions in `SKILL.md` and machine-readable configuration in `workflow.json`; both are loaded into the Codex planning context. Selectors are hints, not trusted commands, and current targets must be revalidated before execution.
 
 ## Deferred translation analysis
 
