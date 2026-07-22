@@ -72,11 +72,28 @@ export interface ResourceTimingSnapshot {
 export interface PerformanceSnapshot {
   navigation?: { ttfb: number; domContentLoaded: number; load: number };
   resources: ResourceTimingSnapshot[];
+  apiRequests: ApiRequestSnapshot[];
   summary: {
     requestCount: number;
     totalTransferSize: number;
     slowRequestCount: number;
   };
+}
+
+export interface ApiRequestSnapshot {
+  url: string;
+  pathname: string;
+  initiatorType: "fetch" | "xmlhttprequest";
+  duration: number;
+  transferSize: number;
+}
+
+export interface CodexRuntimeStatus {
+  available: boolean;
+  command?: string;
+  authenticated: boolean;
+  authMode: "chatgpt" | "apikey" | null;
+  error?: string;
 }
 
 export interface PageSnapshot {
@@ -119,10 +136,10 @@ export type AgentDecision = BrowserActionPlan | AgentAnswer;
 export type ClientMessage =
   | { id: string; type: "health.check" }
   | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot }
-  | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement };
+  | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement; apiRequests: ApiRequestSnapshot[] };
 
 export type ServerMessage =
-  | { id: string; type: "health.result"; ok: boolean; provider: string; repositories: string[] }
+  | { id: string; type: "health.result"; ok: boolean; provider: string; repositories: string[]; codex: CodexRuntimeStatus }
   | { id: string; type: "agent.result"; decision: AgentDecision }
   | { id: string; type: "repository.result"; analysis: RepositoryAnalysis }
   | { id: string; type: "agent.error"; error: string };
