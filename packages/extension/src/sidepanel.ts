@@ -1,4 +1,4 @@
-import type { BrowserActionPlan, InspectedElement, RepositoryAnalysis, ServerMessage } from "@auto-page-agent/shared";
+import type { AutomationSkillDraft, BrowserActionPlan, InspectedElement, RecordedBrowserAction, RepositoryAnalysis, ServerMessage } from "@auto-page-agent/shared";
 
 const status = document.querySelector<HTMLSpanElement>("#status")!;
 const result = document.querySelector<HTMLElement>("#result")!;
@@ -9,9 +9,13 @@ const run = document.querySelector<HTMLButtonElement>("#run")!;
 let pendingPlan: BrowserActionPlan | null = null;
 let selectedElement: InspectedElement | null = null;
 let selectedElementPageUrl = "";
+let recordingActive = false;
+let recordedActions: RecordedBrowserAction[] = [];
+let recordingStartUrl = "";
 
 void checkHealth();
 void restoreSelectedElement();
+void restoreRecording();
 document.querySelectorAll<HTMLButtonElement>("[data-prompt]").forEach((button) => {
   button.addEventListener("click", () => { task.value = button.dataset.prompt ?? ""; task.focus(); });
 });
@@ -23,8 +27,17 @@ document.querySelector("#cancel")!.addEventListener("click", () => hideApproval(
 document.querySelector("#execute")!.addEventListener("click", () => void executePlan());
 document.querySelector("#pick-element")!.addEventListener("click", () => void startElementSelection());
 document.querySelector("#analyze-code")!.addEventListener("click", () => void analyzeCode());
+document.querySelector("#capture-screenshot")!.addEventListener("click", () => void captureScreenshot());
+document.querySelector("#close-screenshot")!.addEventListener("click", () => document.querySelector("#screenshot-card")!.classList.add("hidden"));
+document.querySelector("#toggle-recording")!.addEventListener("click", () => void toggleRecording());
+document.querySelector("#replay-recording")!.addEventListener("click", () => void replayRecording());
+document.querySelector("#save-skill")!.addEventListener("click", () => void saveSkill());
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "ui.element.selected") showSelectedElement(message.element as InspectedElement, String(message.pageUrl ?? ""));
+  if (message?.type === "ui.recording.updated") {
+    recordedActions = message.actions as RecordedBrowserAction[];
+    renderRecording();
+  }
 });
 
 async function checkHealth() {
@@ -42,6 +55,101 @@ async function restoreSelectedElement() {
   const stored = await chrome.runtime.sendMessage({ type: "ui.selection.current" }) as { selectedElement?: InspectedElement; selectedElementPageUrl?: string };
   if (stored.selectedElement) showSelectedElement(stored.selectedElement, stored.selectedElementPageUrl ?? "");
 }
+
+async function restoreRecording() {
+  const state = await chrome.runtime.sendMessage({ type: "ui.recording.status" }) as { active?: boolean; startUrl?: string; actions?: RecordedBrowserAction[] };
+  recordingActive = Boolean(state.active);
+  recordingStartUrl = state.startUrl ?? "";
+  recordedActions = state.actions ?? [];
+  updateRecordingButton();
+  if (recordingActive || recordedActions.length) renderRecording();
+}
+
+async function captureScreenshot() {
+  render("Capturing the current viewport…");
+  const response = await chrome.runtime.sendMessage({ type: "ui.screenshot.capture" }) as { ok?: boolean; dataUrl?: string; title?: string; url?: string; capturedAt?: string; error?: string };
+  if (!response.ok || !response.dataUrl) return render(`Screenshot error: ${response.error ?? "Capture failed."}`);
+  const preview = document.querySelector<HTMLImageElement>("#screenshot-preview")!;
+  preview.src = response.dataUrl;
+  document.querySelector<HTMLElement>("#screenshot-meta")!.textContent = `${response.title || "Current page"}\n${response.url || ""}\n${response.capturedAt || ""}`;
+  document.querySelector("#screenshot-card")!.classList.remove("hidden");
+  render("Screenshot captured locally. It has not been sent to Codex or saved to disk.");
+}
+
+async function toggleRecording() {
+  if (!recordingActive) {
+    const state = await chrome.runtime.sendMessage({ type: "ui.recording.start" }) as { active?: boolean; startUrl?: string; actions?: RecordedBrowserAction[]; error?: string };
+    if (state.error) return render(`Recording error: ${state.error}`);
+    recordingActive = true;
+    recordingStartUrl = state.startUrl ?? "";
+    recordedActions = [];
+    document.querySelector<HTMLInputElement>("#skill-name")!.value = defaultSkillName(recordingStartUrl);
+    updateRecordingButton();
+    renderRecording();
+    return render("Recording started. Use the page normally, then click Stop recording.");
+  }
+  const state = await chrome.runtime.sendMessage({ type: "ui.recording.stop" }) as { startUrl?: string; actions?: RecordedBrowserAction[]; error?: string };
+  if (state.error) return render(`Recording error: ${state.error}`);
+  recordingActive = false;
+  recordingStartUrl = state.startUrl ?? recordingStartUrl;
+  recordedActions = state.actions ?? recordedActions;
+  updateRecordingButton();
+  renderRecording();
+  render(`Recording stopped with ${recordedActions.length} step(s). Review, test, or save it as a Skill.`);
+}
+
+function updateRecordingButton() {
+  const button = document.querySelector<HTMLButtonElement>("#toggle-recording")!;
+  button.textContent = recordingActive ? "Stop recording" : "Record workflow";
+  button.classList.toggle("recording", recordingActive);
+}
+
+function renderRecording() {
+  const card = document.querySelector<HTMLElement>("#recording-card")!;
+  card.classList.remove("hidden");
+  document.querySelector<HTMLElement>("#recording-title")!.textContent = recordingActive ? "Recording in progress" : "Recorded workflow";
+  document.querySelector<HTMLElement>("#recording-count")!.textContent = `${recordedActions.length} steps`;
+  const list = document.querySelector<HTMLOListElement>("#recorded-steps")!;
+  list.replaceChildren(...recordedActions.map((step) => {
+    const item = document.createElement("li");
+    const value = step.sensitive ? " [manual sensitive input]" : step.value ? ` = ${truncate(step.value, 40)}` : "";
+    item.textContent = `${step.action} ${step.label || step.selector || "page"}${value}`;
+    return item;
+  }));
+}
+
+async function replayRecording() {
+  if (!recordedActions.length) return render("Record at least one action first.");
+  if (!confirm(`Replay ${recordedActions.length} recorded action(s) on the current page?`)) return;
+  const response = await chrome.runtime.sendMessage({ type: "ui.recording.replay", actions: recordedActions }) as { ok?: boolean; error?: string };
+  render(response.ok ? "Recorded workflow replay completed." : `Replay stopped: ${response.error ?? "Unknown error"}`);
+}
+
+async function saveSkill() {
+  if (recordingActive) return render("Stop recording before saving the Skill.");
+  if (!recordedActions.length) return render("Record at least one action first.");
+  const name = document.querySelector<HTMLInputElement>("#skill-name")!.value.trim();
+  const description = document.querySelector<HTMLTextAreaElement>("#skill-description")!.value.trim();
+  if (!name) return render("Enter a Skill name.");
+  const draft: AutomationSkillDraft = {
+    name,
+    description: description || `Replay the recorded ${name} browser workflow.`,
+    startUrl: recordingStartUrl || recordedActions[0]!.url,
+    createdAt: new Date().toISOString(),
+    requiresConfirmation: true,
+    steps: recordedActions,
+  };
+  const response = await chrome.runtime.sendMessage({ type: "ui.skill.save", draft }) as ServerMessage;
+  if (response.type === "agent.error") return render(`Skill save error: ${response.error}`);
+  if (response.type !== "skill.saved") return render("Unexpected Skill save response.");
+  render(`Skill saved: ${response.skill.skillPath}\nWorkflow: ${response.skill.workflowPath}\nRuntime inputs: ${response.skill.variableNames.join(", ") || "none"}`);
+}
+
+function defaultSkillName(url: string) {
+  try { return `${new URL(url).hostname} workflow`; } catch { return "Recorded browser workflow"; }
+}
+
+function truncate(value: string, max: number) { return value.length > max ? `${value.slice(0, max)}…` : value; }
 
 async function startElementSelection() {
   const response = await chrome.runtime.sendMessage({ type: "ui.selection.start" });
