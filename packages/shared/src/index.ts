@@ -19,8 +19,46 @@ export interface PageElementSnapshot {
   placeholder?: string;
   inputType?: string;
   disabled: boolean;
+  sensitive: boolean;
   contentEditable: boolean;
   viewportRect: ViewportRect;
+}
+
+export interface InspectedElement {
+  tagName: string;
+  role: string;
+  label: string;
+  text: string;
+  placeholder?: string;
+  inputType?: string;
+  attributes: Record<string, string>;
+  nearbyText: string;
+  source?: {
+    component?: string;
+    file?: string;
+    repository?: string;
+    // TODO(i18n): Add i18nKey when translation-catalog correlation enters scope.
+  };
+}
+
+// TODO(i18n): Extend with an "i18n" evidence kind when translation analysis is implemented.
+export type RepositoryEvidenceKind = "source" | "api" | "text" | "symbol";
+
+export interface RepositoryEvidence {
+  kind: RepositoryEvidenceKind;
+  repository: string;
+  path: string;
+  line: number;
+  preview: string;
+  matchedTerm: string;
+  confidence: "high" | "medium" | "low";
+}
+
+export interface RepositoryAnalysis {
+  queryTerms: string[];
+  repositories: string[];
+  evidence: RepositoryEvidence[];
+  warnings: string[];
 }
 
 export interface ResourceTimingSnapshot {
@@ -80,9 +118,11 @@ export type AgentDecision = BrowserActionPlan | AgentAnswer;
 
 export type ClientMessage =
   | { id: string; type: "health.check" }
-  | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot };
+  | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot }
+  | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement };
 
 export type ServerMessage =
-  | { id: string; type: "health.result"; ok: boolean; provider: string }
+  | { id: string; type: "health.result"; ok: boolean; provider: string; repositories: string[] }
   | { id: string; type: "agent.result"; decision: AgentDecision }
+  | { id: string; type: "repository.result"; analysis: RepositoryAnalysis }
   | { id: string; type: "agent.error"; error: string };
