@@ -34,7 +34,7 @@ The bridge listens only on `127.0.0.1`. It:
 
 ### Codex app-server adapter
 
-The bridge launches `codex app-server --listen stdio://`, initializes it, sends JSON-RPC requests, and consumes newline-delimited notifications. Provider API-key environment variables are removed from the spawned process; authentication should use the user's existing Codex login.
+The bridge discovers the Codex executable, launches `codex app-server --listen stdio://`, initializes it, checks `account/read`, sends JSON-RPC requests, and consumes newline-delimited notifications. Provider API-key environment variables are removed from the spawned process; primary agent authentication uses the user's existing ChatGPT/Codex OAuth login. API-key Codex sessions are not used for main agent prompts, matching Chromex's boundary.
 
 ## Agent decision protocol
 
@@ -102,6 +102,8 @@ Every explanation should include its evidence and confidence rather than present
 Repository roots come from `auto-page-agent.config.json` or `AUTO_PAGE_AGENT_REPOS`. The bridge validates absolute directory paths and invokes `rg` directly with argument arrays, fixed-string matching, bounded results, timeouts, and build/dependency exclusions. No selected text or model output is interpreted as a shell command.
 
 The current search returns evidence candidates; it does not yet claim an end-to-end data flow. The next resolver layer will use TypeScript symbols and imports to trace component -> hook -> API client -> response type.
+
+Resource Timing entries initiated by `fetch` or `xmlhttprequest` are normalized without query strings and used as low-confidence API-path search terms. This provides endpoint candidates without claiming that a page-level request belongs to the selected element.
 
 ## Deferred translation analysis
 
