@@ -1,5 +1,50 @@
 # Roadmap
 
+## Version 0.2 — Browser Agent Runtime
+
+Goal: upgrade from single action execution to a reliable observe-plan-act-verify browser agent.
+
+### Agent Loop
+
+- [ ] Observe → Plan → Act → Verify execution loop
+- [ ] Maximum step budget and timeout control
+- [ ] Snapshot refresh after every action
+- [ ] Action result validation
+- [ ] Failure recovery and retry strategy
+
+### Agent Interaction UI
+
+- [ ] Agent execution timeline
+- [ ] Streaming assistant events
+- [ ] Real-time action status
+- [ ] Enhanced AI cursor / target overlay
+- [ ] Action explanation labels
+- [ ] Step-by-step execution replay
+
+### Page Understanding
+
+- [ ] Snapshot diff between actions
+- [ ] Detect DOM changes after execution
+- [ ] Element state change tracking
+- [ ] Better hidden/loading/disabled element handling
+
+### Skill Runtime
+
+- [ ] Skill execution state machine
+- [ ] Skill step visualization
+- [ ] Skill failure recovery
+- [ ] Skill variables and runtime context
+- [ ] Skill execution metrics
+
+### v0.2 Demo Targets
+
+1. Fill daily report automatically with verification.
+2. Create release form and stop before final submission.
+3. Diagnose page interaction failures.
+4. Explain page element behavior with execution trace.
+
+---
+
 ## Phase 1 — current-page MVP
 
 - [x] MV3 Side Panel
@@ -41,10 +86,6 @@
 - [ ] prove selected element -> component -> hook -> request relationship
 - [ ] field trace: DOM -> component -> prop -> hook -> API response type
 
-Target demo:
-
-> Select a page field and return the owning component, source file, API endpoint, and response field with evidence levels.
-
 ## Phase 3 — remote company runtime
 
 - [ ] authenticated remote Agent Server
@@ -54,8 +95,6 @@ Target demo:
 - [ ] per-user repository and tool authorization
 - [ ] audit events with sensitive-value redaction
 - [ ] local/remote provider selector using one protocol
-
-Remote repository access must be checked server-side for every operation; the extension must never receive repository credentials.
 
 ## Phase 4 — workflow Skill library
 
@@ -76,24 +115,6 @@ Remote repository access must be checked server-side for every operation; the ex
 - [ ] failure recovery and selector/ref regeneration
 - [ ] workflow success-rate and failed-step metrics
 
-Initial company workflows:
-
-1. explain a page field and trace its data source;
-2. diagnose slow or failed requests;
-3. fill a daily report from a Codex summary;
-4. create a release form but stop before submission.
-
-## Phase 5 — deeper browser diagnostics
-
-- [ ] opt-in `chrome.debugger` mode
-- [ ] Chrome DevTools Protocol Network events
-- [ ] initiator chains, status codes and failure reasons
-- [ ] Core Web Vitals collector
-- [ ] performance trace analysis
-- [ ] console and uncaught-error correlation
-
-The debugger permission remains separate from the default installation because it is powerful and creates additional browser warnings.
-
 ## Deferred — translation/i18n intelligence
 
-Translation analysis is not part of the current milestones. `TODO(i18n)` markers preserve future insertion points for an explicit page key, translation-resource evidence kind, and translation-platform provider. This work should begin only after component and API-field tracing is reliable.
+Translation analysis is not part of the current milestones.
