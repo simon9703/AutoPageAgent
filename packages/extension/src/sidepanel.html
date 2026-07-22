@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Auto Page Agent</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div><span class="logo">A</span><div><h1>Auto Page Agent</h1><p>Current-page intelligence</p></div></div>
+        <span id="status" class="status">Checking</span>
+      </header>
+      <section class="suggestions">
+        <button data-prompt="Analyze this page's structure and explain its main purpose.">Analyze page</button>
+        <button data-prompt="Analyze page performance. List the slowest and largest resources with recommendations.">Performance</button>
+        <button data-prompt="Find the main form on this page and explain its fields. Do not change anything.">Explain fields</button>
+      </section>
+      <section id="result" class="result empty">Ask about the current page or request a safe browser action.</section>
+      <section id="approval" class="approval hidden">
+        <strong>Proposed browser actions</strong>
+        <ol id="steps"></ol>
+        <div class="approval-actions"><button id="cancel">Cancel</button><button id="execute" class="primary">Execute</button></div>
+      </section>
+      <form id="composer">
+        <textarea id="task" rows="4" placeholder="Analyze this page, fill a field, or inspect performance…"></textarea>
+        <button id="run" class="primary" type="submit">Run agent</button>
+      </form>
+    </main>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>
