@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve } from "node:path";
-import type { InspectedElement, RepositoryAnalysis, RepositoryEvidence, RepositoryEvidenceKind } from "@auto-page-agent/shared";
+import type { ApiRequestSnapshot, InspectedElement, RepositoryAnalysis, RepositoryEvidence, RepositoryEvidenceKind } from "@auto-page-agent/shared";
 
 export interface RepositoryRoot {
   name: string;
@@ -35,8 +35,8 @@ export async function loadRepositoryRoots(cwd = process.cwd()): Promise<Reposito
 export class LocalRepositoryProvider {
   constructor(readonly roots: RepositoryRoot[]) {}
 
-  async analyze(element: InspectedElement): Promise<RepositoryAnalysis> {
-    const terms = createRepositoryQueryTerms(element);
+  async analyze(element: InspectedElement, apiRequests: ApiRequestSnapshot[] = []): Promise<RepositoryAnalysis> {
+    const terms = createRepositoryQueryTerms(element, apiRequests);
     const warnings: string[] = [];
     if (!this.roots.length) warnings.push("No local repositories are configured. Add auto-page-agent.config.json or AUTO_PAGE_AGENT_REPOS.");
     if (!terms.length) warnings.push("The selected element did not contain specific searchable evidence.");
@@ -124,9 +124,9 @@ async function resolveDirectSourceEvidence(roots: RepositoryRoot[], element: Ins
   return evidence;
 }
 
-type QueryTerm = { value: string; confidence: RepositoryEvidence["confidence"]; source: "source" | "component" | "attribute" | "text" };
+type QueryTerm = { value: string; confidence: RepositoryEvidence["confidence"]; source: "source" | "component" | "attribute" | "text" | "network" };
 
-export function createRepositoryQueryTerms(element: InspectedElement): QueryTerm[] {
+export function createRepositoryQueryTerms(element: InspectedElement, apiRequests: ApiRequestSnapshot[] = []): QueryTerm[] {
   // TODO(i18n): Prefer an explicit i18n key before visible text when the protocol exposes one.
   const raw: QueryTerm[] = [
     ...(element.source?.file ? [{ value: element.source.file, confidence: "high" as const, source: "source" as const }] : []),
@@ -135,6 +135,7 @@ export function createRepositoryQueryTerms(element: InspectedElement): QueryTerm
       ? [{ value: element.attributes[name], confidence: "medium" as const, source: "attribute" as const }]
       : []),
     ...[element.label, element.placeholder, element.text].filter(Boolean).map((value) => ({ value: value!, confidence: "low" as const, source: "text" as const })),
+    ...selectApiPathTerms(apiRequests).map((value) => ({ value, confidence: "low" as const, source: "network" as const })),
   ];
   const seen = new Set<string>();
   return raw
@@ -182,10 +183,26 @@ function parseRipgrepMatch(line: string, root: string): Array<{ path: string; li
 }
 
 function classifyEvidence(preview: string, path: string, source: QueryTerm["source"]): RepositoryEvidenceKind {
+  if (source === "network") return "api";
   if (source === "source" || /\.(?:tsx?|jsx?|vue|svelte)$/iu.test(path) && /component|render|return\s*\(/iu.test(preview)) return "source";
   if (/\b(?:fetch|axios|request|endpoint|api|query|mutation)\b|\/api\//iu.test(`${path} ${preview}`)) return "api";
   if (source === "component" || /\b(?:interface|type|class|function|const)\b/u.test(preview)) return "symbol";
   return "text";
+}
+
+function selectApiPathTerms(requests: ApiRequestSnapshot[]): string[] {
+  const seen = new Set<string>();
+  return [...requests]
+    .sort((left, right) => right.duration - left.duration)
+    .map((request) => request.pathname.replace(/\/\d+(?=\/|$)/gu, "/:id"))
+    .filter((path) => path.length >= 4 && path.length <= 180)
+    .filter((path) => {
+      const key = path.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8);
 }
 
 function dedupeEvidence(evidence: RepositoryEvidence[]): RepositoryEvidence[] {
