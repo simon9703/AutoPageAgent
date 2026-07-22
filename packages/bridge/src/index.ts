@@ -1,17 +1,17 @@
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import type { ClientMessage, ServerMessage } from "@auto-page-agent/shared";
-import { CodexProvider } from "./agent.js";
+import { AgentRouter } from "./agent.js";
 import { loadRepositoryRoots, LocalRepositoryProvider } from "./repositories.js";
 import { configureAutomationSkill, listSkillsForPage, loadSkills, saveAutomationSkill } from "./skills.js";
 
 const host = "127.0.0.1";
 const port = Number(process.env.AUTO_PAGE_AGENT_PORT || 3210);
-const provider = new CodexProvider();
+const provider = new AgentRouter();
 const repositoryProvider = new LocalRepositoryProvider(await loadRepositoryRoots());
 const server = createServer((_request, response) => {
   response.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "chrome-extension://*" });
-  response.end(JSON.stringify({ ok: true, provider: provider.name }));
+  response.end(JSON.stringify({ ok: true, provider: "Auto" }));
 });
 const wss = new WebSocketServer({ server, maxPayload: 2 * 1024 * 1024 });
 
@@ -27,10 +27,14 @@ wss.on("connection", (socket, request) => {
       requestMessage = JSON.parse(String(raw)) as ClientMessage;
       let response: ServerMessage;
       if (requestMessage.type === "health.check") {
-        const codex = await provider.status();
-        response = { id: requestMessage.id, type: "health.result", ok: codex.available && codex.authenticated, provider: provider.name, repositories: repositoryProvider.roots.map((root) => root.name), codex };
+        const codex = await provider.codex.status();
+        const agent = await provider.status(codex);
+        response = { id: requestMessage.id, type: "health.result", ok: agent.available && agent.authenticated, provider: agent.name, repositories: repositoryProvider.roots.map((root) => root.name), codex, agent };
       }
-      else if (requestMessage.type === "agent.run") response = { id: requestMessage.id, type: "agent.result", decision: await provider.run(requestMessage.task, requestMessage.snapshot) };
+      else if (requestMessage.type === "agent.run") {
+        const result = await provider.run(requestMessage.task, requestMessage.snapshot, { conversationId: requestMessage.conversationId, history: requestMessage.history });
+        response = { id: requestMessage.id, type: "agent.result", decision: result.decision, provider: result.provider, conversationId: requestMessage.conversationId };
+      }
       else if (requestMessage.type === "repository.analyze") response = { id: requestMessage.id, type: "repository.result", analysis: await repositoryProvider.analyze(requestMessage.element, requestMessage.apiRequests) };
       else if (requestMessage.type === "skill.list") response = { id: requestMessage.id, type: "skill.list.result", pageUrl: requestMessage.pageUrl, skills: listSkillsForPage(requestMessage.pageUrl, await loadSkills()) };
       else if (requestMessage.type === "skill.configure") response = { id: requestMessage.id, type: "skill.configured", skill: await configureAutomationSkill(requestMessage.slug, { enabled: requestMessage.enabled, pagePatterns: requestMessage.pagePatterns }) };
@@ -44,5 +48,5 @@ wss.on("connection", (socket, request) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`Auto Page Agent bridge listening on ws://${host}:${port} (${provider.name})`);
+  console.log(`Auto Page Agent bridge listening on ws://${host}:${port} (auto provider)`);
 });
