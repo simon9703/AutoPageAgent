@@ -5,12 +5,18 @@ import { extractJson, normalizeDecision } from "../src/agent.js";
 
 const snapshot = {
   snapshotId: "snapshot-1", url: "https://example.com", title: "Example", language: "en", selectedText: "", headings: [], mainText: "",
-  elements: [{ ref: "element-1", tagName: "button", role: "button", label: "Save", text: "Save", selector: "button", disabled: false, contentEditable: false, viewportRect: { x: 0, y: 0, width: 10, height: 10 } }],
+  elements: [{ ref: "element-1", tagName: "button", role: "button", label: "Save", text: "Save", selector: "button", disabled: false, sensitive: false, contentEditable: false, viewportRect: { x: 0, y: 0, width: 10, height: 10 } }],
   performance: { resources: [], summary: { requestCount: 0, totalTransferSize: 0, slowRequestCount: 0 } },
 } satisfies PageSnapshot;
 
 test("extractJson supports fenced model output", () => {
   assert.deepEqual(extractJson("```json\n{\"kind\":\"answer\",\"content\":\"ok\"}\n```"), { kind: "answer", content: "ok" });
+});
+
+test("normalizeDecision rejects filling sensitive fields", () => {
+  const sensitiveSnapshot = { ...snapshot, elements: [{ ...snapshot.elements[0], sensitive: true }] };
+  const result = normalizeDecision({ kind: "action_plan", steps: [{ action: "fill", targetRef: "element-1", value: "secret" }] }, sensitiveSnapshot);
+  assert.equal(result.kind, "answer");
 });
 
 test("normalizeDecision rejects invented element refs", () => {
