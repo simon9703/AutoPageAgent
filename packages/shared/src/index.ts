@@ -159,6 +159,18 @@ export interface SavedAutomationSkill {
   variableNames: string[];
 }
 
+export interface PageSkillSummary {
+  name: string;
+  slug: string;
+  description: string;
+  scope: "page" | "global";
+  match: "origin" | "path-prefix" | "global";
+  pagePattern?: string;
+  stepCount: number;
+  actions: RecordedActionKind[];
+  variableNames: string[];
+}
+
 export interface AgentAnswer {
   kind: "answer";
   content: string;
@@ -170,11 +182,13 @@ export type ClientMessage =
   | { id: string; type: "health.check" }
   | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot }
   | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement; apiRequests: ApiRequestSnapshot[] }
+  | { id: string; type: "skill.list"; pageUrl: string; pageTitle: string }
   | { id: string; type: "skill.save"; draft: AutomationSkillDraft };
 
 export type ServerMessage =
   | { id: string; type: "health.result"; ok: boolean; provider: string; repositories: string[]; codex: CodexRuntimeStatus }
   | { id: string; type: "agent.result"; decision: AgentDecision }
   | { id: string; type: "repository.result"; analysis: RepositoryAnalysis }
+  | { id: string; type: "skill.list.result"; pageUrl: string; skills: PageSkillSummary[] }
   | { id: string; type: "skill.saved"; skill: SavedAutomationSkill }
   | { id: string; type: "agent.error"; error: string };
