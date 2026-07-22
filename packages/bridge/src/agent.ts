@@ -35,7 +35,7 @@ export class CodexProvider implements AgentProvider {
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return mockDecision(task, snapshot);
     const status = await this.status();
     if (!status.available || !status.authenticated) throw new Error(status.error || "Local Codex is unavailable.");
-    const skills = selectSkills(task, await loadSkills());
+    const skills = selectSkills(task, await loadSkills(), snapshot.url);
     const thread = await this.#client.request<{ thread?: { id?: string } }>("thread/start", {
       approvalPolicy: "never",
       personality: "pragmatic",
