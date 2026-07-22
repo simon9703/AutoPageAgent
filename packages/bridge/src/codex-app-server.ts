@@ -1,13 +1,20 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
+import { resolveCodexCommand, type CodexCommandResolution } from "./codex-discovery.js";
 
 type JsonRpcMessage = {
-  id?: number;
+  id?: number | string;
   method?: string;
   params?: Record<string, unknown>;
   result?: unknown;
-  error?: { message?: string };
+  error?: { code?: number; message?: string };
 };
+
+class CodexRpcError extends Error {
+  constructor(readonly code: number | undefined, message: string) { super(message); }
+}
+
+const MAX_OVERLOAD_RETRIES = 4;
 
 export class CodexAppServerClient {
   #process: ChildProcessWithoutNullStreams | null = null;
@@ -19,7 +26,20 @@ export class CodexAppServerClient {
 
   async request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     await this.#ensureStarted();
-    return this.#requestInternal<T>(method, params);
+    return this.#requestWithRetry<T>(method, params);
+  }
+
+  async inspectRuntime(): Promise<CodexCommandResolution> {
+    return resolveCodexCommand();
+  }
+
+  async #requestWithRetry<T>(method: string, params: Record<string, unknown>, attempt = 0): Promise<T> {
+    try { return await this.#requestInternal<T>(method, params); }
+    catch (error) {
+      if (!(error instanceof CodexRpcError) || error.code !== -32001 || attempt >= MAX_OVERLOAD_RETRIES) throw error;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(2_000, 100 * 2 ** attempt)));
+      return this.#requestWithRetry<T>(method, params, attempt + 1);
+    }
   }
 
   #requestInternal<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
@@ -42,10 +62,17 @@ export class CodexAppServerClient {
   }
 
   async #start() {
-    const command = process.env.CODEX_PATH || "codex";
+    const resolution = await this.inspectRuntime();
+    if (!resolution.command) {
+      throw new Error(resolution.configuredCommandInvalid
+        ? "CODEX_PATH does not point to a usable Codex executable."
+        : "Codex CLI was not found. Install @openai/codex or set CODEX_PATH.");
+    }
+    const command = resolution.command;
     const child = spawn(command, ["app-server", "--listen", "stdio://"], {
       stdio: ["pipe", "pipe", "pipe"],
       env: sanitizedEnvironment(process.env),
+      ...(process.platform === "win32" ? { shell: true } : {}),
     });
     this.#process = child;
     child.stderr.on("data", (chunk) => process.stderr.write(`[codex] ${String(chunk)}`));
@@ -57,8 +84,8 @@ export class CodexAppServerClient {
       child.once("error", reject);
     });
     try {
-      await this.#requestInternal("initialize", {
-        clientInfo: { name: "auto-page-agent", title: "Auto Page Agent", version: "0.2.0" },
+      await this.#requestWithRetry("initialize", {
+        clientInfo: { name: "auto-page-agent", title: "Auto Page Agent", version: "0.3.0" },
         capabilities: {},
       });
       this.#write({ method: "initialized", params: {} });
@@ -83,8 +110,12 @@ export class CodexAppServerClient {
     if (typeof message.id === "number" && this.#pending.has(message.id)) {
       const pending = this.#pending.get(message.id)!;
       this.#pending.delete(message.id);
-      if (message.error) pending.reject(new Error(message.error.message || "Codex request failed."));
+      if (message.error) pending.reject(new CodexRpcError(message.error.code, message.error.message || "Codex request failed."));
       else pending.resolve(message.result);
+      return;
+    }
+    if ((typeof message.id === "number" || typeof message.id === "string") && message.method) {
+      this.#write({ id: message.id, error: { code: -32601, message: `Unsupported app-server request: ${message.method}` } });
       return;
     }
     if (message.method) for (const handler of this.#notifications) handler(message);
