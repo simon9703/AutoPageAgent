@@ -6,7 +6,7 @@ import { extractJson, normalizeDecision } from "../src/agent.js";
 const snapshot = {
   snapshotId: "snapshot-1", url: "https://example.com", title: "Example", language: "en", selectedText: "", headings: [], mainText: "",
   elements: [{ ref: "element-1", tagName: "button", role: "button", label: "Save", text: "Save", selector: "button", disabled: false, sensitive: false, contentEditable: false, viewportRect: { x: 0, y: 0, width: 10, height: 10 } }],
-  performance: { resources: [], summary: { requestCount: 0, totalTransferSize: 0, slowRequestCount: 0 } },
+  performance: { resources: [], apiRequests: [], summary: { requestCount: 0, totalTransferSize: 0, slowRequestCount: 0 } },
 } satisfies PageSnapshot;
 
 test("extractJson supports fenced model output", () => {
