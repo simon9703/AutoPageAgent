@@ -18,25 +18,26 @@
 
 ## Phase 2 — local repository intelligence
 
-- [ ] configure one or more local repository roots
-- [ ] `repo.search`, `repo.read_file`, and `repo.find_references` tools
+- [x] configure one or more local repository roots
+- [x] bounded fixed-string repository evidence search
+- [x] visual page-element picker
+- [x] source/symbol/text/API evidence classification with confidence levels
+- [ ] `repo.read_file` and TypeScript-aware `repo.find_references` tools
 - [ ] Git revision and current branch awareness
 - [ ] TypeScript language-service symbol lookup
 - [ ] optional build transform injecting component/source metadata
-- [ ] correlate visible text with i18n keys
 - [ ] correlate request URLs with API clients and hooks
 - [ ] field trace: DOM -> component -> prop -> hook -> API response type
 
 Target demo:
 
-> Select a page field and return the owning component, source file, API endpoint, response field, and translation key with evidence levels.
+> Select a page field and return the owning component, source file, API endpoint, and response field with evidence levels.
 
 ## Phase 3 — remote company runtime
 
 - [ ] authenticated remote Agent Server
 - [ ] GitHub/GitLab/internal repository provider
 - [ ] repository mirror and revision-aware indexes
-- [ ] translation-platform provider
 - [ ] build-artifact and private source-map provider
 - [ ] per-user repository and tool authorization
 - [ ] audit events with sensitive-value redaction
@@ -58,11 +59,9 @@ Remote repository access must be checked server-side for every operation; the ex
 Initial company workflows:
 
 1. explain a page field and trace its data source;
-2. audit visible text and missing translations;
-3. diagnose slow or failed requests;
-4. fill a daily report from a Codex summary;
-5. create a release form but stop before submission;
-6. update translation entries and request approval.
+2. diagnose slow or failed requests;
+3. fill a daily report from a Codex summary;
+4. create a release form but stop before submission.
 
 ## Phase 5 — deeper browser diagnostics
 
@@ -74,3 +73,7 @@ Initial company workflows:
 - [ ] console and uncaught-error correlation
 
 The debugger permission remains separate from the default installation because it is powerful and creates additional browser warnings.
+
+## Deferred — translation/i18n intelligence
+
+Translation analysis is not part of the current milestones. `TODO(i18n)` markers preserve future insertion points for an explicit page key, translation-resource evidence kind, and translation-platform provider. This work should begin only after component and API-field tracing is reliable.
