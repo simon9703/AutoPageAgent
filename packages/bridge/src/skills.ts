@@ -1,9 +1,12 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { AutomationSkillDraft, PageSkillSummary, RecordedActionKind, RecordedBrowserAction, SavedAutomationSkill } from "@auto-page-agent/shared";
+import type { AutomationSkillDraft, ConfiguredAutomationSkill, PageSkillSummary, RecordedActionKind, RecordedBrowserAction, SavedAutomationSkill } from "@auto-page-agent/shared";
 
 interface LoadedWorkflow {
+  schemaVersion?: number;
+  enabled?: boolean;
   startUrl?: string;
+  pagePatterns?: string[];
   steps?: Array<Partial<RecordedBrowserAction> & { value?: string }>;
 }
 
@@ -52,22 +55,22 @@ export function listSkillsForPage(pageUrl: string, skills: LoadedSkill[]): PageS
   const page = safeParseHttpUrl(pageUrl);
   if (!page) return [];
   return skills
-    .filter((skill) => skillMatchesPage(skill, page.href))
+    .filter((skill) => skillMatchesPage(skill, page.href, true))
     .map((skill) => summarizeSkill(skill, page))
     .sort((a, b) => Number(b.scope === "page") - Number(a.scope === "page") || a.name.localeCompare(b.name));
 }
 
-export function skillMatchesPage(skill: LoadedSkill, pageUrl: string): boolean {
+export function skillMatchesPage(skill: LoadedSkill, pageUrl: string, includeDisabled = false): boolean {
+  if (skill.workflow?.enabled === false && !includeDisabled) return false;
   if (!skill.workflow?.startUrl) return true;
   const page = safeParseHttpUrl(pageUrl);
-  const start = safeParseHttpUrl(skill.workflow.startUrl);
-  if (!page || !start || page.origin !== start.origin) return false;
-  const prefix = normalizedPathPrefix(start.pathname);
-  return prefix === "/" || page.pathname === prefix || page.pathname.startsWith(`${prefix}/`);
+  if (!page) return false;
+  return getPagePatterns(skill.workflow).some((pattern) => matchesPagePattern(page, pattern));
 }
 
 function summarizeSkill(skill: LoadedSkill, page: URL): PageSkillSummary {
   const start = skill.workflow?.startUrl ? safeParseHttpUrl(skill.workflow.startUrl) : undefined;
+  const pagePatterns = skill.workflow ? getPagePatterns(skill.workflow) : [];
   const steps = Array.isArray(skill.workflow?.steps) ? skill.workflow.steps : [];
   const actions = Array.from(new Set(steps.map((step) => step.action).filter((action): action is RecordedActionKind =>
     typeof action === "string" && ["click", "fill", "select", "scroll", "submit"].includes(action),
@@ -80,13 +83,34 @@ function summarizeSkill(skill: LoadedSkill, page: URL): PageSkillSummary {
     name: skill.name,
     slug: skill.slug,
     description: skill.description,
+    enabled: skill.workflow?.enabled !== false,
+    configurable: Boolean(skill.workflow),
     scope: start ? "page" : "global",
-    match: !start ? "global" : prefix === "/" ? "origin" : "path-prefix",
-    ...(start ? { pagePattern: prefix === "/" ? `${page.origin}/*` : `${page.origin}${prefix}/*` } : {}),
+    match: !start ? "global" : pagePatterns.every(isSimplePrefixPattern) ? prefix === "/" ? "origin" : "path-prefix" : "wildcard",
+    ...(start ? { pagePattern: pagePatterns[0] } : {}),
+    pagePatterns,
     stepCount: steps.length,
     actions,
     variableNames,
   };
+}
+
+export async function configureAutomationSkill(
+  slug: string,
+  changes: { enabled?: boolean; pagePatterns?: string[] },
+  root = resolve(process.cwd(), "skills"),
+): Promise<ConfiguredAutomationSkill> {
+  const safeSlug = validateSkillSlug(slug);
+  const path = resolve(root, safeSlug, "workflow.json");
+  let workflow: LoadedWorkflow;
+  try { workflow = JSON.parse((await readFile(path, "utf8")).slice(0, 128_000)) as LoadedWorkflow; }
+  catch { throw new Error("Only recorded Skills with workflow.json can be configured."); }
+  if (!workflow.startUrl || !safeParseHttpUrl(workflow.startUrl)) throw new Error("Skill workflow has no valid start URL.");
+  if (typeof changes.enabled === "boolean") workflow.enabled = changes.enabled;
+  if (changes.pagePatterns) workflow.pagePatterns = normalizePagePatterns(changes.pagePatterns);
+  workflow.schemaVersion = Math.max(2, Number(workflow.schemaVersion) || 1);
+  await writeFile(path, `${JSON.stringify(workflow, null, 2)}\n`, "utf8");
+  return { slug: safeSlug, enabled: workflow.enabled !== false, pagePatterns: getPagePatterns(workflow) };
 }
 
 export async function saveAutomationSkill(
@@ -163,10 +187,12 @@ function parameterizeWorkflow(draft: AutomationSkillDraft) {
   return {
     variableNames,
     document: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       name: draft.name,
       description: draft.description,
       startUrl: safeHttpUrl(draft.startUrl),
+      enabled: true,
+      pagePatterns: [defaultPagePattern(safeHttpUrl(draft.startUrl))],
       createdAt: draft.createdAt,
       requiresConfirmation: true,
       steps,
@@ -203,6 +229,59 @@ function safeParseHttpUrl(value: string): URL | undefined {
     const url = new URL(value);
     return url.protocol === "http:" || url.protocol === "https:" ? url : undefined;
   } catch { return undefined; }
+}
+
+function getPagePatterns(workflow: LoadedWorkflow): string[] {
+  if (Array.isArray(workflow.pagePatterns) && workflow.pagePatterns.length) {
+    try { return normalizePagePatterns(workflow.pagePatterns); } catch { return []; }
+  }
+  return workflow.startUrl ? [defaultPagePattern(workflow.startUrl)] : [];
+}
+
+function defaultPagePattern(value: string): string {
+  const url = safeParseHttpUrl(value);
+  if (!url) throw new Error("Skill start URL must use http(s).");
+  const prefix = normalizedPathPrefix(url.pathname);
+  return `${url.origin}${prefix === "/" ? "" : prefix}/**`;
+}
+
+function normalizePagePatterns(values: string[]): string[] {
+  const unique = Array.from(new Set(values.map((value) => cleanSingleLine(value, 500)).filter(Boolean)));
+  if (!unique.length) throw new Error("At least one page pattern is required.");
+  if (unique.length > 20) throw new Error("A Skill can have at most 20 page patterns.");
+  return unique.map((pattern) => {
+    if (/[?#]/u.test(pattern)) throw new Error("Page patterns cannot contain query strings or fragments.");
+    const match = /^(https?):\/\/([^/*]+)(\/.*)?$/iu.exec(pattern);
+    if (!match || match[2]!.includes("@")) throw new Error("Page patterns require a fixed http(s) origin; wildcards are allowed only in the path.");
+    const probe = safeParseHttpUrl(`${match[1]}://${match[2]}/`);
+    if (!probe) throw new Error("Page pattern origin is invalid.");
+    const path = match[3] || "/**";
+    if (!path.startsWith("/") || /[^\p{L}\p{N}\-._~!$&'()+,;=:@/%*]/u.test(path)) throw new Error("Page pattern path contains unsupported characters.");
+    return `${probe.origin}${path}`;
+  });
+}
+
+function matchesPagePattern(page: URL, pattern: string): boolean {
+  const match = /^(https?:\/\/[^/]+)(\/.*)$/iu.exec(pattern);
+  if (!match || page.origin !== match[1]) return false;
+  const pathPattern = match[2]!;
+  if (pathPattern === "/**") return true;
+  if (pathPattern.endsWith("/**") && !pathPattern.slice(0, -3).includes("*")) {
+    const base = normalizedPathPrefix(pathPattern.slice(0, -3));
+    return page.pathname === base || page.pathname.startsWith(`${base}/`);
+  }
+  const escaped = pathPattern.replace(/[.+?^${}()|[\]\\]/gu, "\\$&").replace(/\*\*/gu, "\0").replace(/\*/gu, "[^/]*").replace(/\0/gu, ".*");
+  return new RegExp(`^${escaped}$`, "u").test(page.pathname);
+}
+
+function isSimplePrefixPattern(pattern: string): boolean {
+  return pattern.endsWith("/**") && !pattern.slice(0, -3).includes("*");
+}
+
+function validateSkillSlug(value: string): string {
+  const slug = cleanSingleLine(value, 64);
+  if (!/^[a-z0-9\u4e00-\u9fff](?:[a-z0-9\u4e00-\u9fff-]*[a-z0-9\u4e00-\u9fff])?$/u.test(slug)) throw new Error("Invalid Skill identifier.");
+  return slug;
 }
 
 function normalizedPathPrefix(value: string): string {
