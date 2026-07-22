@@ -17,6 +17,16 @@ chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 });
 
+chrome.tabs.onActivated.addListener(() => {
+  void chrome.runtime.sendMessage({ type: "ui.page.changed" }).catch(() => undefined);
+});
+
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (tab.active && (changeInfo.url || changeInfo.status === "complete")) {
+    void chrome.runtime.sendMessage({ type: "ui.page.changed" }).catch(() => undefined);
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "page.element.selected") {
     void chrome.storage.session.set({ selectedElement: message.element, selectedElementPageUrl: message.pageUrl });
@@ -75,6 +85,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void requestBridge({ id: crypto.randomUUID(), type: "skill.save", draft: message.draft as AutomationSkillDraft }).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
+  if (message?.type === "ui.skills.list") {
+    void listPageSkills().then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
   if (message?.type === "ui.repository.analyze") {
     void analyzeRepository(message.element as InspectedElement, String(message.pageUrl ?? "")).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
@@ -103,6 +117,11 @@ async function analyzeRepository(element: InspectedElement, pageUrl: string): Pr
 async function executePlan(plan: BrowserActionPlan) {
   const tab = await getActiveTab();
   return chrome.tabs.sendMessage(tab.id, { type: "page.actions.execute", plan });
+}
+
+async function listPageSkills(): Promise<ServerMessage> {
+  const tab = await getActiveTab();
+  return requestBridge({ id: crypto.randomUUID(), type: "skill.list", pageUrl: tab.url!, pageTitle: tab.title ?? "" });
 }
 
 async function captureScreenshot() {
