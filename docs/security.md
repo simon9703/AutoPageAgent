@@ -11,6 +11,8 @@
 - Refs are scoped to one snapshot version.
 - Every MVP action plan requires confirmation.
 - Payment, credential, destructive, and hidden-element operations are outside the tool set.
+- Password, file, token-like, OTP, and payment-like fields are marked sensitive; their values are excluded and agent filling is rejected.
+- Repository queries run through direct `rg` process arguments with fixed strings, limits, timeouts, and no shell interpolation.
 
 ## Known development limitation
 
