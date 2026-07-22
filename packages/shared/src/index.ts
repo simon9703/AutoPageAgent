@@ -163,12 +163,21 @@ export interface PageSkillSummary {
   name: string;
   slug: string;
   description: string;
+  enabled: boolean;
+  configurable: boolean;
   scope: "page" | "global";
-  match: "origin" | "path-prefix" | "global";
+  match: "origin" | "path-prefix" | "wildcard" | "global";
   pagePattern?: string;
+  pagePatterns: string[];
   stepCount: number;
   actions: RecordedActionKind[];
   variableNames: string[];
+}
+
+export interface ConfiguredAutomationSkill {
+  slug: string;
+  enabled: boolean;
+  pagePatterns: string[];
 }
 
 export interface AgentAnswer {
@@ -183,6 +192,7 @@ export type ClientMessage =
   | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot }
   | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement; apiRequests: ApiRequestSnapshot[] }
   | { id: string; type: "skill.list"; pageUrl: string; pageTitle: string }
+  | { id: string; type: "skill.configure"; slug: string; enabled?: boolean; pagePatterns?: string[] }
   | { id: string; type: "skill.save"; draft: AutomationSkillDraft };
 
 export type ServerMessage =
@@ -190,5 +200,6 @@ export type ServerMessage =
   | { id: string; type: "agent.result"; decision: AgentDecision }
   | { id: string; type: "repository.result"; analysis: RepositoryAnalysis }
   | { id: string; type: "skill.list.result"; pageUrl: string; skills: PageSkillSummary[] }
+  | { id: string; type: "skill.configured"; skill: ConfiguredAutomationSkill }
   | { id: string; type: "skill.saved"; skill: SavedAutomationSkill }
   | { id: string; type: "agent.error"; error: string };
