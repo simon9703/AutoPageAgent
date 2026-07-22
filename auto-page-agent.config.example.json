@@ -1,0 +1,8 @@
+{
+  "repositories": [
+    {
+      "name": "example-web",
+      "path": "/absolute/path/to/example-web"
+    }
+  ]
+}
