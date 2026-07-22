@@ -31,8 +31,9 @@ export class CodexProvider implements AgentProvider {
   async #runTurn(threadId: string, prompt: string, snapshot: PageSnapshot): Promise<AgentDecision> {
     let turnId = "";
     let text = "";
+    let unsubscribe: () => void = () => undefined;
     const completed = new Promise<void>((resolve, reject) => {
-      const unsubscribe = this.#client.onNotification((notification) => {
+      unsubscribe = this.#client.onNotification((notification) => {
         const params = notification.params ?? {};
         if (String(params.threadId ?? "") !== threadId) return;
         if (turnId && params.turnId && String(params.turnId) !== turnId) return;
@@ -44,15 +45,19 @@ export class CodexProvider implements AgentProvider {
         if (notification.method === "turn/failed") { unsubscribe(); reject(new Error("Codex turn failed.")); }
       });
     });
-    const turn = await this.#client.request<{ turn?: { id?: string } }>("turn/start", {
-      threadId,
-      input: [{ type: "text", text, text_elements: [] }].map((input) => ({ ...input, text: prompt })),
-      effort: "low",
-      approvalPolicy: "never",
-    });
-    turnId = turn.turn?.id ?? "";
-    await withTimeout(completed, 40_000);
-    return normalizeDecision(extractJson(text), snapshot);
+    try {
+      const turn = await this.#client.request<{ turn?: { id?: string } }>("turn/start", {
+        threadId,
+        input: [{ type: "text", text: prompt, text_elements: [] }],
+        effort: "low",
+        approvalPolicy: "never",
+      });
+      turnId = turn.turn?.id ?? "";
+      await withTimeout(completed, 40_000);
+      return normalizeDecision(extractJson(text), snapshot);
+    } finally {
+      unsubscribe();
+    }
   }
 }
 
@@ -74,10 +79,12 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
   const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
   if (raw.kind !== "action_plan") return { kind: "answer", content: String(raw.content || "The agent returned no answer.") };
   const validRefs = new Set(snapshot.elements.map((element) => element.ref));
+  const writableRefs = new Set(snapshot.elements.filter((element) => !element.disabled && !element.sensitive).map((element) => element.ref));
   const steps = Array.isArray(raw.steps) ? raw.steps.flatMap((value) => {
     const step = value && typeof value === "object" ? value as Record<string, unknown> : {};
     if (!ACTIONS.has(String(step.action))) return [];
     if (step.action !== "scroll" && !validRefs.has(String(step.targetRef))) return [];
+    if ((step.action === "fill" || step.action === "select") && !writableRefs.has(String(step.targetRef))) return [];
     return [{
       action: String(step.action) as BrowserActionPlan["steps"][number]["action"],
       ...(validRefs.has(String(step.targetRef)) ? { targetRef: String(step.targetRef) } : {}),
