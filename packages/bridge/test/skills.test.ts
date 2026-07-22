@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { AutomationSkillDraft } from "@auto-page-agent/shared";
-import { loadSkills, saveAutomationSkill } from "../src/skills.js";
+import { listSkillsForPage, loadSkills, saveAutomationSkill, selectSkills } from "../src/skills.js";
 
 test("recorded Skills parameterize values and never persist sensitive input", async () => {
   const root = await mkdtemp(join(tmpdir(), "auto-page-agent-skills-"));
@@ -45,6 +45,34 @@ test("recorded Skills reject non-http start URLs", async () => {
       requiresConfirmation: true,
       steps: [{ id: "1", action: "click", url: "file:///tmp/test", selector: "button", sensitive: false, timestamp: 1 }],
     }, root), /http\(s\)/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("page Skill discovery matches origin and path prefix without leaking to unrelated pages", async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-page-agent-skills-"));
+  try {
+    await saveAutomationSkill({
+      name: "Release draft",
+      description: "Prepare a release draft.",
+      startUrl: "https://example.com/releases/new",
+      createdAt: new Date().toISOString(),
+      requiresConfirmation: true,
+      steps: [{ id: "1", action: "click", url: "https://example.com/releases/new", selector: "#preview", label: "Preview", sensitive: false, timestamp: 1 }],
+    }, root);
+    const globalFolder = join(root, "analyze-page");
+    await mkdir(globalFolder);
+    await writeFile(join(globalFolder, "SKILL.md"), "---\nname: analyze-page\ndescription: Analyze any current page.\n---\n\n# Analyze\n", "utf8");
+    const loaded = await loadSkills(root);
+    const matching = listSkillsForPage("https://example.com/releases/new/advanced?draft=1", loaded);
+    assert.deepEqual(matching.map((skill) => skill.name), ["Release draft", "analyze-page"]);
+    assert.equal(matching[0]!.match, "path-prefix");
+    assert.equal(matching[0]!.stepCount, 1);
+    const unrelated = listSkillsForPage("https://example.com/settings", loaded);
+    assert.deepEqual(unrelated.map((skill) => skill.name), ["analyze-page"]);
+    const selected = selectSkills("release draft", loaded, "https://other.example/releases/new");
+    assert.deepEqual(selected.map((skill) => skill.name), ["analyze-page"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
