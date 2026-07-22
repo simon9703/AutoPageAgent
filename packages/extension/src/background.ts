@@ -1,4 +1,4 @@
-import type { AutomationSkillDraft, BrowserActionPlan, ClientMessage, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
+import type { AutomationSkillDraft, BrowserActionPlan, ChatMessage, ClientMessage, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
 
 const BRIDGE_URL = "ws://127.0.0.1:3210";
 let socket: WebSocket | null = null;
@@ -50,7 +50,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "ui.run") {
-    void runTask(String(message.task ?? "")).then(sendResponse).catch(toErrorResponse(sendResponse));
+    void runTask(String(message.task ?? ""), String(message.conversationId ?? ""), Array.isArray(message.history) ? message.history as ChatMessage[] : []).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.execute") {
@@ -58,7 +58,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "ui.selection.start") {
-    void startSelection().then(sendResponse).catch(toErrorResponse(sendResponse));
+    void startSelection(message.mode === "image" ? "image" : "element").then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.screenshot.capture") {
@@ -106,16 +106,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-async function runTask(task: string): Promise<ServerMessage> {
+async function runTask(task: string, conversationId: string, history: ChatMessage[]): Promise<ServerMessage> {
   if (!task.trim()) throw new Error("Enter a task first.");
   const tab = await getActiveTab();
   const snapshot = await chrome.tabs.sendMessage(tab.id, { type: "page.snapshot" }) as PageSnapshot;
-  return requestBridge({ id: crypto.randomUUID(), type: "agent.run", task, snapshot });
+  const stored = await chrome.storage.session.get(["selectedElement", "selectedElementPageUrl"]);
+  if (stored.selectedElement && stored.selectedElementPageUrl === tab.url) snapshot.context = { selectedElement: stored.selectedElement as InspectedElement };
+  return requestBridge({ id: crypto.randomUUID(), type: "agent.run", task, snapshot, conversationId: conversationId || crypto.randomUUID(), history: history.slice(-20) });
 }
 
-async function startSelection() {
+async function startSelection(mode: "element" | "image") {
   const tab = await getActiveTab();
-  return chrome.tabs.sendMessage(tab.id, { type: "page.selection.start" });
+  return chrome.tabs.sendMessage(tab.id, { type: "page.selection.start", mode });
 }
 
 async function analyzeRepository(element: InspectedElement, pageUrl: string): Promise<ServerMessage> {
