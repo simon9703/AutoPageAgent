@@ -58,7 +58,9 @@ Remote repository access must be checked server-side for every operation; the ex
 - [x] sensitive-value redaction and manual-input checkpoint
 - [x] origin and path-prefix page matching
 - [x] per-page Skill function list with tab/navigation refresh
-- [ ] configurable wildcard and page-fingerprint matching
+- [x] configurable path wildcard matching
+- [x] persistent Skill enable/disable controls
+- [ ] DOM/page-fingerprint matching
 - [ ] declarative required tools and permissions
 - [ ] step-specific confirmation policies
 - [ ] versioned team Skill registry
