@@ -29,10 +29,10 @@ chrome.runtime.onMessage.addListener((message) => {
 
 async function checkHealth() {
   const response = await chrome.runtime.sendMessage({ type: "ui.health" }) as ServerMessage;
-  if (response.type === "health.result" && response.ok) {
-    status.textContent = response.provider;
-    if (response.repositories.length) status.title = `Repositories: ${response.repositories.join(", ")}`;
-    status.classList.add("online");
+  if (response.type === "health.result") {
+    status.textContent = response.ok ? response.provider : response.codex.available ? "Codex login required" : "Codex missing";
+    status.title = [response.codex.error ?? response.codex.command ?? "", response.repositories.length ? `Repositories: ${response.repositories.join(", ")}` : ""].filter(Boolean).join("\n");
+    status.classList.toggle("online", response.ok);
   } else {
     status.textContent = "Bridge offline";
   }
