@@ -10,13 +10,14 @@
     <main>
       <header>
         <div><span class="logo">A</span><div><h1>Auto Page Agent</h1><p>Current-page intelligence</p></div></div>
-        <span id="status" class="status">Checking</span>
+        <div class="header-actions"><button id="new-chat" class="compact">New</button><span id="status" class="status">Checking</span></div>
       </header>
       <section class="suggestions">
         <button data-prompt="Analyze this page's structure and explain its main purpose.">Analyze page</button>
         <button data-prompt="Analyze page performance. List the slowest and largest resources with recommendations.">Performance</button>
         <button data-prompt="Find the main form on this page and explain its fields. Do not change anything.">Explain fields</button>
         <button id="pick-element">Pick element</button>
+        <button id="pick-image">Pick image</button>
         <button id="capture-screenshot">Screenshot</button>
         <button id="toggle-recording">Record workflow</button>
       </section>
@@ -31,6 +32,7 @@
       </section>
       <section id="element-card" class="element-card hidden">
         <div><strong>Selected element</strong><span id="element-tag"></span></div>
+        <img id="selected-image" class="selected-image hidden" alt="Selected page image" />
         <p id="element-summary"></p>
         <button id="analyze-code" class="primary">Find in repositories</button>
       </section>
@@ -42,7 +44,8 @@
         <div class="approval-actions"><button id="replay-recording">Test replay</button><button id="save-skill" class="primary">Save Skill</button></div>
         <p class="hint">Typed values stay in this browser session. Saved Skills replace them with runtime variables; sensitive values are never stored.</p>
       </section>
-      <section id="result" class="result empty">Ask about the current page or request a safe browser action.</section>
+      <section id="chat-thread" class="chat-thread"><div class="chat-empty">Select page context or send a message to start.</div></section>
+      <section id="result" class="result empty">Ready.</section>
       <section id="approval" class="approval hidden">
         <strong>Proposed browser actions</strong>
         <ol id="steps"></ol>
