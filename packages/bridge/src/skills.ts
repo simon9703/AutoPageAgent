@@ -1,11 +1,18 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { AutomationSkillDraft, RecordedBrowserAction, SavedAutomationSkill } from "@auto-page-agent/shared";
+import type { AutomationSkillDraft, PageSkillSummary, RecordedActionKind, RecordedBrowserAction, SavedAutomationSkill } from "@auto-page-agent/shared";
+
+interface LoadedWorkflow {
+  startUrl?: string;
+  steps?: Array<Partial<RecordedBrowserAction> & { value?: string }>;
+}
 
 export interface LoadedSkill {
   name: string;
+  slug: string;
   description: string;
   body: string;
+  workflow?: LoadedWorkflow;
 }
 
 export async function loadSkills(root = resolve(process.cwd(), "skills")): Promise<LoadedSkill[]> {
@@ -18,22 +25,68 @@ export async function loadSkills(root = resolve(process.cwd(), "skills")): Promi
       const frontmatter = /^---\s*\n([\s\S]*?)\n---/u.exec(body)?.[1] ?? "";
       const name = /^name:\s*(.+)$/mu.exec(frontmatter)?.[1]?.trim() || folder;
       const description = /^description:\s*(.+)$/mu.exec(frontmatter)?.[1]?.trim() || "";
-      let workflow = "";
-      try { workflow = (await readFile(resolve(root, folder, "workflow.json"), "utf8")).slice(0, 128_000); } catch { /* Hand-written Skills do not require a workflow file. */ }
-      skills.push({ name, description, body: workflow ? `${body}\n\nRecorded workflow configuration:\n${workflow}` : body });
+      let workflowText = "";
+      let workflow: LoadedWorkflow | undefined;
+      try {
+        workflowText = (await readFile(resolve(root, folder, "workflow.json"), "utf8")).slice(0, 128_000);
+        workflow = JSON.parse(workflowText) as LoadedWorkflow;
+      } catch { /* Hand-written Skills do not require a workflow file. */ }
+      skills.push({ name, slug: folder, description, body: workflowText ? `${body}\n\nRecorded workflow configuration:\n${workflowText}` : body, workflow });
     } catch { /* Ignore folders without a readable SKILL.md. */ }
   }
   return skills;
 }
 
-export function selectSkills(task: string, skills: LoadedSkill[]): LoadedSkill[] {
+export function selectSkills(task: string, skills: LoadedSkill[], pageUrl?: string): LoadedSkill[] {
+  const eligible = pageUrl ? skills.filter((skill) => skillMatchesPage(skill, pageUrl)) : skills;
   const normalized = task.toLowerCase();
-  const scored = skills.map((skill) => ({
+  const scored = eligible.map((skill) => ({
     skill,
     score: `${skill.name} ${skill.description}`.toLowerCase().split(/[^a-z0-9\u4e00-\u9fff]+/u).filter((token) => token.length > 1 && normalized.includes(token)).length,
   }));
   const matched = scored.filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 2).map((item) => item.skill);
-  return matched.length ? matched : skills.filter((skill) => skill.name === "analyze-page").slice(0, 1);
+  return matched.length ? matched : eligible.filter((skill) => skill.name === "analyze-page").slice(0, 1);
+}
+
+export function listSkillsForPage(pageUrl: string, skills: LoadedSkill[]): PageSkillSummary[] {
+  const page = safeParseHttpUrl(pageUrl);
+  if (!page) return [];
+  return skills
+    .filter((skill) => skillMatchesPage(skill, page.href))
+    .map((skill) => summarizeSkill(skill, page))
+    .sort((a, b) => Number(b.scope === "page") - Number(a.scope === "page") || a.name.localeCompare(b.name));
+}
+
+export function skillMatchesPage(skill: LoadedSkill, pageUrl: string): boolean {
+  if (!skill.workflow?.startUrl) return true;
+  const page = safeParseHttpUrl(pageUrl);
+  const start = safeParseHttpUrl(skill.workflow.startUrl);
+  if (!page || !start || page.origin !== start.origin) return false;
+  const prefix = normalizedPathPrefix(start.pathname);
+  return prefix === "/" || page.pathname === prefix || page.pathname.startsWith(`${prefix}/`);
+}
+
+function summarizeSkill(skill: LoadedSkill, page: URL): PageSkillSummary {
+  const start = skill.workflow?.startUrl ? safeParseHttpUrl(skill.workflow.startUrl) : undefined;
+  const steps = Array.isArray(skill.workflow?.steps) ? skill.workflow.steps : [];
+  const actions = Array.from(new Set(steps.map((step) => step.action).filter((action): action is RecordedActionKind =>
+    typeof action === "string" && ["click", "fill", "select", "scroll", "submit"].includes(action),
+  )));
+  const variableNames = Array.from(new Set(steps.flatMap((step) => typeof step.value === "string"
+    ? Array.from(step.value.matchAll(/\{\{([a-z0-9_]+)\}\}/giu), (match) => match[1]!)
+    : [])));
+  const prefix = start ? normalizedPathPrefix(start.pathname) : undefined;
+  return {
+    name: skill.name,
+    slug: skill.slug,
+    description: skill.description,
+    scope: start ? "page" : "global",
+    match: !start ? "global" : prefix === "/" ? "origin" : "path-prefix",
+    ...(start ? { pagePattern: prefix === "/" ? `${page.origin}/*` : `${page.origin}${prefix}/*` } : {}),
+    stepCount: steps.length,
+    actions,
+    variableNames,
+  };
 }
 
 export async function saveAutomationSkill(
@@ -143,6 +196,18 @@ function safeHttpUrl(value: string): string {
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Skill URLs must use http(s).");
   url.hash = "";
   return url.toString();
+}
+
+function safeParseHttpUrl(value: string): URL | undefined {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url : undefined;
+  } catch { return undefined; }
+}
+
+function normalizedPathPrefix(value: string): string {
+  const normalized = value.replace(/\/+$/gu, "") || "/";
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
 }
 
 function finiteCoordinate(value: number | undefined): number {
