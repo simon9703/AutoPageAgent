@@ -12,7 +12,7 @@ Chrome extension -> local bridge -> codex app-server -> thread/start + turn/star
 
 Chromex uses Chrome Native Messaging between the extension and its local bridge. Auto Page Agent currently uses a loopback WebSocket for easier development; Native Messaging remains the production target.
 
-| Capability | Chromex | Auto Page Agent v0.3 |
+| Capability | Chromex | Auto Page Agent v0.7 |
 | --- | --- | --- |
 | Start `codex app-server` | Yes | Yes |
 | JSON-RPC over stdio | Yes | Yes |
@@ -22,7 +22,7 @@ Chromex uses Chrome Native Messaging between the extension and its local bridge.
 | Executable discovery / override | Yes | Yes |
 | App-server overload retry | Yes | Yes |
 | Delta streaming | Yes | Not yet |
-| Thread resume/history/compaction | Yes | Not yet |
+| Thread continuity | Yes | Yes, in-process conversation map |
 | Model catalog | Yes | Not yet |
 | App-server server-request handlers | Full policy handlers | Explicit unsupported response |
 | Skills from Codex `skills/list` | Yes | Local `SKILL.md` loader only |
@@ -37,7 +37,7 @@ Reference implementations:
 
 Chromex does **not** run its primary browser-agent/Codex chat requests through API-key authentication. Its Codex plane explicitly rejects a Codex `apiKey` account for main prompt requests and asks the user to use ChatGPT-managed authentication. The separately entered OpenAI API key is stored locally for dedicated features such as realtime translation.
 
-Auto Page Agent follows that main-agent boundary in v0.3:
+Auto Page Agent keeps that Chromex-compatible local Codex boundary:
 
 - provider API-key environment variables are removed before spawning Codex;
 - `account/read` verifies the current Codex account;
@@ -45,7 +45,9 @@ Auto Page Agent follows that main-agent boundary in v0.3:
 - an API-key Codex session is reported as unsupported for the main browser agent;
 - the extension never stores an OpenAI API key.
 
-A direct Responses API provider is therefore **not implemented**. If added later, it should be a separate provider behind a company/local server, not an API key placed in Chrome storage.
+At the user's request, v0.7 also adds a **separate** Responses API provider. This does not authenticate `codex app-server` with an API key. The extension talks only to the local bridge; the bridge reads `OPENAI_API_KEY` from its environment and calls the Responses API directly. `AUTO_PAGE_AGENT_PROVIDER=auto|codex|openai` controls routing.
+
+Both providers share the same compact page context and constrained decision validator. Local Codex reuses an app-server thread per conversation. Responses API mode reuses `previous_response_id` per conversation and resends bounded history only when starting a new API conversation.
 
 ## 3. APIs used by the current webpage
 
