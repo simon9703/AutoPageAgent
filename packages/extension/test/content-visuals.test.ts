@@ -11,14 +11,20 @@ test("manifest injects the isolated browser-agent visual stylesheet", async () =
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   ) as { version?: string };
   const stylesheet = await readFile(new URL("../src/content.css", import.meta.url), "utf8");
+  const contentScript = await readFile(new URL("../src/content.ts", import.meta.url), "utf8");
 
   assert.equal(manifest.version, extensionPackage.version);
   assert.ok(manifest.content_scripts?.some((entry) => entry.css?.includes("content.css")));
   assert.match(stylesheet, /html > \.auto-page-agent-element-outline\.selected/u);
   assert.match(stylesheet, /html > \.auto-page-agent-viewport-frame\.visible/u);
-  assert.match(stylesheet, /html > \.auto-page-agent-viewport-frame::before/u);
-  assert.match(stylesheet, /mask-composite: exclude !important/u);
+  assert.match(stylesheet, /\.auto-page-agent-frame-edge\.top/u);
+  assert.match(stylesheet, /\.auto-page-agent-frame-edge\.right/u);
+  assert.doesNotMatch(stylesheet, /auto-page-agent-viewport-frame::before/u);
+  assert.doesNotMatch(stylesheet, /mask-composite/u);
   assert.match(stylesheet, /background: transparent !important/u);
+  for (const edge of ["top", "right", "bottom", "left"]) {
+    assert.match(contentScript, new RegExp(`auto-page-agent-frame-edge ${edge}`, "u"));
+  }
   assert.match(stylesheet, /html > \.auto-page-agent-pointer\.visible/u);
   assert.match(stylesheet, /\.auto-page-agent-pointer-label/u);
 });

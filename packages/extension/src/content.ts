@@ -777,7 +777,13 @@ function showAgentFrame() {
     agentFrame = document.createElement("div");
     agentFrame.dataset.autoPageAgentOverlay = "true";
     agentFrame.className = "auto-page-agent-viewport-frame";
-    agentFrame.innerHTML = '<span class="auto-page-agent-frame-status"><i></i> AI is operating</span>';
+    agentFrame.innerHTML = `
+      <span class="auto-page-agent-frame-edge top"></span>
+      <span class="auto-page-agent-frame-edge right"></span>
+      <span class="auto-page-agent-frame-edge bottom"></span>
+      <span class="auto-page-agent-frame-edge left"></span>
+      <span class="auto-page-agent-frame-status"><i></i> AI is operating</span>
+    `;
     document.documentElement.append(agentFrame);
   }
   requestAnimationFrame(() => agentFrame?.classList.add("visible"));
@@ -826,7 +832,11 @@ function ensureAgentStyles() {
     .auto-page-agent-element-outline.label-below .auto-page-agent-outline-label { top: calc(100% + 7px); bottom: auto; }
     .auto-page-agent-element-outline.action .auto-page-agent-outline-label { background: linear-gradient(135deg,#4338ca,#0891b2); }
     .auto-page-agent-viewport-frame { position: fixed; z-index: 2147483643; inset: 0; box-sizing: border-box; opacity: 0; pointer-events: none; border: 0; border-radius: 12px; background: transparent; box-shadow: none; transition: opacity .28s ease; }
-    .auto-page-agent-viewport-frame::before { content: ""; position: absolute; inset: 0; box-sizing: border-box; padding: 4px; border-radius: inherit; background: linear-gradient(115deg,#22d3ee,#6366f1,#a855f7,#ec4899,#22d3ee); background-size: 300% 300%; -webkit-mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); mask-composite: exclude; filter: drop-shadow(0 0 8px #6366f180); animation: auto-page-agent-frame-flow 4s linear infinite; }
+    .auto-page-agent-frame-edge { position: absolute; display: block; background: linear-gradient(115deg,#22d3ee,#6366f1,#a855f7,#ec4899,#22d3ee); background-size: 300% 300%; box-shadow: 0 0 10px #6366f180; animation: auto-page-agent-frame-flow 4s linear infinite; }
+    .auto-page-agent-frame-edge.top { top: 0; left: 0; right: 0; height: 4px; }
+    .auto-page-agent-frame-edge.right { top: 0; right: 0; bottom: 0; width: 4px; }
+    .auto-page-agent-frame-edge.bottom { right: 0; bottom: 0; left: 0; height: 4px; }
+    .auto-page-agent-frame-edge.left { top: 0; bottom: 0; left: 0; width: 4px; }
     .auto-page-agent-viewport-frame.visible { opacity: 1; }
     .auto-page-agent-frame-status { position: absolute; right: 15px; bottom: 14px; display: flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid #ffffff3d; border-radius: 999px; color: white; background: #17132bdc; backdrop-filter: blur(12px); box-shadow: 0 8px 24px #312e8150; font: 650 10px/1 system-ui,-apple-system,sans-serif; letter-spacing: .02em; }
     .auto-page-agent-frame-status i { width: 7px; height: 7px; border-radius: 50%; background: #67e8f9; box-shadow: 0 0 0 4px #22d3ee25,0 0 12px #22d3ee; animation: auto-page-agent-status-pulse 1.4s ease-in-out infinite; }

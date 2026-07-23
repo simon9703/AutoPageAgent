@@ -24,7 +24,11 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("Ready on the current page.");
   const [pendingPlan, setPendingPlan] = useState<BrowserActionPlan | null>(null);
-  const [selected, setSelected] = useState<{ element: InspectedElement; pageUrl: string } | null>(null);
+  const [selected, setSelected] = useState<{
+    element: InspectedElement;
+    pageUrl: string;
+    screenshot?: { dataUrl: string; title: string; url: string };
+  } | null>(null);
   const [selectionMode, setSelectionMode] = useState<"element" | "image" | null>(null);
   const [screenshot, setScreenshot] = useState<{ dataUrl: string; title: string; url: string } | null>(null);
   const [modal, setModal] = useState<Modal>(null);
@@ -54,7 +58,7 @@ export function App() {
     const listener = (message: unknown) => {
       const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; tabId?: number; screenshot?: { dataUrl: string; title: string; url: string }; reason?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent };
       if (value.type === "ui.element.selected" && value.element && value.tabId === targetTabRef.current?.tabId) {
-        setSelected({ element: value.element, pageUrl: value.pageUrl ?? "" });
+        setSelected({ element: value.element, pageUrl: value.pageUrl ?? "", screenshot: value.screenshot });
         setSelectionMode(null);
         setNotice(value.screenshot
           ? `Captured visible <${value.element.tagName}>. It will be included in the next message.`
@@ -163,7 +167,13 @@ export function App() {
 
   async function restoreSelection(targetTabId: number) {
     const stored = await chrome.runtime.sendMessage({ type: "ui.selection.current", targetTabId }) as { selectedElement?: InspectedElement; selectedElementPageUrl?: string; selectedElementScreenshot?: { dataUrl: string; title: string; url: string } };
-    if (stored.selectedElement) setSelected({ element: stored.selectedElement, pageUrl: stored.selectedElementPageUrl ?? "" });
+    if (stored.selectedElement) {
+      setSelected({
+        element: stored.selectedElement,
+        pageUrl: stored.selectedElementPageUrl ?? "",
+        screenshot: stored.selectedElementScreenshot,
+      });
+    }
   }
 
   async function restoreRecording() {
@@ -476,7 +486,7 @@ export function App() {
           {busy ? <div className="flex items-center gap-2 text-xs text-slate-400"><LoaderCircle className="animate-spin" size={15} />Agent is working on the page…</div> : null}
         </div>
 
-        {selected ? <ContextCard selected={selected.element} onClose={() => void clearContext()} onAnalyze={() => void analyzeCode()} /> : null}
+        {selected ? <ContextCard selected={selected.element} screenshot={selected.screenshot} onClose={() => void clearContext()} onAnalyze={() => void analyzeCode()} /> : null}
         {screenshot ? <ScreenshotCard screenshot={screenshot} onClose={() => setScreenshot(null)} /> : null}
         {events.length ? <Timeline events={events} /> : null}
       </section>
@@ -563,8 +573,14 @@ function Message({ message }: { message: ChatMessage }) {
   return <article className={`group flex gap-2.5 ${assistant ? "items-start" : "justify-end"}`}>{assistant ? <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-950 text-white"><Bot size={14} /></span> : null}<div className={`${assistant ? "max-w-[calc(100%-38px)] text-slate-700" : "max-w-[86%] rounded-2xl rounded-br-md bg-slate-200/70 px-3.5 py-2.5 text-slate-900"}`}><div className="whitespace-pre-wrap text-[13px] leading-[1.65]">{message.content}</div><button type="button" onClick={() => void navigator.clipboard.writeText(message.content)} className="mt-1.5 flex items-center gap-1 text-[10px] text-slate-400 opacity-0 transition group-hover:opacity-100"><Copy size={11} />Copy</button></div></article>;
 }
 
-function ContextCard({ selected, onClose, onAnalyze }: { selected: InspectedElement; onClose: () => void; onAnalyze: () => void }) {
-  return <aside className="mt-5 rounded-2xl border border-violet-100 bg-violet-50/60 p-3"><div className="flex items-start gap-3">{selected.image?.src ? <img src={selected.image.src} className="h-14 w-14 rounded-xl object-cover" alt={selected.image.alt} /> : <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-violet-600"><MousePointer2 size={17} /></span>}<div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><strong className="truncate text-xs">Selected &lt;{selected.tagName}&gt;</strong><button onClick={onClose} aria-label="Remove selection"><X size={14} /></button></div><p className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-500">{selected.label || selected.text || selected.nearbyText || "No visible text"}</p><button onClick={onAnalyze} className="mt-2 flex items-center gap-1 text-[11px] font-medium text-violet-700"><Code2 size={13} />Find in repositories</button></div></div></aside>;
+function ContextCard({ selected, screenshot, onClose, onAnalyze }: {
+  selected: InspectedElement;
+  screenshot?: { dataUrl: string; title: string; url: string };
+  onClose: () => void;
+  onAnalyze: () => void;
+}) {
+  const preview = screenshot?.dataUrl ?? selected.image?.src;
+  return <aside className="mt-5 overflow-hidden rounded-2xl border border-violet-100 bg-violet-50/60">{screenshot ? <div className="relative border-b border-violet-100 bg-white"><img src={screenshot.dataUrl} className="max-h-52 w-full object-contain" alt={screenshot.title} /><span className="absolute bottom-2 left-2 rounded-full bg-slate-950/80 px-2 py-1 text-[9px] font-medium text-white">Element capture</span></div> : null}<div className="flex items-start gap-3 p-3">{!screenshot && preview ? <img src={preview} className="h-14 w-14 rounded-xl object-cover" alt={selected.image?.alt} /> : !screenshot ? <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-violet-600"><MousePointer2 size={17} /></span> : null}<div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><strong className="truncate text-xs">{screenshot ? "Captured" : "Selected"} &lt;{selected.tagName}&gt;</strong><button onClick={onClose} aria-label="Remove selection"><X size={14} /></button></div><p className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-500">{selected.label || selected.text || selected.nearbyText || "No visible text"}</p><button onClick={onAnalyze} className="mt-2 flex items-center gap-1 text-[11px] font-medium text-violet-700"><Code2 size={13} />Find in repositories</button></div></div></aside>;
 }
 
 function ScreenshotCard({ screenshot, onClose }: { screenshot: { dataUrl: string; title: string; url: string }; onClose: () => void }) {

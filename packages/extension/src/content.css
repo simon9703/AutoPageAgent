@@ -242,21 +242,41 @@ html > .auto-page-agent-viewport-frame {
   transition: opacity .28s ease !important;
 }
 
-html > .auto-page-agent-viewport-frame::before {
-  content: "" !important;
+html > .auto-page-agent-viewport-frame > .auto-page-agent-frame-edge {
   position: absolute !important;
-  inset: 0 !important;
-  box-sizing: border-box !important;
-  padding: 4px !important;
-  border-radius: inherit !important;
+  display: block !important;
   background: linear-gradient(115deg, #22d3ee, #6366f1, #a855f7, #ec4899, #22d3ee) !important;
   background-size: 300% 300% !important;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0) !important;
-  -webkit-mask-composite: xor !important;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0) !important;
-  mask-composite: exclude !important;
-  filter: drop-shadow(0 0 8px #6366f180) !important;
+  box-shadow: 0 0 10px #6366f180 !important;
   animation: auto-page-agent-frame-flow 4s linear infinite !important;
+}
+
+html > .auto-page-agent-viewport-frame > .auto-page-agent-frame-edge.top {
+  top: 0 !important;
+  right: 0 !important;
+  left: 0 !important;
+  height: 4px !important;
+}
+
+html > .auto-page-agent-viewport-frame > .auto-page-agent-frame-edge.right {
+  top: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 4px !important;
+}
+
+html > .auto-page-agent-viewport-frame > .auto-page-agent-frame-edge.bottom {
+  right: 0 !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  height: 4px !important;
+}
+
+html > .auto-page-agent-viewport-frame > .auto-page-agent-frame-edge.left {
+  top: 0 !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  width: 4px !important;
 }
 
 html > .auto-page-agent-viewport-frame.visible {
