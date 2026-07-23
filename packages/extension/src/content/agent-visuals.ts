@@ -31,7 +31,11 @@ export function setSelectedTarget(target: Element) {
   selectedTarget = target;
   selectedOutline = createElementOutline("selected");
   let updateFrame: number | undefined;
+  let fadeTimer: number | undefined;
+  let removeTimer: number | undefined;
+  let dismissing = false;
   const update = () => {
+    if (dismissing) return;
     if (!selectedTarget?.isConnected || !selectedOutline) {
       clearSelectedTarget();
       return;
@@ -50,8 +54,18 @@ export function setSelectedTarget(target: Element) {
   observer.observe(target);
   window.addEventListener("resize", scheduleUpdate);
   document.addEventListener("scroll", scheduleUpdate, true);
+  fadeTimer = window.setTimeout(() => {
+    if (!selectedOutline) return;
+    dismissing = true;
+    selectedOutline.classList.add("dismissing");
+    selectedOutline.style.setProperty("opacity", "0", "important");
+    selectedOutline.style.setProperty("scale", ".985", "important");
+    removeTimer = window.setTimeout(clearSelectedTarget, 260);
+  }, 720);
   selectedOutlineCleanup = () => {
     if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
+    if (fadeTimer !== undefined) clearTimeout(fadeTimer);
+    if (removeTimer !== undefined) clearTimeout(removeTimer);
     observer.disconnect();
     window.removeEventListener("resize", scheduleUpdate);
     document.removeEventListener("scroll", scheduleUpdate, true);
@@ -142,6 +156,8 @@ function createElementOutline(kind: "picker" | "selected"): HTMLElement {
     boxShadow: kind === "selected"
       ? "inset 0 0 0 1px rgba(255,255,255,.82), 0 0 0 4px rgba(124,92,255,.18), 0 10px 34px rgba(67,56,202,.22)"
       : "inset 0 0 0 1px rgba(255,255,255,.70), 0 0 0 3px rgba(139,92,246,.12), 0 8px 30px rgba(76,29,149,.14)",
+    transition: "transform .08s ease-out, width .08s ease-out, height .08s ease-out, opacity .24s ease, scale .24s ease",
+    scale: "1",
   });
   outline.querySelectorAll<HTMLElement>(".auto-page-agent-corner").forEach((corner) => {
     setImportantStyles(corner, {

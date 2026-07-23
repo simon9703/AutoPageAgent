@@ -144,6 +144,11 @@ html > .auto-page-agent-element-outline.selected {
   box-shadow: 0 0 0 1px #ffffffd0 inset, 0 0 0 4px #7c5cff28, 0 10px 34px #4338ca38 !important;
 }
 
+html > .auto-page-agent-element-outline.selected.dismissing {
+  opacity: 0 !important;
+  scale: .985 !important;
+}
+
 html > .auto-page-agent-element-outline.action {
   border: 2px solid #22d3ee !important;
   background: linear-gradient(135deg, #22d3ee18, #7c3aed12) !important;

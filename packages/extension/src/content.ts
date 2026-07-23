@@ -390,7 +390,7 @@ function startElementSelection(mode: "element" | "image") {
   const onMove = (event: MouseEvent) => {
     visuals.movePointer(event.clientX, event.clientY);
     const raw = event.target instanceof Element ? event.target : null;
-    const next = mode === "image" ? findImageTarget(raw) ?? raw : raw;
+    const next = raw;
     if (!next || next === hovered) return;
     restore();
     hovered = next;
@@ -408,9 +408,7 @@ function startElementSelection(mode: "element" | "image") {
   };
   const onClick = (event: MouseEvent) => {
     if (!(event.target instanceof Element)) return;
-    const target = mode === "image"
-      ? findImageTarget(event.target) ?? event.target
-      : event.target;
+    const target = event.target;
     event.preventDefault();
     event.stopImmediatePropagation();
     if (mode === "image" && isSensitiveCaptureTarget(target)) {
@@ -642,18 +640,6 @@ function getImageInfo(element: Element): InspectedElement["image"] {
   const rect = element.getBoundingClientRect();
   try { return { src: new URL(src, location.href).href, alt: getAccessibleLabel(element), width: Math.round(rect.width), height: Math.round(rect.height) }; }
   catch { return undefined; }
-}
-
-function findImageTarget(element: Element | null): Element | null {
-  if (!element) return null;
-  const image = element.closest("img,[role='img']") ?? element.querySelector("img,[role='img']");
-  if (image) return image;
-  let current: Element | null = element;
-  while (current && current !== document.body) {
-    if (getImageInfo(current)) return current;
-    current = current.parentElement;
-  }
-  return null;
 }
 
 async function simulateClick(element: HTMLElement) {

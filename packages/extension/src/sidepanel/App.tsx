@@ -518,14 +518,14 @@ function TargetTabHeader(props: {
       <img src="assets/icon-48.png" className="h-9 w-9 shrink-0 rounded-[11px]" alt="" />
       <button type="button" onClick={props.onToggle} className="flex min-w-0 max-w-[calc(100%-96px)] items-center gap-1.5 rounded-xl px-1.5 py-1 text-left transition hover:bg-slate-50" aria-expanded={props.open}>
         <span className="min-w-0">
-          <strong className="block truncate text-[15px] font-semibold">Auto Page Agent</strong>
+          <strong className="block truncate text-[14px] font-semibold">{props.queued ? props.queued.title : props.target?.title ?? "Select a page"}</strong>
           <span className={`flex items-center gap-1 truncate text-[10px] ${targetVisible ? "text-slate-400" : "text-violet-600"}`}>
             {props.target?.favIconUrl ? <img src={props.target.favIconUrl} className="h-3 w-3 shrink-0 rounded-[2px]" alt="" /> : <Globe2 size={12} className="shrink-0" />}
             <span className="truncate">
               {props.queued
-                ? `Next: ${props.queued.title}`
+                ? `Next target · ${hostname(props.queued.url)}`
                 : props.target
-                  ? `${props.target.title} · ${hostname(props.target.url)}${targetVisible ? "" : " · bound"}`
+                  ? `${hostname(props.target.url)}${targetVisible ? " · current page" : " · conversation target"}`
                   : "Open an http(s) page"}
             </span>
           </span>
