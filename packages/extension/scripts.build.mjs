@@ -14,6 +14,7 @@ await Promise.all([
 ]);
 await Promise.all([
   cp("manifest.json", "dist/manifest.json"),
+  cp("src/content.css", "dist/content.css"),
   cp("src/sidepanel.html", "dist/sidepanel.html"),
   cp("assets", "dist/assets", { recursive: true }),
 ]);
