@@ -1,10 +1,11 @@
 import type { ActionExecutionResult, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ClientMessage, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
+import { PendingAgentRunStore } from "./pending-agent-run.js";
 
 const BRIDGE_URL = "ws://127.0.0.1:3210";
 let socket: WebSocket | null = null;
 let connecting: Promise<WebSocket> | null = null;
 const RECORDING_KEY = "automationRecording";
-let pendingAgentRun: { task: string; conversationId: string; history: ChatMessage[] } | null = null;
+const pendingAgentRuns = new PendingAgentRunStore(chrome.storage.session);
 type EventWithoutMeta<T> = T extends unknown ? Omit<T, "id" | "timestamp"> : never;
 type AgentEventInput = EventWithoutMeta<AgentEvent>;
 
@@ -54,9 +55,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "ui.conversation.reset") {
     const conversationId = String(message.conversationId ?? "");
-    pendingAgentRun = pendingAgentRun?.conversationId === conversationId ? null : pendingAgentRun;
     void Promise.all([
       chrome.storage.session.remove(["selectedElement", "selectedElementPageUrl"]),
+      conversationId ? pendingAgentRuns.clearForConversation(conversationId) : Promise.resolve(),
       conversationId ? requestBridge({ id: crypto.randomUUID(), type: "agent.reset", conversationId }) : Promise.resolve(undefined),
     ]).then(() => sendResponse({ ok: true })).catch(toErrorResponse(sendResponse));
     return true;
@@ -156,8 +157,35 @@ async function runTask(task: string, conversationId: string, history: ChatMessag
     ? { dataUrl: screenshot.dataUrl.slice(0, 1_900_000), title: String(screenshot.title ?? "Current viewport").slice(0, 300), url: String(screenshot.url ?? tab.url ?? "").slice(0, 2_000) }
     : undefined;
   if (selectedElement || selectedScreenshot) snapshot.context = { ...(selectedElement ? { selectedElement } : {}), ...(selectedScreenshot ? { screenshot: selectedScreenshot } : {}) };
-  pendingAgentRun = { task, conversationId: conversationId || crypto.randomUUID(), history: history.slice(-20) };
-  return requestBridge({ id: crypto.randomUUID(), type: "agent.run", task, snapshot, conversationId: pendingAgentRun.conversationId, history: pendingAgentRun.history }, emitUiEvent);
+  const pendingRun = {
+    task,
+    conversationId: conversationId || crypto.randomUUID(),
+    history: history.slice(-20),
+    snapshotId: snapshot.snapshotId,
+  };
+  await pendingAgentRuns.save(pendingRun);
+  try {
+    const response = await requestBridge({
+      id: crypto.randomUUID(),
+      type: "agent.run",
+      task,
+      snapshot,
+      conversationId: pendingRun.conversationId,
+      history: pendingRun.history,
+    }, emitUiEvent);
+    if (response.type === "agent.result" && response.decision.kind === "action_plan") {
+      if (response.decision.snapshotId !== pendingRun.snapshotId) {
+        await pendingAgentRuns.clearForSnapshot(pendingRun.snapshotId);
+        throw new Error("The agent returned a plan for an expired page snapshot.");
+      }
+      return response;
+    }
+    await pendingAgentRuns.clearForSnapshot(pendingRun.snapshotId);
+    return response;
+  } catch (error) {
+    await pendingAgentRuns.clearForSnapshot(pendingRun.snapshotId);
+    throw error;
+  }
 }
 
 async function startSelection(mode: "element" | "image") {
@@ -180,49 +208,53 @@ async function executePlan(plan: BrowserActionPlan) {
 }
 
 async function runAgentLoop(initialPlan: BrowserActionPlan) {
-  if (!pendingAgentRun) throw new Error("The original agent task expired. Run the task again.");
-  const runId = crypto.randomUUID();
-  const startedAt = Date.now();
-  const maxSteps = 8;
-  const timeoutMs = 90_000;
-  let iteration = 0;
-  let failures = 0;
-  let plan = initialPlan;
-  let latestAnswer = "Task completed.";
-  while (iteration < maxSteps && Date.now() - startedAt < timeoutMs) {
-    const step = plan.steps[0];
-    if (!step) throw new Error("The agent returned an empty action plan.");
-    emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: "running", step: iteration + 1, detail: step.reason }));
-    let execution = await executePlanResilient({ ...plan, steps: [step] });
-    if (!execution.snapshot) execution = { ...execution, snapshot: await readCurrentSnapshot() };
-    const observedSnapshot = execution.snapshot!;
-    emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: execution.ok ? "success" : "failed", step: iteration + 1, detail: execution.error }));
-    const verification = execution.verification;
-    emitUiEvent(createEvent({ type: "verify", success: Boolean(verification?.success ?? execution.ok), summary: verification?.summary ?? execution.error ?? "Action observation completed.", changes: verification?.changes, changedRefs: verification?.diff.changedFingerprints, step: iteration + 1 }));
-    if (!execution.ok) failures += 1;
-    else failures = 0;
-    iteration += 1;
-    if (failures >= 2) throw new Error("The agent stopped after two consecutive verification failures.");
-    const loop: AgentLoopContext = {
-      runId, iteration, maxSteps, timeoutMs, startedAt,
-      previousSnapshot: observedSnapshot,
-      lastAction: step,
-      ...(verification ? { lastVerification: verification } : {}),
-    };
-    const response = await requestBridge({
-      id: crypto.randomUUID(), type: "agent.run", task: pendingAgentRun.task, snapshot: observedSnapshot,
-      conversationId: pendingAgentRun.conversationId, history: pendingAgentRun.history, loop,
-    }, emitUiEvent);
-    if (response.type === "agent.error") throw new Error(response.error);
-    if (response.type !== "agent.result") throw new Error("Unexpected agent loop response.");
-    if (response.decision.kind === "answer") {
-      latestAnswer = response.decision.content;
-      return { ok: true, answer: latestAnswer, steps: iteration };
+  const pendingRun = await pendingAgentRuns.loadForPlan(initialPlan.snapshotId);
+  try {
+    const runId = crypto.randomUUID();
+    const startedAt = Date.now();
+    const maxSteps = 8;
+    const timeoutMs = 90_000;
+    let iteration = 0;
+    let failures = 0;
+    let plan = initialPlan;
+    let latestAnswer = "Task completed.";
+    while (iteration < maxSteps && Date.now() - startedAt < timeoutMs) {
+      const step = plan.steps[0];
+      if (!step) throw new Error("The agent returned an empty action plan.");
+      emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: "running", step: iteration + 1, detail: step.reason }));
+      let execution = await executePlanResilient({ ...plan, steps: [step] });
+      if (!execution.snapshot) execution = { ...execution, snapshot: await readCurrentSnapshot() };
+      const observedSnapshot = execution.snapshot!;
+      emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: execution.ok ? "success" : "failed", step: iteration + 1, detail: execution.error }));
+      const verification = execution.verification;
+      emitUiEvent(createEvent({ type: "verify", success: Boolean(verification?.success ?? execution.ok), summary: verification?.summary ?? execution.error ?? "Action observation completed.", changes: verification?.changes, changedRefs: verification?.diff.changedFingerprints, step: iteration + 1 }));
+      if (!execution.ok) failures += 1;
+      else failures = 0;
+      iteration += 1;
+      if (failures >= 2) throw new Error("The agent stopped after two consecutive verification failures.");
+      const loop: AgentLoopContext = {
+        runId, iteration, maxSteps, timeoutMs, startedAt,
+        previousSnapshot: observedSnapshot,
+        lastAction: step,
+        ...(verification ? { lastVerification: verification } : {}),
+      };
+      const response = await requestBridge({
+        id: crypto.randomUUID(), type: "agent.run", task: pendingRun.task, snapshot: observedSnapshot,
+        conversationId: pendingRun.conversationId, history: pendingRun.history, loop,
+      }, emitUiEvent);
+      if (response.type === "agent.error") throw new Error(response.error);
+      if (response.type !== "agent.result") throw new Error("Unexpected agent loop response.");
+      if (response.decision.kind === "answer") {
+        latestAnswer = response.decision.content;
+        return { ok: true, answer: latestAnswer, steps: iteration };
+      }
+      if (iteration >= maxSteps || Date.now() - startedAt >= timeoutMs) throw new Error(`The agent stopped at its ${iteration >= maxSteps ? "step" : "time"} budget.`);
+      plan = response.decision;
     }
-    if (iteration >= maxSteps || Date.now() - startedAt >= timeoutMs) throw new Error(`The agent stopped at its ${iteration >= maxSteps ? "step" : "time"} budget.`);
-    plan = response.decision;
+    throw new Error("The agent stopped at its time budget.");
+  } finally {
+    await pendingAgentRuns.clearForSnapshot(initialPlan.snapshotId);
   }
-  return { ok: true, answer: latestAnswer, steps: iteration };
 }
 
 async function executePlanResilient(plan: BrowserActionPlan): Promise<ActionExecutionResult> {

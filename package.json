@@ -7,7 +7,7 @@
   "scripts": {
     "build": "npm run build -w @auto-page-agent/shared && npm run build -w @auto-page-agent/bridge && npm run build -w @auto-page-agent/extension",
     "typecheck": "npm run build -w @auto-page-agent/shared && npm run typecheck -w @auto-page-agent/bridge && npm run typecheck -w @auto-page-agent/extension",
-    "test": "npm run test -w @auto-page-agent/bridge",
+    "test": "npm run test -w @auto-page-agent/bridge && npm run test -w @auto-page-agent/extension",
     "dev:bridge": "npm run dev -w @auto-page-agent/bridge"
   },
   "devDependencies": {
