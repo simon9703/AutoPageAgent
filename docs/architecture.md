@@ -32,16 +32,23 @@ packages/extension/src/
 │   ├── screenshot.ts      # viewport and selected-element capture
 │   ├── recording.ts       # session-backed recorder lifecycle
 │   └── pending-agent-run.ts
-├── content.ts             # page events, snapshots, actions, verification
+├── content.ts             # minimal content-script bootstrap
 ├── content/
-│   └── agent-visuals.ts   # picker and persistent selection overlays
+│   ├── runtime.ts         # message routing, snapshots, actions, verification
+│   ├── dom.ts             # bounded DOM inspection and interaction helpers
+│   ├── recording.ts       # page-event recording and safe replay
+│   ├── selection.ts       # element/image selection lifecycle
+│   ├── agent-visuals.ts   # picker and persistent selection overlays
+│   └── agent-activity.ts  # action pointer and isolated activity frame
 ├── sidepanel.tsx          # React mount only
 └── sidepanel/
-    ├── App.tsx            # UI state and workflow orchestration
+    ├── App.tsx            # stable component entry
+    ├── controller.tsx     # Chrome state, persistence, workflow orchestration
+    ├── components.tsx     # presentation-only UI components
     └── formatters.ts      # pure presentation formatting
 ```
 
-Entrypoints own browser lifecycle and orchestration. Submodules own reusable stateful services or pure helpers; they do not register additional global Chrome listeners. Cross-process protocol types remain in `packages/shared`.
+Entrypoints stay minimal. Runtime/controller modules own browser lifecycle and orchestration, while feature modules own one bounded concern. Cross-process protocol types remain in `packages/shared`.
 
 The snapshot contains page metadata, selected text, a limited body-text extraction, headings, at most 160 interactive elements near the viewport, a Page Agent-inspired simplified DOM, page/scroll geometry, and at most 100 resource timing entries. DOM nodes remain inside the content script and are represented externally by ephemeral refs. Candidate elements are bounded to a 700-pixel expansion around the viewport and checked against the browser's top-layer hit target before inclusion.
 

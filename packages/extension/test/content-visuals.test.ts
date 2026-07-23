@@ -11,11 +11,14 @@ test("manifest injects the isolated browser-agent visual stylesheet", async () =
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   ) as { version?: string };
   const stylesheet = await readFile(new URL("../src/content.css", import.meta.url), "utf8");
-  const contentScript = await readFile(new URL("../src/content.ts", import.meta.url), "utf8");
+  const contentEntry = await readFile(new URL("../src/content.ts", import.meta.url), "utf8");
+  const contentScript = await readFile(new URL("../src/content/agent-activity.ts", import.meta.url), "utf8");
 
   assert.equal(manifest.version, extensionPackage.version);
   assert.ok(manifest.content_scripts?.some((entry) => entry.css?.includes("content.css")));
   assert.match(stylesheet, /html > \.auto-page-agent-element-outline\.selected/u);
+  assert.match(contentEntry, /import "\.\/content\/runtime\.js"/u);
+  assert.doesNotMatch(contentEntry, /chrome\.runtime/u);
   assert.match(contentScript, /attachShadow\(\{ mode: "closed" \}\)/u);
   assert.match(contentScript, /document\.createElement\("auto-page-agent-frame"\)/u);
   assert.match(contentScript, /pointerEvents: "none"/u);

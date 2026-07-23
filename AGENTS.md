@@ -23,10 +23,13 @@ Read `README.md` for usage, `docs/architecture.md` for component boundaries, `do
 - `packages/bridge/src/repositories.ts`: bounded local `rg` evidence search.
 - `packages/extension/src/background.ts`: service-worker entry, Chrome event listeners, message dispatch, and agent-loop orchestration.
 - `packages/extension/src/background/`: bridge transport, target-tab messaging, screenshots, recorder state, and pending-run persistence.
-- `packages/extension/src/content.ts`: content-script entry, compact DOM snapshots, recorder hooks, constrained actions, and verification.
-- `packages/extension/src/content/`: page-overlay and element-selection visual lifecycle.
+- `packages/extension/src/content.ts`: minimal content-script bootstrap.
+- `packages/extension/src/content/runtime.ts`: page message routing, snapshots, constrained actions, and verification.
+- `packages/extension/src/content/`: DOM helpers, recording, selection, and isolated agent visual lifecycle.
 - `packages/extension/src/sidepanel.tsx`: minimal React mount entry.
-- `packages/extension/src/sidepanel/`: conversation UI orchestration and presentation helpers.
+- `packages/extension/src/sidepanel/App.tsx`: stable side-panel component entry.
+- `packages/extension/src/sidepanel/controller.tsx`: Chrome state, persistence, and conversation workflow orchestration.
+- `packages/extension/src/sidepanel/components.tsx`: side-panel presentation components.
 - `skills/*`: bundled Marketplace templates. These are distribution assets, not user data.
 - `packages/bridge/test`: Node test suite for agent, runtime, repository, and Skill behavior.
 
