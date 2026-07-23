@@ -15,3 +15,18 @@ test("busy conversations expose a real agent cancellation path", async () => {
   assert.match(shared, /type: "agent\.cancel"/u);
   assert.match(shared, /type: "agent\.cancel\.result"/u);
 });
+
+test("page tools and compact run controls share the composer", async () => {
+  const sidePanel = await readFile(new URL("../src/sidepanel/App.tsx", import.meta.url), "utf8");
+  const stylesheet = await readFile(new URL("../src/sidepanel.css", import.meta.url), "utf8");
+
+  assert.doesNotMatch(sidePanel, /<nav[^>]+aria-label="Page tools"/u);
+  assert.match(sidePanel, /<div[^>]+aria-label="Page tools"/u);
+  for (const label of ["Select element", "Select image area", "Capture viewport", "Open Skills"]) {
+    assert.match(sidePanel, new RegExp(`label="${label}"`, "u"));
+  }
+  assert.match(sidePanel, /label=\{recording \? "Stop recording" : "Record workflow"\}/u);
+  assert.match(sidePanel, /h-8 w-8[^>]+aria-label="Stop agent"/u);
+  assert.match(sidePanel, /h-8 w-8[^>]+aria-label="Send"/u);
+  assert.match(stylesheet, /\.composer \.composer-input:focus-visible \{ outline: none;/u);
+});

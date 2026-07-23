@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot, Camera, Check, ChevronDown, CircleStop, Code2, Copy, Image,
-  ExternalLink, Globe2, LoaderCircle, MousePointer2, Play, Plus, RefreshCw,
+  ExternalLink, Globe2, LoaderCircle, MousePointer2, Play, RefreshCw,
   Send, Sparkles, SquarePen, WandSparkles, X,
 } from "lucide-react";
 import type {
@@ -486,16 +486,6 @@ export function App() {
         </div>
       </header>
 
-      <nav className="flex shrink-0 items-center justify-between border-b border-slate-200/70 bg-white px-3 py-2" aria-label="Page tools">
-        <div className="flex items-center gap-1">
-          <ToolButton active={selectionMode === "element"} label="Select" title="Select an element" onClick={() => void startSelection("element")}><MousePointer2 size={16} /></ToolButton>
-          <ToolButton active={selectionMode === "image"} label="Image" title="Select an image" onClick={() => void startSelection("image")}><Image size={16} /></ToolButton>
-          <ToolButton active={Boolean(screenshot)} label="Capture" title="Capture viewport" onClick={() => void captureScreenshot()}><Camera size={16} /></ToolButton>
-          <ToolButton label="Skills" title="Open Skills" onClick={() => setModal("skills")}><Sparkles size={16} /></ToolButton>
-        </div>
-        <ToolButton active={recording} label={recording ? "Stop" : "Record"} title="Record a reusable workflow" onClick={() => void toggleRecording()}>{recording ? <CircleStop size={16} /> : <Play size={16} />}</ToolButton>
-      </nav>
-
       <section ref={threadRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
         {!messages.length && !busy ? <EmptyState onPick={() => void startSelection("element")} onSkills={() => setModal("skills")} /> : null}
         <div className="space-y-5">
@@ -510,14 +500,20 @@ export function App() {
 
       <div className="shrink-0 px-3 pb-3">
         {pendingPlan ? <ApprovalCard plan={pendingPlan} onCancel={() => setPendingPlan(null)} onConfirm={() => void executePlan()} /> : null}
-        <form onSubmit={(event) => void submitTask(event)} className="rounded-[22px] border border-slate-200 bg-white p-3 shadow-[0_12px_40px_rgba(15,23,42,.10)] focus-within:border-violet-300">
+        <form onSubmit={(event) => void submitTask(event)} className="composer rounded-[22px] border border-slate-200 bg-white p-2.5 shadow-[0_10px_32px_rgba(15,23,42,.09)] transition focus-within:border-slate-300 focus-within:shadow-[0_12px_36px_rgba(15,23,42,.12)]">
           {contextLabel ? <div className="mb-2 flex"><span className="flex max-w-full items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600"><MousePointer2 size={12} /><span className="truncate">{contextLabel}</span><button type="button" onClick={() => void clearContext()} aria-label="Remove context"><X size={12} /></button></span></div> : null}
-          <textarea ref={inputRef} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitTask(); } }} rows={2} placeholder="Ask about this page or tell the agent what to do…" className="max-h-32 min-h-12 w-full resize-none border-0 bg-transparent px-1 text-[14px] leading-5 outline-none placeholder:text-slate-400" />
-          <div className="mt-1 flex items-center justify-between">
-            <div className="flex gap-1"><IconButton label="Select element" onClick={() => void startSelection("element")}><MousePointer2 size={16} /></IconButton><IconButton label="Open Skills" onClick={() => setModal("skills")}><Sparkles size={16} /></IconButton></div>
+          <textarea ref={inputRef} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitTask(); } }} rows={2} placeholder="Ask about this page or tell the agent what to do…" className="composer-input max-h-32 min-h-10 w-full resize-none border-0 bg-transparent px-1 text-[14px] leading-5 outline-none placeholder:text-slate-400" />
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-0.5" aria-label="Page tools">
+              <ComposerToolButton active={selectionMode === "element"} label="Select element" onClick={() => void startSelection("element")}><MousePointer2 size={15} /></ComposerToolButton>
+              <ComposerToolButton active={selectionMode === "image"} label="Select image area" onClick={() => void startSelection("image")}><Image size={15} /></ComposerToolButton>
+              <ComposerToolButton active={Boolean(screenshot)} label="Capture viewport" onClick={() => void captureScreenshot()}><Camera size={15} /></ComposerToolButton>
+              <ComposerToolButton label="Open Skills" onClick={() => setModal("skills")}><Sparkles size={15} /></ComposerToolButton>
+              <ComposerToolButton active={recording} label={recording ? "Stop recording" : "Record workflow"} onClick={() => void toggleRecording()}>{recording ? <CircleStop size={15} /> : <Play size={15} />}</ComposerToolButton>
+            </div>
             {busy
-              ? <button type="button" onClick={() => void stopAgent()} className="grid h-10 w-10 place-items-center rounded-full bg-rose-600 text-white transition hover:bg-rose-700" aria-label="Stop agent" title="Stop agent"><CircleStop size={18} /></button>
-              : <button type="submit" disabled={!prompt.trim()} className="grid h-10 w-10 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-violet-600 disabled:cursor-not-allowed disabled:bg-slate-200" aria-label="Send"><Send size={17} /></button>}
+              ? <button type="button" onClick={() => void stopAgent()} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-700" aria-label="Stop agent" title="Stop agent"><CircleStop size={15} /></button>
+              : <button type="submit" disabled={!prompt.trim()} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-200" aria-label="Send"><Send size={14} /></button>}
           </div>
         </form>
         <p className="mt-1.5 truncate px-2 text-center text-[10px] text-slate-400">{notice}</p>
@@ -579,8 +575,8 @@ function IconButton({ label, onClick, children }: { label: string; onClick: () =
   return <button type="button" onClick={onClick} title={label} aria-label={label} className="grid h-9 w-9 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-900">{children}</button>;
 }
 
-function ToolButton({ label, title, active = false, onClick, children }: { label: string; title: string; active?: boolean; onClick: () => void; children: React.ReactNode }) {
-  return <button type="button" onClick={onClick} title={title} className={`flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-[11px] font-medium transition ${active ? "bg-violet-50 text-violet-700 ring-1 ring-violet-200" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"}`}>{children}<span className="hidden min-[430px]:inline">{label}</span></button>;
+function ComposerToolButton({ label, active = false, onClick, children }: { label: string; active?: boolean; onClick: () => void; children: React.ReactNode }) {
+  return <button type="button" onClick={onClick} title={label} aria-label={label} aria-pressed={active} className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg transition ${active ? "bg-slate-200 text-slate-900" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"}`}>{children}</button>;
 }
 
 function EmptyState({ onPick, onSkills }: { onPick: () => void; onSkills: () => void }) {
