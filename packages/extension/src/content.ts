@@ -17,6 +17,7 @@ let currentSnapshotId = "";
 let currentSnapshotUrl = "";
 let currentSnapshot: PageSnapshot | null = null;
 let selectionCleanup: (() => void) | null = null;
+let selectedTarget: Element | null = null;
 let recordingActive = false;
 let scrollTimer: number | undefined;
 let aiPointer: HTMLElement | null = null;
@@ -39,6 +40,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "page.selection.start") {
     startElementSelection(message.mode === "image" ? "image" : "element");
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message?.type === "page.selection.clear") {
+    clearSelectedTarget();
     sendResponse({ ok: true });
     return false;
   }
@@ -395,8 +401,13 @@ function startElementSelection(mode: "element" | "image") {
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
     };
+    const pageUrl = location.href;
     cleanup();
-    void chrome.runtime.sendMessage({ type: "page.element.selected", mode, element: selected, geometry, pageUrl: location.href });
+    void chrome.runtime.sendMessage({ type: "page.element.selected", mode, element: selected, geometry, pageUrl })
+      .then((response: { ok?: boolean }) => {
+        if (response?.ok && location.href === pageUrl && target.isConnected) setSelectedTarget(target);
+      })
+      .catch(() => undefined);
   };
   const onKey = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return;
@@ -407,6 +418,17 @@ function startElementSelection(mode: "element" | "image") {
   document.addEventListener("click", onClick, true);
   document.addEventListener("keydown", onKey, true);
   selectionCleanup = cleanup;
+}
+
+function setSelectedTarget(target: Element) {
+  clearSelectedTarget();
+  selectedTarget = target;
+  selectedTarget.classList.add("auto-page-agent-selected-target");
+}
+
+function clearSelectedTarget() {
+  selectedTarget?.classList.remove("auto-page-agent-selected-target");
+  selectedTarget = null;
 }
 
 function inspectElement(element: Element): InspectedElement {
@@ -667,6 +689,7 @@ function ensureAgentStyles() {
     .auto-page-agent-pointer-dot::after { content: ''; position: absolute; left: 7px; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: #6d3bd1; }
     .auto-page-agent-pointer-label { position: absolute; left: 15px; top: 13px; width: max-content; max-width: 180px; padding: 4px 7px; border-radius: 7px; color: white; background: #6d3bd1; font: 600 10px system-ui; }
     .auto-page-agent-picker-target { outline: 3px solid #7c5cff !important; outline-offset: 2px !important; }
+    .auto-page-agent-selected-target { outline: 3px solid #7c5cff !important; outline-offset: 2px !important; box-shadow: 0 0 0 5px #7c5cff26 !important; }
     .auto-page-agent-target-ring { outline: 3px solid #8b5cf6 !important; outline-offset: 4px !important; box-shadow: 0 0 0 8px #8b5cf633 !important; }
   `;
   document.documentElement.append(style);

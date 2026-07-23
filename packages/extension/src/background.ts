@@ -53,8 +53,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "page.element.selected") {
-    void handleElementSelected(message, _sender);
-    return false;
+    void handleElementSelected(message, _sender).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
   }
   if (message?.type === "page.selection.cancelled") {
     void chrome.runtime.sendMessage({ type: "ui.selection.cancelled", reason: message.reason }).catch(() => undefined);
@@ -75,7 +75,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "ui.conversation.reset") {
     const conversationId = String(message.conversationId ?? "");
     void Promise.all([
-      chrome.storage.session.remove([...SELECTION_STORAGE_KEYS]),
+      clearStoredSelection(),
       conversationId ? pendingAgentRuns.clearForConversation(conversationId) : Promise.resolve(),
       conversationId ? requestBridge({ id: crypto.randomUUID(), type: "agent.reset", conversationId }) : Promise.resolve(undefined),
     ]).then(() => sendResponse({ ok: true })).catch(toErrorResponse(sendResponse));
@@ -86,7 +86,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "ui.selection.clear") {
-    void chrome.storage.session.remove([...SELECTION_STORAGE_KEYS]).then(() => sendResponse({ ok: true })).catch(toErrorResponse(sendResponse));
+    void clearStoredSelection().then(() => sendResponse({ ok: true })).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.run") {
@@ -206,11 +206,14 @@ async function handleElementSelected(message: {
       tabId: tab.id,
       screenshot,
     }).catch(() => undefined);
+    return { ok: true };
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     await chrome.runtime.sendMessage({
       type: "ui.selection.cancelled",
-      reason: error instanceof Error ? error.message : String(error),
+      reason,
     }).catch(() => undefined);
+    return { ok: false, error: reason };
   }
 }
 
@@ -229,6 +232,14 @@ async function clearSelectionForTab(tabId: number) {
   if (stored.selectedElementTabId !== tabId) return;
   await chrome.storage.session.remove([...SELECTION_STORAGE_KEYS]);
   await chrome.runtime.sendMessage({ type: "ui.selection.cleared", tabId }).catch(() => undefined);
+}
+
+async function clearStoredSelection() {
+  const stored = await chrome.storage.session.get(["selectedElementTabId"]);
+  if (typeof stored.selectedElementTabId === "number") {
+    await sendPageMessage(stored.selectedElementTabId, { type: "page.selection.clear" }).catch(() => undefined);
+  }
+  await chrome.storage.session.remove([...SELECTION_STORAGE_KEYS]);
 }
 
 function normalizeScreenshot(
