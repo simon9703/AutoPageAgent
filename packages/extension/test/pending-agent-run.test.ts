@@ -36,6 +36,8 @@ test("restores a planned task after the background worker restarts", async () =>
     conversationId: "conversation-1",
     history,
     snapshotId: "snapshot-1",
+    tabId: 17,
+    pageUrl: "https://example.com/form",
   });
 
   const restartedWorker = new PendingAgentRunStore(storage);
@@ -43,6 +45,8 @@ test("restores a planned task after the background worker restarts", async () =>
 
   assert.equal(restored.task, "Submit the form");
   assert.equal(restored.conversationId, "conversation-1");
+  assert.equal(restored.tabId, 17);
+  assert.equal(restored.pageUrl, "https://example.com/form");
   assert.deepEqual(restored.history, history);
 });
 
@@ -54,6 +58,8 @@ test("rejects a plan whose snapshot does not match the persisted task", async ()
     conversationId: "conversation-1",
     history,
     snapshotId: "snapshot-1",
+    tabId: 17,
+    pageUrl: "https://example.com/form",
   });
 
   await assert.rejects(
@@ -70,18 +76,23 @@ test("an old run cannot clear a newer pending task", async () => {
     conversationId: "conversation-1",
     history,
     snapshotId: "snapshot-old",
+    tabId: 17,
+    pageUrl: "https://example.com/form",
   });
   await store.save({
     task: "New task",
     conversationId: "conversation-1",
     history,
     snapshotId: "snapshot-new",
+    tabId: 22,
+    pageUrl: "https://example.com/next",
   });
 
   await store.clearForSnapshot("snapshot-old");
 
   const restored = await new PendingAgentRunStore(storage).loadForPlan("snapshot-new");
   assert.equal(restored.task, "New task");
+  assert.equal(restored.tabId, 22);
 });
 
 test("conversation reset clears only the matching pending task", async () => {
@@ -92,10 +103,27 @@ test("conversation reset clears only the matching pending task", async () => {
     conversationId: "conversation-new",
     history,
     snapshotId: "snapshot-new",
+    tabId: 17,
+    pageUrl: "https://example.com/form",
   });
 
   await store.clearForConversation("conversation-old");
 
   const restored = await new PendingAgentRunStore(storage).loadForPlan("snapshot-new");
   assert.equal(restored.conversationId, "conversation-new");
+});
+
+test("rejects legacy pending runs without a bound target tab", async () => {
+  const storage = new FakeSessionStorage();
+  storage.values.pendingAgentRun = {
+    task: "Submit the form",
+    conversationId: "conversation-1",
+    history,
+    snapshotId: "snapshot-1",
+  };
+
+  await assert.rejects(
+    new PendingAgentRunStore(storage).loadForPlan("snapshot-1"),
+    /original agent task expired/iu,
+  );
 });

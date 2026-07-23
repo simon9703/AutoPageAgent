@@ -1,10 +1,12 @@
 # Auto Page Agent
 
-A lightweight Chrome side-panel agent that understands the current page, analyzes browser performance, and executes explicit, reviewable DOM actions through local Codex or the OpenAI Responses API.
+A lightweight Chrome side-panel agent that understands a conversation-bound target page, analyzes browser performance, and executes explicit, reviewable DOM actions through local Codex or the OpenAI Responses API.
 
 ## MVP capabilities
 
 - Ask questions about the current page, selected text, headings, fields, links, and visible content.
+- Keep a conversation bound to its target tab while freely viewing other browser tabs.
+- Inspect or explicitly switch the target from the page selector at the top of the side panel.
 - Inspect Navigation Timing and the slowest/largest Resource Timing entries.
 - Plan `click`, `fill`, `select`, `scroll`, `focus`, and `submit` actions.
 - Validate every element reference against a versioned page snapshot.
@@ -63,6 +65,8 @@ Then:
 4. Select `packages/extension/dist`.
 5. Open an HTTP(S) page and click the extension icon.
 
+A new conversation binds to the tab that is active when it is created. Switching browser tabs does not move or stop the agent; use the target-page selector to change the conversation target explicitly.
+
 To exercise the complete extension/bridge flow without starting Codex:
 
 ```bash
@@ -110,7 +114,7 @@ Restart the bridge, click the **Select** pointer, select an element on the page,
 
 ## Record an automation Skill
 
-1. Click **Record** in the top tool bar and operate the current tab normally.
+1. Choose the target page, click **Record** in the top tool bar, and operate that tab normally.
 2. Click **Stop recording** and review the captured steps.
 3. Use **Test replay** for a confirmation-gated replay on the current page.
 4. Name the workflow and click **Save as new**, or load an existing recorded Skill and choose **Update Skill**.
@@ -133,7 +137,7 @@ npm run build
 
 - The V2 loop is intentionally bounded to 8 actions and 90 seconds; cross-tab execution and unrestricted final-submit actions remain out of scope.
 - A selected public image URL is sent as `input_image` in Responses API mode. Local Codex currently receives its URL, alt text, dimensions, and surrounding DOM context rather than binary image data.
-- Recorded replay targets the current page. Navigation-aware and cross-tab replay remain planned.
+- Recorded replay targets the conversation's selected page. Navigation-aware and multi-target workflows remain planned.
 - Resource Timing cannot expose all cross-origin sizes unless the resource sends `Timing-Allow-Origin`.
 - The localhost bridge is intended for local development. Packaged releases should use an install-time secret or Chrome Native Messaging.
 - Repository evidence search is implemented; deeper TypeScript reference tracing, API response-field tracing, source maps, and React component correlation remain planned.

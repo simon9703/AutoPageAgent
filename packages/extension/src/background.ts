@@ -1,4 +1,4 @@
-import type { ActionExecutionResult, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ClientMessage, ElementSelectionGeometry, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
+import type { ActionExecutionResult, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, BrowserTabTarget, ChatMessage, ClientMessage, ElementSelectionGeometry, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
 import { PendingAgentRunStore } from "./pending-agent-run.js";
 import { calculateScreenshotCrop } from "./screenshot-crop.js";
 
@@ -32,14 +32,23 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.tabs.onActivated.addListener(() => {
-  void chrome.runtime.sendMessage({ type: "ui.page.changed" }).catch(() => undefined);
+  void chrome.runtime.sendMessage({ type: "ui.tabs.changed", reason: "activated" }).catch(() => undefined);
 });
 
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
-  if (changeInfo.url) void clearSelectionForTab(_tabId);
-  if (tab.active && (changeInfo.url || changeInfo.status === "complete")) {
-    void chrome.runtime.sendMessage({ type: "ui.page.changed" }).catch(() => undefined);
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url) void clearSelectionForTab(tabId);
+  if (changeInfo.url || changeInfo.title || changeInfo.status === "complete") {
+    void chrome.runtime.sendMessage({
+      type: "ui.tabs.changed",
+      reason: changeInfo.url ? "navigated" : "updated",
+      tabId,
+    }).catch(() => undefined);
   }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void clearSelectionForTab(tabId);
+  void chrome.runtime.sendMessage({ type: "ui.tabs.changed", reason: "removed", tabId }).catch(() => undefined);
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -73,7 +82,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "ui.selection.current") {
-    void currentSelection().then(sendResponse).catch(toErrorResponse(sendResponse));
+    void currentSelection(Number(message.targetTabId)).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.selection.clear") {
@@ -85,6 +94,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       String(message.task ?? ""),
       String(message.conversationId ?? ""),
       Array.isArray(message.history) ? message.history as ChatMessage[] : [],
+      Number(message.targetTabId),
       message.screenshot && typeof message.screenshot === "object" ? message.screenshot as { dataUrl?: string; title?: string; url?: string } : undefined,
     ).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
@@ -97,15 +107,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "ui.selection.start") {
-    void startSelection(message.mode === "image" ? "image" : "element").then(sendResponse).catch(toErrorResponse(sendResponse));
+    void startSelection(message.mode === "image" ? "image" : "element", Number(message.targetTabId)).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.screenshot.capture") {
-    void captureScreenshot().then(sendResponse).catch(toErrorResponse(sendResponse));
+    void captureScreenshot(Number(message.targetTabId)).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.recording.start") {
-    void startRecording().then(sendResponse).catch(toErrorResponse(sendResponse));
+    void startRecording(Number(message.targetTabId)).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.recording.stop") {
@@ -117,7 +127,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "ui.recording.replay") {
-    void replayRecording(message.actions as RecordedBrowserAction[]).then(sendResponse).catch(toErrorResponse(sendResponse));
+    void replayRecording(message.actions as RecordedBrowserAction[], Number(message.targetTabId)).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.skill.save") {
@@ -147,11 +157,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "ui.skills.list") {
-    void listPageSkills().then(sendResponse).catch(toErrorResponse(sendResponse));
+    void listPageSkills(Number(message.targetTabId)).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.repository.analyze") {
-    void analyzeRepository(message.element as InspectedElement, String(message.pageUrl ?? "")).then(sendResponse).catch(toErrorResponse(sendResponse));
+    void analyzeRepository(message.element as InspectedElement, String(message.pageUrl ?? ""), Number(message.targetTabId)).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.tabs.list") {
+    void listTargetTabs().then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.tab.activate") {
+    void activateTargetTab(Number(message.targetTabId)).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   return false;
@@ -185,6 +203,7 @@ async function handleElementSelected(message: {
       type: "ui.element.selected",
       element: message.element,
       pageUrl: message.pageUrl,
+      tabId: tab.id,
       screenshot,
     }).catch(() => undefined);
   } catch (error) {
@@ -195,8 +214,8 @@ async function handleElementSelected(message: {
   }
 }
 
-async function currentSelection() {
-  const tab = await getActiveTab();
+async function currentSelection(targetTabId: number) {
+  const tab = await getTargetTab(targetTabId);
   const stored = await chrome.storage.session.get([...SELECTION_STORAGE_KEYS]);
   if (stored.selectedElementPageUrl !== tab.url || stored.selectedElementTabId !== tab.id) {
     await chrome.storage.session.remove([...SELECTION_STORAGE_KEYS]);
@@ -209,7 +228,7 @@ async function clearSelectionForTab(tabId: number) {
   const stored = await chrome.storage.session.get(["selectedElementTabId"]);
   if (stored.selectedElementTabId !== tabId) return;
   await chrome.storage.session.remove([...SELECTION_STORAGE_KEYS]);
-  await chrome.runtime.sendMessage({ type: "ui.page.changed" }).catch(() => undefined);
+  await chrome.runtime.sendMessage({ type: "ui.selection.cleared", tabId }).catch(() => undefined);
 }
 
 function normalizeScreenshot(
@@ -227,9 +246,9 @@ function normalizeScreenshot(
   };
 }
 
-async function runTask(task: string, conversationId: string, history: ChatMessage[], screenshot?: { dataUrl?: string; title?: string; url?: string }): Promise<ServerMessage> {
+async function runTask(task: string, conversationId: string, history: ChatMessage[], targetTabId: number, screenshot?: { dataUrl?: string; title?: string; url?: string }): Promise<ServerMessage> {
   if (!task.trim()) throw new Error("Enter a task first.");
-  const tab = await getActiveTab();
+  const tab = await getTargetTab(targetTabId);
   const snapshot = await sendPageMessage<PageSnapshot>(tab.id, { type: "page.snapshot" });
   const stored = await chrome.storage.session.get([...SELECTION_STORAGE_KEYS]);
   const selectionIsCurrent = stored.selectedElementPageUrl === tab.url && stored.selectedElementTabId === tab.id;
@@ -244,6 +263,8 @@ async function runTask(task: string, conversationId: string, history: ChatMessag
     conversationId: conversationId || crypto.randomUUID(),
     history: history.slice(-20),
     snapshotId: snapshot.snapshotId,
+    tabId: tab.id,
+    pageUrl: snapshot.url,
   };
   await pendingAgentRuns.save(pendingRun);
   try {
@@ -270,28 +291,31 @@ async function runTask(task: string, conversationId: string, history: ChatMessag
   }
 }
 
-async function startSelection(mode: "element" | "image") {
-  const tab = await getActiveTab();
-  const response = await sendPageMessage(tab.id, { type: "page.selection.start", mode });
+async function startSelection(mode: "element" | "image", targetTabId: number) {
+  const tab = await getTargetTab(targetTabId);
   await chrome.tabs.update(tab.id, { active: true });
   if (typeof tab.windowId === "number") await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
-  return response;
+  return sendPageMessage(tab.id, { type: "page.selection.start", mode });
 }
 
-async function analyzeRepository(element: InspectedElement, pageUrl: string): Promise<ServerMessage> {
-  const tab = await getActiveTab();
+async function analyzeRepository(element: InspectedElement, pageUrl: string, targetTabId: number): Promise<ServerMessage> {
+  const tab = await getTargetTab(targetTabId);
+  if (tab.url !== pageUrl) throw new Error("The selected element belongs to an earlier page. Select it again.");
   const performance = await sendPageMessage<PageSnapshot["performance"]>(tab.id, { type: "page.performance" });
   return requestBridge({ id: crypto.randomUUID(), type: "repository.analyze", pageUrl, element, apiRequests: performance.apiRequests });
 }
 
-async function executePlan(plan: BrowserActionPlan) {
-  const tab = await getActiveTab();
-  return sendPageMessage(tab.id, { type: "page.actions.execute", plan });
+async function executePlan(plan: BrowserActionPlan, tabId: number) {
+  return sendPageMessage(tabId, { type: "page.actions.execute", plan });
 }
 
 async function runAgentLoop(initialPlan: BrowserActionPlan) {
   const pendingRun = await pendingAgentRuns.loadForPlan(initialPlan.snapshotId);
   try {
+    const initialTab = await getTargetTab(pendingRun.tabId);
+    if (initialTab.url !== pendingRun.pageUrl) {
+      throw new Error("The target page navigated after this plan was created. Run the task again.");
+    }
     const runId = crypto.randomUUID();
     const startedAt = Date.now();
     const maxSteps = 8;
@@ -304,8 +328,8 @@ async function runAgentLoop(initialPlan: BrowserActionPlan) {
       const step = plan.steps[0];
       if (!step) throw new Error("The agent returned an empty action plan.");
       emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: "running", step: iteration + 1, detail: step.reason }));
-      let execution = await executePlanResilient({ ...plan, steps: [step] });
-      if (!execution.snapshot) execution = { ...execution, snapshot: await readCurrentSnapshot() };
+      let execution = await executePlanResilient({ ...plan, steps: [step] }, pendingRun.tabId);
+      if (!execution.snapshot) execution = { ...execution, snapshot: await readSnapshot(pendingRun.tabId) };
       const observedSnapshot = execution.snapshot!;
       emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: execution.ok ? "success" : "failed", step: iteration + 1, detail: execution.error }));
       const verification = execution.verification;
@@ -339,21 +363,16 @@ async function runAgentLoop(initialPlan: BrowserActionPlan) {
   }
 }
 
-async function executePlanResilient(plan: BrowserActionPlan): Promise<ActionExecutionResult> {
-  try { return await executePlan(plan) as ActionExecutionResult; }
+async function executePlanResilient(plan: BrowserActionPlan, tabId: number): Promise<ActionExecutionResult> {
+  try { return await executePlan(plan, tabId) as ActionExecutionResult; }
   catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!/message port closed|receiving end does not exist|context invalidated|frame was removed/iu.test(message)) throw error;
-    await waitForActiveTabReady();
-    const snapshot = await readCurrentSnapshot();
+    await waitForTabReady(tabId);
+    const snapshot = await readSnapshot(tabId);
     const diff = { urlChanged: true, titleChanged: false, addedFingerprints: [], removedFingerprints: [], changedFingerprints: [], summary: ["The page navigated and a new document was observed."] };
     return { ok: true, results: [{ action: plan.steps[0]?.action ?? "click", ok: true }], snapshot, verification: { success: true, summary: diff.summary[0]!, changes: diff.summary, diff } };
   }
-}
-
-async function waitForActiveTabReady(timeoutMs = 8_000): Promise<void> {
-  const tab = await getActiveTab();
-  await waitForTabReady(tab.id, timeoutMs);
 }
 
 async function waitForTabReady(tabId: number, timeoutMs = 8_000): Promise<void> {
@@ -367,9 +386,9 @@ async function waitForTabReady(tabId: number, timeoutMs = 8_000): Promise<void> 
   });
 }
 
-async function readCurrentSnapshot(): Promise<PageSnapshot> {
-  const tab = await getActiveTab();
-  return sendPageMessage<PageSnapshot>(tab.id, { type: "page.snapshot" });
+async function readSnapshot(tabId: number): Promise<PageSnapshot> {
+  await getTargetTab(tabId);
+  return sendPageMessage<PageSnapshot>(tabId, { type: "page.snapshot" });
 }
 
 function emitUiEvent(event: AgentEvent) {
@@ -380,13 +399,14 @@ function createEvent(event: AgentEventInput): AgentEvent {
   return { ...event, id: crypto.randomUUID(), timestamp: new Date().toISOString() } as AgentEvent;
 }
 
-async function listPageSkills(): Promise<ServerMessage> {
-  const tab = await getActiveTab();
+async function listPageSkills(targetTabId: number): Promise<ServerMessage> {
+  const tab = await getTargetTab(targetTabId);
   return requestBridge({ id: crypto.randomUUID(), type: "skill.list", pageUrl: tab.url!, pageTitle: tab.title ?? "" });
 }
 
-async function captureScreenshot() {
-  const tab = await getActiveTab();
+async function captureScreenshot(targetTabId: number) {
+  const tab = await getTargetTab(targetTabId);
+  await activateTargetTab(tab.id);
   const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 82 });
   if (dataUrl.length > MAX_SCREENSHOT_DATA_URL_LENGTH) {
     throw new Error("The viewport screenshot is too large. Reduce the window size or display scale and try again.");
@@ -442,8 +462,8 @@ async function blobToDataUrl(blob: Blob) {
   return `data:${blob.type};base64,${btoa(binary)}`;
 }
 
-async function startRecording() {
-  const tab = await getActiveTab();
+async function startRecording(targetTabId: number) {
+  const tab = await getTargetTab(targetTabId);
   const state: RecordingState = { active: true, tabId: tab.id, startedAt: Date.now(), startUrl: tab.url!, actions: [] };
   await chrome.storage.session.set({ [RECORDING_KEY]: state });
   await sendPageMessage(tab.id, { type: "page.recording.start" });
@@ -459,10 +479,10 @@ async function stopRecording() {
   return stopped;
 }
 
-async function replayRecording(actions: RecordedBrowserAction[]) {
+async function replayRecording(actions: RecordedBrowserAction[], targetTabId: number) {
   if (!Array.isArray(actions) || !actions.length) throw new Error("There are no recorded actions to replay.");
   if (actions.length > 100) throw new Error("At most 100 actions can be replayed.");
-  const tab = await getActiveTab();
+  const tab = await getTargetTab(targetTabId);
   return sendPageMessage(tab.id, { type: "page.recording.replay", actions });
 }
 
@@ -505,6 +525,48 @@ async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number }> {
     throw new Error("Open an http(s) page before running the agent.");
   }
   return tab as chrome.tabs.Tab & { id: number };
+}
+
+async function getTargetTab(tabId: number): Promise<chrome.tabs.Tab & { id: number }> {
+  if (!Number.isInteger(tabId) || tabId < 0) throw new Error("Choose a target page before running the agent.");
+  let tab: chrome.tabs.Tab;
+  try { tab = await chrome.tabs.get(tabId); }
+  catch { throw new Error("The target page was closed. Choose another tab."); }
+  if (typeof tab.id !== "number" || !/^https?:/u.test(tab.url ?? "")) {
+    throw new Error("The target must be an open http(s) page.");
+  }
+  return tab as chrome.tabs.Tab & { id: number };
+}
+
+async function listTargetTabs(): Promise<{ tabs: BrowserTabTarget[]; activeTabId?: number }> {
+  const [tabs, activeTab] = await Promise.all([
+    chrome.tabs.query({}),
+    getActiveTab().catch(() => undefined),
+  ]);
+  return {
+    tabs: tabs
+      .filter((tab): tab is chrome.tabs.Tab & { id: number } => typeof tab.id === "number" && /^https?:/u.test(tab.url ?? ""))
+      .map(toBrowserTabTarget),
+    ...(activeTab ? { activeTabId: activeTab.id } : {}),
+  };
+}
+
+function toBrowserTabTarget(tab: chrome.tabs.Tab & { id: number }): BrowserTabTarget {
+  return {
+    tabId: tab.id,
+    windowId: tab.windowId,
+    title: tab.title || new URL(tab.url!).hostname,
+    url: tab.url!,
+    ...(tab.favIconUrl ? { favIconUrl: tab.favIconUrl } : {}),
+    active: Boolean(tab.active),
+  };
+}
+
+async function activateTargetTab(targetTabId: number): Promise<{ ok: true }> {
+  const tab = await getTargetTab(targetTabId);
+  await chrome.tabs.update(tab.id, { active: true });
+  await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
+  return { ok: true };
 }
 
 async function sendPageMessage<T = unknown>(tabId: number, message: unknown): Promise<T> {

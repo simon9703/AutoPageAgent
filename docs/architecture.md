@@ -14,8 +14,8 @@ The MVP implements the browser-page domain, lightweight performance evidence, lo
 
 ### Chrome extension
 
-- **Side Panel** is a React + Tailwind interface with icon-first page tools, modal Skill/recording management, a fixed composer, and an adjacent action-approval card.
-- **Background service worker** owns the localhost connection and routes messages to the active tab.
+- **Side Panel** is a React + Tailwind interface with a conversation-bound target-tab selector, icon-first page tools, modal Skill/recording management, a fixed composer, and an adjacent action-approval card.
+- **Background service worker** owns the localhost connection and routes messages to explicit target tab ids.
 - **Content script** creates a bounded snapshot and executes approved actions.
 - **Element picker** captures source metadata and stable textual/attribute clues for repository analysis.
 - **Screenshot capture** uses `captureVisibleTab`, keeps the JPEG data URL inside the extension, and attaches it only when the user sends a message while the preview is selected.
@@ -24,6 +24,19 @@ The MVP implements the browser-page domain, lightweight performance evidence, lo
 The snapshot contains page metadata, selected text, a limited body-text extraction, headings, at most 160 interactive elements near the viewport, a Page Agent-inspired simplified DOM, page/scroll geometry, and at most 100 resource timing entries. DOM nodes remain inside the content script and are represented externally by ephemeral refs. Candidate elements are bounded to a 700-pixel expansion around the viewport and checked against the browser's top-layer hit target before inclusion.
 
 The side panel can attach one inspected element, page image, or captured viewport to the current conversation. The Responses provider sends the selected visual as an image input. Local Codex receives the selected element or screenshot metadata, but screenshot data URLs are removed from its text prompt. Removing the context chip clears the background-owned selection as well.
+
+### Conversation and tab lifecycle
+
+A conversation binds to the HTTP(S) tab that was active when the conversation was created. Browser focus and agent routing are separate:
+
+- changing the browser's active tab only updates the side panel's viewing indicator;
+- questions, Skills, repository analysis, recording, and DOM actions continue to use the conversation target;
+- the target selector is the explicit way to rebind the conversation;
+- a target change requested while an agent run or approval is pending is queued for the next task;
+- selection and screenshot commands activate the target because they depend on a visible page;
+- closing the target leaves the conversation intact but requires choosing another page.
+
+Every planned run persists its `tabId`, initial page URL, and snapshot id. The confirmed observe-act-verify loop reuses that immutable `tabId` for every action, navigation recovery, observation, and verification step. It never falls back to the currently active browser tab.
 
 ### Local bridge
 

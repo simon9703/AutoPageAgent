@@ -2,7 +2,7 @@
 
 ## Project summary
 
-Auto Page Agent is a local-first Chrome MV3 side-panel agent. It observes the active page, asks either local Codex or the OpenAI Responses API for a constrained decision, and executes only explicit, reviewable browser actions. The current implementation includes the V2 observe-plan-act-verify runtime and the V3 local Skill Marketplace/Registry.
+Auto Page Agent is a local-first Chrome MV3 side-panel agent. It observes the conversation's explicitly selected target page, asks either local Codex or the OpenAI Responses API for a constrained decision, and executes only explicit, reviewable browser actions. The current implementation includes the V2 observe-plan-act-verify runtime and the V3 local Skill Marketplace/Registry.
 
 The product is intentionally split into three trust zones:
 
@@ -21,7 +21,7 @@ Read `README.md` for usage, `docs/architecture.md` for component boundaries, `do
 - `packages/bridge/src/codex-app-server.ts`: Codex app-server JSON-RPC adapter.
 - `packages/bridge/src/skills.ts`: Marketplace, local Registry, page matching, selection, migration, and persistence.
 - `packages/bridge/src/repositories.ts`: bounded local `rg` evidence search.
-- `packages/extension/src/background.ts`: extension-to-bridge transport and active-tab routing.
+- `packages/extension/src/background.ts`: extension-to-bridge transport and target-tab routing.
 - `packages/extension/src/content.ts`: compact DOM snapshots, recorder, constrained actions, verification, and visual pointer.
 - `packages/extension/src/sidepanel.ts`: conversation, approval, timeline, picker, recorder, and Skill Registry UI.
 - `skills/*`: bundled Marketplace templates. These are distribution assets, not user data.

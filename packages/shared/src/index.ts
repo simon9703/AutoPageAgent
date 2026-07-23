@@ -133,6 +133,15 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+export interface BrowserTabTarget {
+  tabId: number;
+  windowId: number;
+  title: string;
+  url: string;
+  favIconUrl?: string;
+  active: boolean;
+}
+
 export interface PageInfoSnapshot {
   viewportWidth: number;
   viewportHeight: number;

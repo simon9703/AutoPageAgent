@@ -7,6 +7,8 @@ export interface PendingAgentRun {
   conversationId: string;
   history: ChatMessage[];
   snapshotId: string;
+  tabId: number;
+  pageUrl: string;
 }
 
 export interface SessionStorageArea {
@@ -78,12 +80,19 @@ function parsePendingAgentRun(value: unknown): PendingAgentRun | null {
     typeof candidate.task !== "string"
     || typeof candidate.conversationId !== "string"
     || typeof candidate.snapshotId !== "string"
+    || typeof candidate.tabId !== "number"
+    || !Number.isInteger(candidate.tabId)
+    || candidate.tabId < 0
+    || typeof candidate.pageUrl !== "string"
+    || !/^https?:\/\//u.test(candidate.pageUrl)
     || !Array.isArray(candidate.history)
   ) return null;
   return {
     task: candidate.task,
     conversationId: candidate.conversationId,
     snapshotId: candidate.snapshotId,
+    tabId: candidate.tabId,
+    pageUrl: candidate.pageUrl,
     history: candidate.history,
   };
 }

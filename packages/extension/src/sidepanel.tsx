@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Bot, Camera, Check, ChevronDown, CircleStop, Code2, Copy, Image,
-  LoaderCircle, MousePointer2, Play, Plus, RefreshCw, Send, Sparkles,
-  SquarePen, WandSparkles, X,
+  ExternalLink, Globe2, LoaderCircle, MousePointer2, Play, Plus, RefreshCw,
+  Send, Sparkles, SquarePen, WandSparkles, X,
 } from "lucide-react";
 import type {
-  AgentEvent, AutomationSkillDraft, BrowserActionPlan, ChatMessage,
+  AgentEvent, AutomationSkillDraft, BrowserActionPlan, BrowserTabTarget, ChatMessage,
   EditableAutomationSkill, InspectedElement, PageSkillSummary,
   RecordedBrowserAction, RepositoryAnalysis, ServerMessage, SkillCatalogItem,
 } from "@auto-page-agent/shared";
@@ -38,14 +38,21 @@ function App() {
   const [skillName, setSkillName] = useState("");
   const [skillDescription, setSkillDescription] = useState("");
   const [editingSkillSlug, setEditingSkillSlug] = useState("");
+  const [tabs, setTabs] = useState<BrowserTabTarget[]>([]);
+  const [targetTab, setTargetTab] = useState<BrowserTabTarget | null>(null);
+  const [activeTabId, setActiveTabId] = useState<number | null>(null);
+  const [targetPickerOpen, setTargetPickerOpen] = useState(false);
+  const [queuedTarget, setQueuedTarget] = useState<BrowserTabTarget | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const targetTabRef = useRef<BrowserTabTarget | null>(null);
+  const busyRef = useRef(false);
 
   useEffect(() => {
-    void Promise.all([restoreConversation(), refreshHealth(), restoreSelection(), restoreRecording(), refreshSkills()]);
+    void initialize();
     const listener = (message: unknown) => {
-      const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; screenshot?: { dataUrl: string; title: string; url: string }; reason?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent };
-      if (value.type === "ui.element.selected" && value.element) {
+      const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; tabId?: number; screenshot?: { dataUrl: string; title: string; url: string }; reason?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent };
+      if (value.type === "ui.element.selected" && value.element && value.tabId === targetTabRef.current?.tabId) {
         setSelected({ element: value.element, pageUrl: value.pageUrl ?? "" });
         setScreenshot(value.screenshot ?? null);
         setSelectionMode(null);
@@ -58,11 +65,18 @@ function App() {
         setNotice(value.reason || "Selection cancelled.");
       }
       if (value.type === "ui.recording.updated") setRecordedActions(value.actions ?? []);
-      if (value.type === "ui.page.changed") {
+      if (value.type === "ui.selection.cleared" && value.tabId === targetTabRef.current?.tabId) {
         setSelected(null);
         setScreenshot(null);
         setSelectionMode(null);
-        void refreshSkills();
+      }
+      if (value.type === "ui.tabs.changed") {
+        if (value.reason === "navigated" && value.tabId === targetTabRef.current?.tabId && !busyRef.current) {
+          setPendingPlan(null);
+          setSelected(null);
+          setScreenshot(null);
+        }
+        void refreshTabs();
       }
       if (value.type === "ui.agent.event" && value.event) appendEvent(value.event);
     };
@@ -71,15 +85,50 @@ function App() {
   }, []);
 
   useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" }); }, [messages, pendingPlan]);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
+  useEffect(() => {
+    if (!busy && !pendingPlan && !recording && queuedTarget) {
+      setQueuedTarget(null);
+      void switchTargetNow(queuedTarget);
+    }
+  }, [busy, pendingPlan, queuedTarget, recording]);
 
-  async function restoreConversation() {
-    const stored = await chrome.storage.session.get(["conversationId", "chatMessages"]);
-    setConversationId(typeof stored.conversationId === "string" ? stored.conversationId : crypto.randomUUID());
+  async function initialize() {
+    const [stored, tabState] = await Promise.all([
+      chrome.storage.session.get(["conversationId", "chatMessages", "conversationTargetTabId"]),
+      chrome.runtime.sendMessage({ type: "ui.tabs.list" }) as Promise<{ tabs?: BrowserTabTarget[]; activeTabId?: number }>,
+    ]);
+    const availableTabs = tabState.tabs ?? [];
+    const storedTargetId = typeof stored.conversationTargetTabId === "number" ? stored.conversationTargetTabId : undefined;
+    const initialTarget = availableTabs.find((tab) => tab.tabId === storedTargetId)
+      ?? availableTabs.find((tab) => tab.tabId === tabState.activeTabId)
+      ?? availableTabs[0]
+      ?? null;
+    const initialConversationId = typeof stored.conversationId === "string" ? stored.conversationId : crypto.randomUUID();
+    setConversationId(initialConversationId);
     setMessages(Array.isArray(stored.chatMessages) ? (stored.chatMessages as ChatMessage[]).slice(-40) : []);
+    setTabs(availableTabs);
+    setActiveTabId(tabState.activeTabId ?? null);
+    setTargetTabValue(initialTarget);
+    await chrome.storage.session.set({
+      conversationId: initialConversationId,
+      ...(initialTarget ? { conversationTargetTabId: initialTarget.tabId } : {}),
+    });
+    await Promise.all([
+      refreshHealth(),
+      initialTarget ? restoreSelection(initialTarget.tabId) : Promise.resolve(),
+      restoreRecording(),
+      refreshSkills(initialTarget?.tabId),
+    ]);
+    if (!initialTarget) setNotice("Open an http(s) page, then choose it as the target.");
   }
 
-  async function persistConversation(id: string, next: ChatMessage[]) {
-    await chrome.storage.session.set({ conversationId: id, chatMessages: next.slice(-40) });
+  async function persistConversation(id: string, next: ChatMessage[], targetTabId = targetTabRef.current?.tabId) {
+    await chrome.storage.session.set({
+      conversationId: id,
+      chatMessages: next.slice(-40),
+      ...(typeof targetTabId === "number" ? { conversationTargetTabId: targetTabId } : {}),
+    });
   }
 
   function appendMessage(role: ChatMessage["role"], content: string) {
@@ -107,8 +156,8 @@ function App() {
     } catch { setHealth(null); }
   }
 
-  async function restoreSelection() {
-    const stored = await chrome.runtime.sendMessage({ type: "ui.selection.current" }) as { selectedElement?: InspectedElement; selectedElementPageUrl?: string; selectedElementScreenshot?: { dataUrl: string; title: string; url: string } };
+  async function restoreSelection(targetTabId: number) {
+    const stored = await chrome.runtime.sendMessage({ type: "ui.selection.current", targetTabId }) as { selectedElement?: InspectedElement; selectedElementPageUrl?: string; selectedElementScreenshot?: { dataUrl: string; title: string; url: string } };
     if (stored.selectedElement) setSelected({ element: stored.selectedElement, pageUrl: stored.selectedElementPageUrl ?? "" });
     if (stored.selectedElementScreenshot) setScreenshot(stored.selectedElementScreenshot);
   }
@@ -120,17 +169,69 @@ function App() {
     setRecordedActions(state.actions ?? []);
   }
 
-  async function refreshSkills() {
+  async function refreshSkills(targetTabId = targetTabRef.current?.tabId) {
     const [pageResponse, catalogResponse] = await Promise.all([
-      chrome.runtime.sendMessage({ type: "ui.skills.list" }) as Promise<ServerMessage>,
+      typeof targetTabId === "number"
+        ? chrome.runtime.sendMessage({ type: "ui.skills.list", targetTabId }) as Promise<ServerMessage>
+        : Promise.resolve(undefined),
       chrome.runtime.sendMessage({ type: "ui.skills.catalog" }) as Promise<ServerMessage>,
-    ]).catch(() => [] as unknown as [ServerMessage, ServerMessage]);
+    ]).catch(() => [] as unknown as [ServerMessage | undefined, ServerMessage]);
     if (pageResponse?.type === "skill.list.result") {
       setPageSkills(pageResponse.skills);
       try { setSkillScope(`${new URL(pageResponse.pageUrl).hostname} · ${pageResponse.skills.length} available`); }
       catch { setSkillScope(`${pageResponse.skills.length} available`); }
     }
     if (catalogResponse?.type === "skill.catalog.result") setCatalog({ installed: catalogResponse.installed, marketplace: catalogResponse.marketplace });
+  }
+
+  async function refreshTabs() {
+    const response = await chrome.runtime.sendMessage({ type: "ui.tabs.list" }) as { tabs?: BrowserTabTarget[]; activeTabId?: number };
+    const availableTabs = response.tabs ?? [];
+    setTabs(availableTabs);
+    setActiveTabId(response.activeTabId ?? null);
+    const current = targetTabRef.current;
+    if (!current) return;
+    const refreshed = availableTabs.find((tab) => tab.tabId === current.tabId) ?? null;
+    setTargetTabValue(refreshed);
+    if (!refreshed) {
+      setPendingPlan(null);
+      setNotice("The target page was closed. Choose another tab.");
+      return;
+    }
+    if (refreshed.url !== current.url) void refreshSkills(refreshed.tabId);
+  }
+
+  function setTargetTabValue(tab: BrowserTabTarget | null) {
+    targetTabRef.current = tab;
+    setTargetTab(tab);
+  }
+
+  async function chooseTarget(tab: BrowserTabTarget) {
+    setTargetPickerOpen(false);
+    if (tab.tabId === targetTabRef.current?.tabId) return;
+    if (busy || pendingPlan || recording) {
+      setQueuedTarget(tab);
+      setNotice(recording
+        ? "Target change queued. Stop recording before switching pages."
+        : "Target change queued. The current task will finish on its original page.");
+      return;
+    }
+    await switchTargetNow(tab);
+  }
+
+  async function switchTargetNow(tab: BrowserTabTarget) {
+    const previous = targetTabRef.current;
+    setTargetTabValue(tab);
+    setSelected(null);
+    setScreenshot(null);
+    setSelectionMode(null);
+    setPendingPlan(null);
+    await Promise.all([
+      chrome.storage.session.set({ conversationTargetTabId: tab.tabId }),
+      chrome.runtime.sendMessage({ type: "ui.selection.clear" }).catch(() => undefined),
+    ]);
+    await Promise.all([restoreSelection(tab.tabId), refreshSkills(tab.tabId)]);
+    setNotice(previous ? `Target changed to ${tab.title}.` : `Target set to ${tab.title}.`);
   }
 
   async function newConversation() {
@@ -143,16 +244,21 @@ function App() {
     setSelected(null);
     setScreenshot(null);
     setPrompt("");
-    setNotice("New conversation. Current-page context was reset.");
+    const activeTarget = tabs.find((tab) => tab.tabId === activeTabId) ?? targetTabRef.current;
+    if (activeTarget) setTargetTabValue(activeTarget);
+    setQueuedTarget(null);
+    setNotice("New conversation. Bound to the page you are viewing now.");
     await chrome.runtime.sendMessage({ type: "ui.conversation.reset", conversationId: oldId }).catch(() => undefined);
-    await persistConversation(nextId, []);
+    await persistConversation(nextId, [], activeTarget?.tabId);
+    if (activeTarget) await refreshSkills(activeTarget.tabId);
     inputRef.current?.focus();
   }
 
   async function startSelection(mode: "element" | "image") {
+    if (!targetTab) return setNotice("Choose a target page first.");
     setSelectionMode(mode);
     setNotice(mode === "image" ? "Click any visible element to capture it · Esc to cancel" : "Click any element on the page · Esc to cancel");
-    const response = await chrome.runtime.sendMessage({ type: "ui.selection.start", mode }) as { ok?: boolean; error?: string };
+    const response = await chrome.runtime.sendMessage({ type: "ui.selection.start", mode, targetTabId: targetTab.tabId }) as { ok?: boolean; error?: string };
     if (!response?.ok) {
       setSelectionMode(null);
       setNotice(`Selection failed: ${response?.error ?? "Open an http(s) page and reload the extension."}`);
@@ -160,8 +266,9 @@ function App() {
   }
 
   async function captureScreenshot() {
+    if (!targetTab) return setNotice("Choose a target page first.");
     setNotice("Capturing the visible page…");
-    const response = await chrome.runtime.sendMessage({ type: "ui.screenshot.capture" }) as { ok?: boolean; dataUrl?: string; title?: string; url?: string; error?: string };
+    const response = await chrome.runtime.sendMessage({ type: "ui.screenshot.capture", targetTabId: targetTab.tabId }) as { ok?: boolean; dataUrl?: string; title?: string; url?: string; error?: string };
     if (!response.ok || !response.dataUrl) return setNotice(`Screenshot failed: ${response.error ?? "Unknown error"}`);
     setScreenshot({ dataUrl: response.dataUrl, title: response.title || "Current page", url: response.url || "" });
     setNotice("Screenshot captured locally.");
@@ -177,6 +284,7 @@ function App() {
     event?.preventDefault();
     const text = prompt.trim();
     if (!text || busy) return;
+    if (!targetTab) return setNotice("Choose a target page first.");
     const history = messages.slice(-20);
     setEvents([]);
     appendMessage("user", text);
@@ -186,7 +294,7 @@ function App() {
     setNotice("Reading the current page and planning…");
     try {
       const response = await chrome.runtime.sendMessage({
-        type: "ui.run", task: text, conversationId, history,
+        type: "ui.run", task: text, conversationId, history, targetTabId: targetTab.tabId,
         ...(screenshot ? { screenshot: { dataUrl: screenshot.dataUrl, title: screenshot.title, url: screenshot.url } } : {}),
       }) as ServerMessage;
       if (response.type === "agent.error") throw new Error(response.error);
@@ -226,9 +334,9 @@ function App() {
   }
 
   async function analyzeCode() {
-    if (!selected) return;
+    if (!selected || !targetTab) return;
     setNotice("Searching configured repositories…");
-    const response = await chrome.runtime.sendMessage({ type: "ui.repository.analyze", element: selected.element, pageUrl: selected.pageUrl }) as ServerMessage;
+    const response = await chrome.runtime.sendMessage({ type: "ui.repository.analyze", element: selected.element, pageUrl: selected.pageUrl, targetTabId: targetTab.tabId }) as ServerMessage;
     if (response.type === "agent.error") return setNotice(response.error);
     if (response.type !== "repository.result") return setNotice("Unexpected repository response.");
     appendMessage("assistant", formatRepositoryAnalysis(response.analysis));
@@ -270,7 +378,8 @@ function App() {
   }
 
   async function toggleRecording() {
-    const response = await chrome.runtime.sendMessage({ type: recording ? "ui.recording.stop" : "ui.recording.start" }) as { active?: boolean; startUrl?: string; actions?: RecordedBrowserAction[]; error?: string };
+    if (!recording && !targetTab) return setNotice("Choose a target page first.");
+    const response = await chrome.runtime.sendMessage({ type: recording ? "ui.recording.stop" : "ui.recording.start", targetTabId: targetTab?.tabId }) as { active?: boolean; startUrl?: string; actions?: RecordedBrowserAction[]; error?: string };
     if (response.error) return setNotice(response.error);
     const active = !recording;
     setRecording(active);
@@ -282,8 +391,9 @@ function App() {
   }
 
   async function replayRecording() {
+    if (!targetTab) return setNotice("Choose a target page first.");
     if (!recordedActions.length || !confirm(`Replay ${recordedActions.length} action(s) on the current page?`)) return;
-    const response = await chrome.runtime.sendMessage({ type: "ui.recording.replay", actions: recordedActions }) as { ok?: boolean; error?: string };
+    const response = await chrome.runtime.sendMessage({ type: "ui.recording.replay", actions: recordedActions, targetTabId: targetTab.tabId }) as { ok?: boolean; error?: string };
     setNotice(response.ok ? "Workflow replay completed." : response.error ?? "Replay failed.");
   }
 
@@ -315,6 +425,19 @@ function App() {
           <IconButton label="New conversation" onClick={() => void newConversation()}><SquarePen size={17} /></IconButton>
         </div>
       </header>
+
+      <TargetTabBar
+        target={targetTab}
+        tabs={tabs}
+        activeTabId={activeTabId}
+        open={targetPickerOpen}
+        queued={queuedTarget}
+        onToggle={() => setTargetPickerOpen((current) => !current)}
+        onChoose={(tab) => void chooseTarget(tab)}
+        onActivate={() => {
+          if (targetTab) void chrome.runtime.sendMessage({ type: "ui.tab.activate", targetTabId: targetTab.tabId });
+        }}
+      />
 
       <nav className="flex shrink-0 items-center justify-between border-b border-slate-200/70 bg-white px-3 py-2" aria-label="Page tools">
         <div className="flex items-center gap-1">
@@ -354,6 +477,46 @@ function App() {
       {modal === "skills" ? <SkillsModal view={skillView} setView={setSkillView} scope={skillScope} items={activeSkills} onClose={() => setModal(null)} onRefresh={() => void refreshSkills()} onUse={chooseSkill} onInstall={(slug, update) => void installSkill(slug, update)} onToggle={(slug, enabled) => void configureSkill(slug, enabled)} onEdit={(slug) => void editSkill(slug)} /> : null}
       {modal === "recording" ? <RecordingModal active={recording} actions={recordedActions} name={skillName} description={skillDescription} editing={Boolean(editingSkillSlug)} onName={setSkillName} onDescription={setSkillDescription} onClose={() => setModal(null)} onToggle={() => void toggleRecording()} onReplay={() => void replayRecording()} onSave={() => void saveSkill()} /> : null}
     </main>
+  );
+}
+
+function TargetTabBar(props: {
+  target: BrowserTabTarget | null;
+  tabs: BrowserTabTarget[];
+  activeTabId: number | null;
+  open: boolean;
+  queued: BrowserTabTarget | null;
+  onToggle: () => void;
+  onChoose: (tab: BrowserTabTarget) => void;
+  onActivate: () => void;
+}) {
+  const targetVisible = props.target?.tabId === props.activeTabId;
+  return (
+    <section className="relative shrink-0 border-b border-slate-200/70 bg-white px-3 py-2">
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={props.onToggle} className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 px-2.5 py-2 text-left transition hover:border-violet-200 hover:bg-violet-50/40" aria-expanded={props.open}>
+          {props.target?.favIconUrl ? <img src={props.target.favIconUrl} className="h-4 w-4 shrink-0 rounded-sm" alt="" /> : <Globe2 size={16} className="shrink-0 text-slate-400" />}
+          <span className="min-w-0 flex-1">
+            <strong className="block truncate text-[11px] font-medium">{props.target?.title ?? "Choose target page"}</strong>
+            <span className="block truncate text-[9px] text-slate-400">{props.target ? hostname(props.target.url) : "No http(s) tab selected"}</span>
+          </span>
+          <ChevronDown size={14} className={`shrink-0 text-slate-400 transition ${props.open ? "rotate-180" : ""}`} />
+        </button>
+        {props.target && !targetVisible ? <button type="button" onClick={props.onActivate} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700" title="Switch to target page" aria-label="Switch to target page"><ExternalLink size={15} /></button> : null}
+      </div>
+      {props.queued ? <p className="mt-1.5 truncate px-1 text-[9px] text-amber-600">Next target: {props.queued.title}</p> : !targetVisible && props.target ? <p className="mt-1.5 truncate px-1 text-[9px] text-slate-400">You are viewing another tab. The agent remains bound here.</p> : null}
+      {props.open ? (
+        <div className="absolute left-3 right-3 top-[calc(100%-2px)] z-40 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl">
+          {props.tabs.length ? props.tabs.map((tab) => (
+            <button key={tab.tabId} type="button" onClick={() => props.onChoose(tab)} className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left hover:bg-slate-50">
+              {tab.favIconUrl ? <img src={tab.favIconUrl} className="h-4 w-4 shrink-0 rounded-sm" alt="" /> : <Globe2 size={15} className="shrink-0 text-slate-400" />}
+              <span className="min-w-0 flex-1"><strong className="block truncate text-[11px] font-medium">{tab.title}</strong><span className="block truncate text-[9px] text-slate-400">{hostname(tab.url)}{tab.tabId === props.activeTabId ? " · viewing" : ""}</span></span>
+              {tab.tabId === props.target?.tabId ? <Check size={14} className="shrink-0 text-violet-600" /> : null}
+            </button>
+          )) : <p className="px-3 py-5 text-center text-[11px] text-slate-400">No open http(s) pages.</p>}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -425,5 +588,6 @@ function formatRepositoryAnalysis(analysis: RepositoryAnalysis) {
 }
 
 function defaultSkillName(url: string) { try { return `${new URL(url).hostname} workflow`; } catch { return "Recorded browser workflow"; } }
+function hostname(url: string) { try { return new URL(url).hostname; } catch { return url; } }
 
 createRoot(document.querySelector("#root")!).render(<App />);

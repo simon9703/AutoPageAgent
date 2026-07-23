@@ -57,6 +57,8 @@ Goal: upgrade from single action execution to a reliable observe-plan-act-verify
 - [x] Real-time action status
 - [x] Enhanced AI cursor / target overlay
 - [x] Action explanation labels
+- [x] Conversation-bound target tab selector
+- [x] Continue a fixed-tab Agent Run while the user views another tab
 - [ ] Step-by-step execution replay
 
 ### Page Understanding
@@ -148,7 +150,8 @@ Goal: upgrade from single action execution to a reliable observe-plan-act-verify
 - [ ] declarative required tools and permissions
 - [ ] step-specific confirmation policies
 - [ ] versioned team Skill registry
-- [ ] tab discovery by URL/title/page fingerprint
+- [x] manual tab discovery and selection by URL/title
+- [ ] automatic tab discovery by URL/title/page fingerprint
 - [ ] cross-tab workflows
 - [ ] failure recovery and selector/ref regeneration
 - [ ] workflow success-rate and failed-step metrics
