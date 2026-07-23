@@ -79,6 +79,25 @@ test("Responses API provider sends selected images and parses structured output"
   assert.equal(requestBody?.model, "test-model");
 });
 
+test("Responses API provider sends a selected viewport screenshot without embedding it in the text prompt", async () => {
+  let requestBody = "";
+  const provider = new OpenAIResponsesProvider({
+    apiKey: "test-key",
+    fetchImpl: (async (_input, init) => {
+      requestBody = String(init?.body);
+      return new Response(JSON.stringify({ output_text: '{"kind":"answer","content":"screenshot understood"}' }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch,
+  });
+  const screenshotData = "data:image/jpeg;base64,c2NyZWVuc2hvdA==";
+  const decision = await provider.run("Describe the screenshot", { ...snapshot, context: { screenshot: { dataUrl: screenshotData, title: "Viewport", url: snapshot.url } } }, { conversationId: "screenshot-1", history: [] });
+  assert.deepEqual(decision, { kind: "answer", content: "screenshot understood" });
+  const request = JSON.parse(requestBody) as { input: Array<{ content: Array<Record<string, unknown>> }> };
+  assert.equal(request.input[0]?.content.some((item) => item.type === "input_image" && item.image_url === screenshotData), true);
+  const text = String(request.input[0]?.content.find((item) => item.type === "input_text")?.text ?? "");
+  assert.doesNotMatch(text, /c2NyZWVuc2hvdA/u);
+  assert.match(text, /Viewport/u);
+});
+
 test("Responses API provider chains turns by conversation", async () => {
   const bodies: Array<Record<string, unknown>> = [];
   let call = 0;

@@ -12,7 +12,7 @@ A lightweight Chrome side-panel agent that understands the current page, analyze
 - Connect to local `codex app-server` without storing API keys in extension storage.
 - Load simple reusable workflows from `skills/*/SKILL.md`.
 - Pick any page element and search configured local repositories for source, symbol, text, and API evidence.
-- Capture the current viewport locally and preview it in the side panel.
+- Capture the current viewport locally, preview it in the side panel, and explicitly attach it to the next Responses API message.
 - Record current-tab clicks, form changes, submits, and scroll positions; test replay after confirmation.
 - Save a recording as a reusable `SKILL.md` plus declarative `workflow.json` with runtime variables.
 - Discover a page-specific Skill function list in the side panel and refresh it automatically on tab/navigation changes.

@@ -70,7 +70,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "ui.run") {
-    void runTask(String(message.task ?? ""), String(message.conversationId ?? ""), Array.isArray(message.history) ? message.history as ChatMessage[] : []).then(sendResponse).catch(toErrorResponse(sendResponse));
+    void runTask(
+      String(message.task ?? ""),
+      String(message.conversationId ?? ""),
+      Array.isArray(message.history) ? message.history as ChatMessage[] : [],
+      message.screenshot && typeof message.screenshot === "object" ? message.screenshot as { dataUrl?: string; title?: string; url?: string } : undefined,
+    ).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.execute") {
@@ -141,12 +146,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-async function runTask(task: string, conversationId: string, history: ChatMessage[]): Promise<ServerMessage> {
+async function runTask(task: string, conversationId: string, history: ChatMessage[], screenshot?: { dataUrl?: string; title?: string; url?: string }): Promise<ServerMessage> {
   if (!task.trim()) throw new Error("Enter a task first.");
   const tab = await getActiveTab();
   const snapshot = await chrome.tabs.sendMessage(tab.id, { type: "page.snapshot" }) as PageSnapshot;
   const stored = await chrome.storage.session.get(["selectedElement", "selectedElementPageUrl"]);
-  if (stored.selectedElement && stored.selectedElementPageUrl === tab.url) snapshot.context = { selectedElement: stored.selectedElement as InspectedElement };
+  const selectedElement = stored.selectedElement && stored.selectedElementPageUrl === tab.url ? stored.selectedElement as InspectedElement : undefined;
+  const selectedScreenshot = screenshot?.dataUrl?.startsWith("data:image/")
+    ? { dataUrl: screenshot.dataUrl.slice(0, 1_900_000), title: String(screenshot.title ?? "Current viewport").slice(0, 300), url: String(screenshot.url ?? tab.url ?? "").slice(0, 2_000) }
+    : undefined;
+  if (selectedElement || selectedScreenshot) snapshot.context = { ...(selectedElement ? { selectedElement } : {}), ...(selectedScreenshot ? { screenshot: selectedScreenshot } : {}) };
   pendingAgentRun = { task, conversationId: conversationId || crypto.randomUUID(), history: history.slice(-20) };
   return requestBridge({ id: crypto.randomUUID(), type: "agent.run", task, snapshot, conversationId: pendingAgentRun.conversationId, history: pendingAgentRun.history }, emitUiEvent);
 }

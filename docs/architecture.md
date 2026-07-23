@@ -18,12 +18,12 @@ The MVP implements the browser-page domain, lightweight performance evidence, lo
 - **Background service worker** owns the localhost connection and routes messages to the active tab.
 - **Content script** creates a bounded snapshot and executes approved actions.
 - **Element picker** captures source metadata and stable textual/attribute clues for repository analysis.
-- **Screenshot capture** uses `captureVisibleTab` and keeps the JPEG data URL inside the extension side panel.
+- **Screenshot capture** uses `captureVisibleTab`, keeps the JPEG data URL inside the extension, and attaches it only when the user sends a message while the preview is selected.
 - **Workflow recorder** captures bounded declarative actions in Chrome session storage and never records sensitive values.
 
 The snapshot contains page metadata, selected text, a limited body-text extraction, headings, at most 160 interactive elements near the viewport, a Page Agent-inspired simplified DOM, page/scroll geometry, and at most 100 resource timing entries. DOM nodes remain inside the content script and are represented externally by ephemeral refs. Candidate elements are bounded to a 700-pixel expansion around the viewport and checked against the browser's top-layer hit target before inclusion.
 
-The side panel can attach one inspected element or image to the current conversation. A selected image remains local metadata for the local Codex prompt; the Responses provider can additionally send a public HTTP(S) or `data:image` source as an image input. Normal screenshots remain local previews and are not uploaded automatically.
+The side panel can attach one inspected element, page image, or captured viewport to the current conversation. The Responses provider sends the selected visual as an image input. Local Codex receives the selected element or screenshot metadata, but screenshot data URLs are removed from its text prompt. Removing the context chip clears the background-owned selection as well.
 
 ### Local bridge
 

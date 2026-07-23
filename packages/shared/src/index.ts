@@ -148,7 +148,10 @@ export interface PageSnapshot {
   mainText: string;
   simplifiedDom: string;
   pageInfo: PageInfoSnapshot;
-  context?: { selectedElement?: InspectedElement };
+  context?: {
+    selectedElement?: InspectedElement;
+    screenshot?: { dataUrl: string; title: string; url: string };
+  };
   elements: PageElementSnapshot[];
   performance: PerformanceSnapshot;
   capturedAt: string;

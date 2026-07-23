@@ -139,7 +139,7 @@ export class OpenAIResponsesProvider {
     const previousResponseId = this.#previousResponses.get(context.conversationId);
     const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), previousResponseId ? [] : context.history, context.loop, skills);
     const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: prompt }];
-    const imageUrl = snapshot.context?.selectedElement?.image?.src;
+    const imageUrl = snapshot.context?.selectedElement?.image?.src ?? snapshot.context?.screenshot?.dataUrl;
     if (imageUrl && /^(?:https?:|data:image\/)/iu.test(imageUrl)) userContent.push({ type: "input_image", image_url: imageUrl, detail: "auto" });
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60_000);
@@ -313,6 +313,11 @@ function readErrorMessage(value: unknown): string {
 
 export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: string[], history: ChatMessage[] = [], loop?: AgentLoopContext, selectedSkills: SkillSelection[] = []): string {
   const loopState = loop ? { iteration: loop.iteration, maxSteps: loop.maxSteps, elapsedMs: Date.now() - loop.startedAt, lastAction: loop.lastAction, lastVerification: loop.lastVerification } : undefined;
+  const promptSnapshot = {
+    ...snapshot,
+    elements: undefined,
+    ...(snapshot.context?.screenshot ? { context: { ...snapshot.context, screenshot: { title: snapshot.context.screenshot.title, url: snapshot.context.screenshot.url } } } : {}),
+  };
   return [
     "You are a current-page observe-plan-act-verify browser agent.",
     "Return exactly one JSON object without Markdown.",
@@ -326,7 +331,7 @@ export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: 
     history.length ? `Recent conversation:\n${history.slice(-12).map((message) => `${message.role}: ${message.content}`).join("\n")}` : "",
     loopState ? `Loop state:\n${JSON.stringify(loopState)}` : "",
     `User task:\n${task}`,
-    `Page snapshot:\n${JSON.stringify({ ...snapshot, elements: undefined })}`,
+    `Page snapshot:\n${JSON.stringify(promptSnapshot)}`,
   ].filter(Boolean).join("\n\n");
 }
 

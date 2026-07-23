@@ -176,7 +176,10 @@ function App() {
     setPendingPlan(null);
     setNotice("Reading the current page and planning…");
     try {
-      const response = await chrome.runtime.sendMessage({ type: "ui.run", task: text, conversationId, history }) as ServerMessage;
+      const response = await chrome.runtime.sendMessage({
+        type: "ui.run", task: text, conversationId, history,
+        ...(screenshot ? { screenshot: { dataUrl: screenshot.dataUrl, title: screenshot.title, url: screenshot.url } } : {}),
+      }) as ServerMessage;
       if (response.type === "agent.error") throw new Error(response.error);
       if (response.type !== "agent.result") throw new Error("Unexpected bridge response.");
       if (response.decision.kind === "answer") {
