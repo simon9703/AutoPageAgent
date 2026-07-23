@@ -327,6 +327,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan) {
     if (initialTab.url !== pendingRun.pageUrl) {
       throw new Error("The target page navigated after this plan was created. Run the task again.");
     }
+    await sendPageMessage(pendingRun.tabId, { type: "page.agent.activity", active: true }).catch(() => undefined);
     const runId = crypto.randomUUID();
     const startedAt = Date.now();
     const maxSteps = 8;
@@ -370,6 +371,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan) {
     }
     throw new Error("The agent stopped at its time budget.");
   } finally {
+    await sendPageMessage(pendingRun.tabId, { type: "page.agent.activity", active: false }).catch(() => undefined);
     await pendingAgentRuns.clearForSnapshot(initialPlan.snapshotId);
   }
 }
@@ -494,7 +496,12 @@ async function replayRecording(actions: RecordedBrowserAction[], targetTabId: nu
   if (!Array.isArray(actions) || !actions.length) throw new Error("There are no recorded actions to replay.");
   if (actions.length > 100) throw new Error("At most 100 actions can be replayed.");
   const tab = await getTargetTab(targetTabId);
-  return sendPageMessage(tab.id, { type: "page.recording.replay", actions });
+  await sendPageMessage(tab.id, { type: "page.agent.activity", active: true }).catch(() => undefined);
+  try {
+    return await sendPageMessage(tab.id, { type: "page.recording.replay", actions });
+  } finally {
+    await sendPageMessage(tab.id, { type: "page.agent.activity", active: false }).catch(() => undefined);
+  }
 }
 
 async function resumeRecordingForSender(tabId: number | undefined) {

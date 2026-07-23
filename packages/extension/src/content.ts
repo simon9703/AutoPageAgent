@@ -21,6 +21,14 @@ let selectedTarget: Element | null = null;
 let recordingActive = false;
 let scrollTimer: number | undefined;
 let aiPointer: HTMLElement | null = null;
+let pickerPointer: HTMLElement | null = null;
+let pickerOutline: HTMLElement | null = null;
+let selectedOutline: HTMLElement | null = null;
+let selectedOutlineCleanup: (() => void) | null = null;
+let actionOutline: HTMLElement | null = null;
+let agentFrame: HTMLElement | null = null;
+let persistentAgentActivity = false;
+let agentFrameHideTimer: number | undefined;
 let domVersion = 0;
 
 new MutationObserver((records) => {
@@ -37,6 +45,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
     });
     return true;
+  }
+  if (message?.type === "page.agent.activity") {
+    persistentAgentActivity = Boolean(message.active);
+    if (persistentAgentActivity) showAgentFrame();
+    else hideAgentFrame();
+    sendResponse({ ok: true });
+    return false;
   }
   if (message?.type === "page.selection.start") {
     startElementSelection(message.mode === "image" ? "image" : "element");
@@ -218,13 +233,18 @@ async function executePlan(plan: BrowserActionPlan): Promise<ActionExecutionResu
   if (!before) throw new Error("No current page snapshot is available.");
   const step = plan.steps[0];
   if (!step) throw new Error("The action plan is empty.");
+  showAgentFrame();
   const targetFingerprint = step.targetRef ? before.elements.find((element) => element.ref === step.targetRef)?.fingerprint : undefined;
-  const results = [await executeStep(step)];
-  await waitForDomSettled();
-  const after = createPageSnapshot();
-  const diff = diffSnapshots(before, after);
-  const verification = verifyAction(step, after, diff, targetFingerprint);
-  return { ok: verification.success, results, snapshot: after, verification, ...(!verification.success ? { error: verification.summary } : {}) };
+  try {
+    const results = [await executeStep(step)];
+    await waitForDomSettled();
+    const after = createPageSnapshot();
+    const diff = diffSnapshots(before, after);
+    const verification = verifyAction(step, after, diff, targetFingerprint);
+    return { ok: verification.success, results, snapshot: after, verification, ...(!verification.success ? { error: verification.summary } : {}) };
+  } finally {
+    if (!persistentAgentActivity) hideAgentFrame(650);
+  }
 }
 
 async function waitForDomSettled(maxWaitMs = 1_800, quietMs = 250): Promise<void> {
@@ -293,7 +313,6 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   await delay(220);
   if (!isTopLayerElement(element)) throw new Error("Target is covered by another page element.");
   await showAiPointer(element, `AI · ${step.action}`);
-  highlight(element);
   if (step.action === "click") await simulateClick(element);
   if (step.action === "focus") element.focus();
   if (step.action === "submit") {
@@ -309,6 +328,7 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
 async function replayRecordedActions(actions: RecordedBrowserAction[]) {
   const wasRecording = recordingActive;
   recordingActive = false;
+  showAgentFrame();
   const results: Array<{ action: string; ok: true }> = [];
   try {
     for (const step of actions) {
@@ -327,7 +347,6 @@ async function replayRecordedActions(actions: RecordedBrowserAction[]) {
       if (isSensitiveElement(element)) throw new Error("Sensitive fields cannot be replayed.");
       element.scrollIntoView({ block: "center", behavior: "smooth" });
       await showAiPointer(element, `AI · ${step.action}`);
-      highlight(element);
       if (step.action === "click") await simulateClick(element);
       if (step.action === "fill" || step.action === "select") setElementValue(element, step.value ?? "");
       if (step.action === "submit") {
@@ -341,6 +360,7 @@ async function replayRecordedActions(actions: RecordedBrowserAction[]) {
     return { ok: true, results };
   } finally {
     recordingActive = wasRecording;
+    if (!persistentAgentActivity) hideAgentFrame(650);
   }
 }
 
@@ -355,6 +375,8 @@ function startElementSelection(mode: "element" | "image") {
   selectionCleanup?.();
   ensureAgentStyles();
   document.documentElement.classList.add("auto-page-agent-picking");
+  pickerPointer = createPointer("auto-page-agent-picker-pointer");
+  pickerOutline = createElementOutline("picker");
   const notice = document.createElement("div");
   notice.dataset.autoPageAgentOverlay = "true";
   notice.className = "auto-page-agent-notice";
@@ -362,16 +384,18 @@ function startElementSelection(mode: "element" | "image") {
   document.documentElement.append(notice);
   let hovered: Element | null = null;
   const restore = () => {
-    hovered?.classList.remove("auto-page-agent-picker-target");
     hovered = null;
+    pickerOutline?.classList.remove("visible");
   };
   const onMove = (event: MouseEvent) => {
+    positionPointer(pickerPointer, event.clientX, event.clientY);
     const raw = event.target instanceof Element ? event.target : null;
     const next = mode === "image" ? findImageTarget(raw) ?? raw : raw;
     if (!next || next === hovered) return;
     restore();
     hovered = next;
-    next.classList.add("auto-page-agent-picker-target");
+    positionElementOutline(pickerOutline, next, describeElement(next));
+    pickerOutline?.classList.add("visible");
   };
   const cleanup = () => {
     restore();
@@ -380,6 +404,10 @@ function startElementSelection(mode: "element" | "image") {
     document.removeEventListener("keydown", onKey, true);
     document.documentElement.classList.remove("auto-page-agent-picking");
     notice.remove();
+    pickerPointer?.remove();
+    pickerPointer = null;
+    pickerOutline?.remove();
+    pickerOutline = null;
     selectionCleanup = null;
   };
   const onClick = (event: MouseEvent) => {
@@ -422,12 +450,43 @@ function startElementSelection(mode: "element" | "image") {
 
 function setSelectedTarget(target: Element) {
   clearSelectedTarget();
+  ensureAgentStyles();
   selectedTarget = target;
-  selectedTarget.classList.add("auto-page-agent-selected-target");
+  selectedOutline = createElementOutline("selected");
+  let updateFrame: number | undefined;
+  const update = () => {
+    if (!selectedTarget?.isConnected || !selectedOutline) {
+      clearSelectedTarget();
+      return;
+    }
+    positionElementOutline(selectedOutline, selectedTarget, `Selected · ${describeElement(selectedTarget)}`);
+    selectedOutline.classList.add("visible");
+  };
+  const scheduleUpdate = () => {
+    if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
+    updateFrame = requestAnimationFrame(() => {
+      updateFrame = undefined;
+      update();
+    });
+  };
+  const observer = new ResizeObserver(scheduleUpdate);
+  observer.observe(target);
+  window.addEventListener("resize", scheduleUpdate);
+  document.addEventListener("scroll", scheduleUpdate, true);
+  selectedOutlineCleanup = () => {
+    if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
+    observer.disconnect();
+    window.removeEventListener("resize", scheduleUpdate);
+    document.removeEventListener("scroll", scheduleUpdate, true);
+  };
+  update();
 }
 
 function clearSelectedTarget() {
-  selectedTarget?.classList.remove("auto-page-agent-selected-target");
+  selectedOutlineCleanup?.();
+  selectedOutlineCleanup = null;
+  selectedOutline?.remove();
+  selectedOutline = null;
   selectedTarget = null;
 }
 
@@ -660,20 +719,104 @@ async function simulateClick(element: HTMLElement) {
 async function showAiPointer(element: HTMLElement, label: string) {
   ensureAgentStyles();
   if (!aiPointer) {
-    aiPointer = document.createElement("div");
-    aiPointer.dataset.autoPageAgentOverlay = "true";
-    aiPointer.className = "auto-page-agent-pointer";
-    aiPointer.innerHTML = '<span class="auto-page-agent-pointer-dot"></span><span class="auto-page-agent-pointer-label"></span>';
-    document.documentElement.append(aiPointer);
+    aiPointer = createPointer("auto-page-agent-pointer");
   }
+  actionOutline ??= createElementOutline("action");
   const rect = element.getBoundingClientRect();
   aiPointer.querySelector<HTMLElement>(".auto-page-agent-pointer-label")!.textContent = label;
-  aiPointer.style.transform = `translate(${Math.round(rect.left + rect.width / 2)}px,${Math.round(rect.top + rect.height / 2)}px)`;
+  positionElementOutline(actionOutline, element, label);
+  actionOutline.classList.add("visible");
   aiPointer.classList.add("visible");
-  element.classList.add("auto-page-agent-target-ring");
-  await delay(420);
-  element.classList.remove("auto-page-agent-target-ring");
-  setTimeout(() => aiPointer?.classList.remove("visible"), 500);
+  positionPointer(aiPointer, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  await delay(520);
+  aiPointer.classList.add("clicking");
+  actionOutline.classList.add("acting");
+  await delay(180);
+  aiPointer.classList.remove("clicking");
+  actionOutline.classList.remove("acting");
+  setTimeout(() => {
+    aiPointer?.classList.remove("visible");
+    actionOutline?.classList.remove("visible");
+  }, 650);
+}
+
+function createPointer(className: string): HTMLElement {
+  const pointer = document.createElement("div");
+  pointer.dataset.autoPageAgentOverlay = "true";
+  pointer.className = className;
+  pointer.innerHTML = `
+    <span class="auto-page-agent-pointer-pulse"></span>
+    <svg class="auto-page-agent-pointer-arrow" viewBox="0 0 38 46" aria-hidden="true">
+      <path d="M3 2.8v34.4l9.2-8.2 7.2 14 7.4-3.8-7.1-13.7 12.3-1.2L3 2.8Z" />
+    </svg>
+    <span class="auto-page-agent-pointer-label"></span>
+  `;
+  document.documentElement.append(pointer);
+  return pointer;
+}
+
+function positionPointer(pointer: HTMLElement | null, x: number, y: number) {
+  if (!pointer) return;
+  pointer.style.transform = `translate3d(${Math.round(x)}px,${Math.round(y)}px,0)`;
+  pointer.classList.add("visible");
+}
+
+function createElementOutline(kind: "picker" | "selected" | "action"): HTMLElement {
+  const outline = document.createElement("div");
+  outline.dataset.autoPageAgentOverlay = "true";
+  outline.className = `auto-page-agent-element-outline ${kind}`;
+  outline.innerHTML = `
+    <span class="auto-page-agent-corner top-left"></span>
+    <span class="auto-page-agent-corner top-right"></span>
+    <span class="auto-page-agent-corner bottom-left"></span>
+    <span class="auto-page-agent-corner bottom-right"></span>
+    <span class="auto-page-agent-outline-label"></span>
+  `;
+  document.documentElement.append(outline);
+  return outline;
+}
+
+function positionElementOutline(outline: HTMLElement | null, target: Element, label: string) {
+  if (!outline) return;
+  const rect = target.getBoundingClientRect();
+  outline.classList.toggle("offscreen", rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth);
+  const left = Math.max(2, rect.left);
+  const top = Math.max(2, rect.top);
+  const right = Math.min(innerWidth - 2, rect.right);
+  const bottom = Math.min(innerHeight - 2, rect.bottom);
+  outline.style.transform = `translate3d(${Math.round(left)}px,${Math.round(top)}px,0)`;
+  outline.style.width = `${Math.max(0, Math.round(right - left))}px`;
+  outline.style.height = `${Math.max(0, Math.round(bottom - top))}px`;
+  outline.classList.toggle("label-below", top < 34);
+  outline.querySelector<HTMLElement>(".auto-page-agent-outline-label")!.textContent = label;
+}
+
+function describeElement(element: Element): string {
+  const role = element.getAttribute("role");
+  const identity = element.id ? `#${element.id}` : element.getAttribute("aria-label");
+  return [element.tagName.toLowerCase(), role, identity].filter(Boolean).join(" · ");
+}
+
+function showAgentFrame() {
+  ensureAgentStyles();
+  window.clearTimeout(agentFrameHideTimer);
+  agentFrameHideTimer = undefined;
+  if (!agentFrame) {
+    agentFrame = document.createElement("div");
+    agentFrame.dataset.autoPageAgentOverlay = "true";
+    agentFrame.className = "auto-page-agent-viewport-frame";
+    agentFrame.innerHTML = '<span class="auto-page-agent-frame-status"><i></i> AI is operating</span>';
+    document.documentElement.append(agentFrame);
+  }
+  requestAnimationFrame(() => agentFrame?.classList.add("visible"));
+}
+
+function hideAgentFrame(delayMs = 0) {
+  window.clearTimeout(agentFrameHideTimer);
+  agentFrameHideTimer = window.setTimeout(() => {
+    if (persistentAgentActivity) return;
+    agentFrame?.classList.remove("visible");
+  }, delayMs);
 }
 
 function ensureAgentStyles() {
@@ -681,28 +824,51 @@ function ensureAgentStyles() {
   const style = document.createElement("style");
   style.dataset.autoPageAgentOverlay = "true";
   style.textContent = `
-    html.auto-page-agent-picking, html.auto-page-agent-picking * { cursor: crosshair !important; }
-    .auto-page-agent-notice { position: fixed; z-index: 2147483647; top: 16px; left: 50%; transform: translateX(-50%); padding: 8px 13px; border-radius: 999px; color: white; background: #6d3bd1; box-shadow: 0 8px 28px #4c1d9566; font: 600 12px system-ui; pointer-events: none; }
-    .auto-page-agent-pointer { position: fixed; z-index: 2147483647; left: 0; top: 0; opacity: 0; pointer-events: none; transition: transform .38s cubic-bezier(.2,.8,.2,1), opacity .15s; }
-    .auto-page-agent-pointer.visible { opacity: 1; }
-    .auto-page-agent-pointer-dot { position: absolute; width: 24px; height: 24px; margin: -12px; border: 3px solid #8b5cf6; border-radius: 50%; background: #ffffff99; box-shadow: 0 0 0 7px #8b5cf633, 0 5px 18px #4c1d9566; }
-    .auto-page-agent-pointer-dot::after { content: ''; position: absolute; left: 7px; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: #6d3bd1; }
-    .auto-page-agent-pointer-label { position: absolute; left: 15px; top: 13px; width: max-content; max-width: 180px; padding: 4px 7px; border-radius: 7px; color: white; background: #6d3bd1; font: 600 10px system-ui; }
-    .auto-page-agent-picker-target { outline: 3px solid #7c5cff !important; outline-offset: 2px !important; }
-    .auto-page-agent-selected-target { outline: 3px solid #7c5cff !important; outline-offset: 2px !important; box-shadow: 0 0 0 5px #7c5cff26 !important; }
-    .auto-page-agent-target-ring { outline: 3px solid #8b5cf6 !important; outline-offset: 4px !important; box-shadow: 0 0 0 8px #8b5cf633 !important; }
+    html.auto-page-agent-picking, html.auto-page-agent-picking * { cursor: none !important; }
+    .auto-page-agent-notice { position: fixed; z-index: 2147483647; top: 18px; left: 50%; transform: translateX(-50%); padding: 9px 15px; border: 1px solid #ffffff38; border-radius: 999px; color: white; background: linear-gradient(135deg,#5b31d2eF,#8b5cf6eF 55%,#2563ebeF); backdrop-filter: blur(14px); box-shadow: 0 10px 35px #4c1d9560, inset 0 1px #ffffff40; font: 650 12px/1.2 system-ui,-apple-system,sans-serif; letter-spacing: .01em; pointer-events: none; }
+    .auto-page-agent-pointer, .auto-page-agent-picker-pointer { position: fixed; z-index: 2147483647; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; will-change: transform; }
+    .auto-page-agent-pointer { transition: transform .52s cubic-bezier(.16,1,.3,1), opacity .16s ease; }
+    .auto-page-agent-picker-pointer { transition: opacity .1s ease; }
+    .auto-page-agent-pointer.visible, .auto-page-agent-picker-pointer.visible { opacity: 1; }
+    .auto-page-agent-pointer-arrow { position: absolute; left: -4px; top: -4px; width: 38px; height: 46px; overflow: visible; filter: drop-shadow(0 5px 8px #312e8160); transform-origin: 5px 5px; }
+    .auto-page-agent-pointer-arrow path { fill: white; stroke: #7657f5; stroke-width: 3.4; stroke-linejoin: round; }
+    .auto-page-agent-picker-pointer .auto-page-agent-pointer-arrow { width: 32px; height: 39px; }
+    .auto-page-agent-pointer-pulse { position: absolute; left: -12px; top: -12px; width: 24px; height: 24px; border: 2px solid #38bdf8; border-radius: 50%; opacity: 0; transform: scale(.25); }
+    .auto-page-agent-pointer.clicking .auto-page-agent-pointer-arrow { animation: auto-page-agent-pointer-press .18s ease; }
+    .auto-page-agent-pointer.clicking .auto-page-agent-pointer-pulse { animation: auto-page-agent-click-ripple .55s ease-out; }
+    .auto-page-agent-pointer-label { position: absolute; left: 28px; top: 31px; width: max-content; max-width: 190px; padding: 5px 9px; border: 1px solid #ffffff38; border-radius: 8px; color: white; background: linear-gradient(135deg,#5b31d2,#7657f5); box-shadow: 0 7px 20px #4c1d9550; font: 650 10px/1.2 system-ui,-apple-system,sans-serif; letter-spacing: .015em; }
+    .auto-page-agent-picker-pointer .auto-page-agent-pointer-label { display: none; }
+    .auto-page-agent-element-outline { position: fixed; z-index: 2147483645; left: 0; top: 0; box-sizing: border-box; opacity: 0; pointer-events: none; border: 1.5px solid #8b5cf6; border-radius: 5px; background: #8b5cf60a; box-shadow: 0 0 0 1px #ffffffb0 inset, 0 0 0 3px #8b5cf61c, 0 8px 30px #4c1d9524; transition: transform .08s ease-out,width .08s ease-out,height .08s ease-out,opacity .1s ease; }
+    .auto-page-agent-element-outline.visible { opacity: 1; }
+    .auto-page-agent-element-outline.offscreen { opacity: 0; }
+    .auto-page-agent-element-outline.selected { border-color: #6d5dfc; background: linear-gradient(135deg,#7c5cff12,#38bdf80d); box-shadow: 0 0 0 1px #ffffffd0 inset,0 0 0 4px #7c5cff22,0 10px 34px #4338ca2c; }
+    .auto-page-agent-element-outline.action { border-color: #22d3ee; background: #22d3ee0d; box-shadow: 0 0 0 1px #ffffffd0 inset,0 0 0 5px #22d3ee25,0 0 26px #7c3aed48; transition: transform .18s ease-out,width .18s ease-out,height .18s ease-out,opacity .12s ease; }
+    .auto-page-agent-element-outline.action.acting { animation: auto-page-agent-target-pop .45s ease-out; }
+    .auto-page-agent-corner { position: absolute; width: 10px; height: 10px; border-color: #7657f5; }
+    .auto-page-agent-corner.top-left { left: -3px; top: -3px; border-left: 3px solid; border-top: 3px solid; border-radius: 4px 0 0; }
+    .auto-page-agent-corner.top-right { right: -3px; top: -3px; border-right: 3px solid; border-top: 3px solid; border-radius: 0 4px 0 0; }
+    .auto-page-agent-corner.bottom-left { left: -3px; bottom: -3px; border-left: 3px solid; border-bottom: 3px solid; border-radius: 0 0 0 4px; }
+    .auto-page-agent-corner.bottom-right { right: -3px; bottom: -3px; border-right: 3px solid; border-bottom: 3px solid; border-radius: 0 0 4px; }
+    .auto-page-agent-element-outline.action .auto-page-agent-corner { border-color: #22d3ee; }
+    .auto-page-agent-outline-label { position: absolute; left: -1px; bottom: calc(100% + 7px); max-width: min(280px,70vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 8px; border: 1px solid #ffffff40; border-radius: 7px; color: white; background: linear-gradient(135deg,#5b31d2,#7657f5); box-shadow: 0 5px 16px #4c1d9545; font: 650 10px/1.25 system-ui,-apple-system,sans-serif; }
+    .auto-page-agent-element-outline.label-below .auto-page-agent-outline-label { top: calc(100% + 7px); bottom: auto; }
+    .auto-page-agent-element-outline.action .auto-page-agent-outline-label { background: linear-gradient(135deg,#4338ca,#0891b2); }
+    .auto-page-agent-viewport-frame { position: fixed; z-index: 2147483643; inset: 0; box-sizing: border-box; opacity: 0; pointer-events: none; border: 3px solid transparent; border-radius: 10px; background: linear-gradient(transparent,transparent) padding-box,linear-gradient(115deg,#22d3ee,#6366f1,#a855f7,#ec4899,#22d3ee) border-box; background-size: 100% 100%,300% 300%; box-shadow: inset 0 0 34px #6366f120,0 0 24px #7c3aed38; transition: opacity .28s ease; animation: auto-page-agent-frame-flow 4s linear infinite; }
+    .auto-page-agent-viewport-frame.visible { opacity: 1; }
+    .auto-page-agent-frame-status { position: absolute; right: 15px; bottom: 14px; display: flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid #ffffff3d; border-radius: 999px; color: white; background: #17132bdc; backdrop-filter: blur(12px); box-shadow: 0 8px 24px #312e8150; font: 650 10px/1 system-ui,-apple-system,sans-serif; letter-spacing: .02em; }
+    .auto-page-agent-frame-status i { width: 7px; height: 7px; border-radius: 50%; background: #67e8f9; box-shadow: 0 0 0 4px #22d3ee25,0 0 12px #22d3ee; animation: auto-page-agent-status-pulse 1.4s ease-in-out infinite; }
+    @keyframes auto-page-agent-frame-flow { to { background-position: 0 0,300% 50%; } }
+    @keyframes auto-page-agent-status-pulse { 50% { opacity: .45; transform: scale(.72); } }
+    @keyframes auto-page-agent-pointer-press { 50% { transform: scale(.82) rotate(-3deg); } }
+    @keyframes auto-page-agent-click-ripple { 0% { opacity: .95; transform: scale(.25); } 100% { opacity: 0; transform: scale(2.25); } }
+    @keyframes auto-page-agent-target-pop { 50% { box-shadow: 0 0 0 9px #22d3ee28,0 0 40px #7c3aed5c; } }
+    @media (prefers-reduced-motion: reduce) { .auto-page-agent-pointer,.auto-page-agent-element-outline,.auto-page-agent-viewport-frame { transition-duration: .01ms; animation: none; } }
   `;
   document.documentElement.append(style);
 }
 
 function escapeDomText(value: string): string {
   return value.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;");
-}
-
-function highlight(element: HTMLElement) {
-  const previous = element.style.outline;
-  element.style.outline = "3px solid #7c5cff";
-  setTimeout(() => { element.style.outline = previous; }, 1_500);
 }
 
 function cleanText(value: string, max: number): string {
