@@ -59,6 +59,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
   if (message?.type === "page.selection.clear") {
+    selectionCleanup?.();
     clearSelectedTarget();
     sendResponse({ ok: true });
     return false;

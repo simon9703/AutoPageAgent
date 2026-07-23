@@ -47,6 +47,7 @@ export function App() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const targetTabRef = useRef<BrowserTabTarget | null>(null);
   const busyRef = useRef(false);
+  const conversationStartedRef = useRef(false);
 
   useEffect(() => {
     void initialize();
@@ -99,14 +100,19 @@ export function App() {
       chrome.runtime.sendMessage({ type: "ui.tabs.list" }) as Promise<{ tabs?: BrowserTabTarget[]; activeTabId?: number }>,
     ]);
     const availableTabs = tabState.tabs ?? [];
-    const storedTargetId = typeof stored.conversationTargetTabId === "number" ? stored.conversationTargetTabId : undefined;
+    const storedMessages = Array.isArray(stored.chatMessages) ? (stored.chatMessages as ChatMessage[]).slice(-40) : [];
+    const conversationStarted = storedMessages.length > 0;
+    const storedTargetId = conversationStarted && typeof stored.conversationTargetTabId === "number"
+      ? stored.conversationTargetTabId
+      : undefined;
     const initialTarget = availableTabs.find((tab) => tab.tabId === storedTargetId)
       ?? availableTabs.find((tab) => tab.tabId === tabState.activeTabId)
       ?? availableTabs[0]
       ?? null;
     const initialConversationId = typeof stored.conversationId === "string" ? stored.conversationId : crypto.randomUUID();
+    conversationStartedRef.current = conversationStarted;
     setConversationId(initialConversationId);
-    setMessages(Array.isArray(stored.chatMessages) ? (stored.chatMessages as ChatMessage[]).slice(-40) : []);
+    setMessages(storedMessages);
     setTabs(availableTabs);
     setActiveTabId(tabState.activeTabId ?? null);
     setTargetTabValue(initialTarget);
@@ -190,6 +196,25 @@ export function App() {
     setTabs(availableTabs);
     setActiveTabId(response.activeTabId ?? null);
     const current = targetTabRef.current;
+    if (!conversationStartedRef.current) {
+      const active = availableTabs.find((tab) => tab.tabId === response.activeTabId) ?? availableTabs[0] ?? null;
+      setTargetTabValue(active);
+      if (active?.tabId !== current?.tabId) {
+        setSelected(null);
+        setScreenshot(null);
+        setSelectionMode(null);
+        setPendingPlan(null);
+        await Promise.all([
+          active
+            ? chrome.storage.session.set({ conversationTargetTabId: active.tabId })
+            : chrome.storage.session.remove(["conversationTargetTabId"]),
+          chrome.runtime.sendMessage({ type: "ui.selection.clear" }).catch(() => undefined),
+        ]);
+        if (active) await refreshSkills(active.tabId);
+        setNotice(active ? "Ready on the current page." : "Open an http(s) page to get started.");
+      }
+      return;
+    }
     if (!current) return;
     const refreshed = availableTabs.find((tab) => tab.tabId === current.tabId) ?? null;
     setTargetTabValue(refreshed);
@@ -244,6 +269,7 @@ export function App() {
     setSelected(null);
     setScreenshot(null);
     setPrompt("");
+    conversationStartedRef.current = false;
     const activeTarget = tabs.find((tab) => tab.tabId === activeTabId) ?? targetTabRef.current;
     if (activeTarget) setTargetTabValue(activeTarget);
     setQueuedTarget(null);
@@ -285,6 +311,7 @@ export function App() {
     const text = prompt.trim();
     if (!text || busy) return;
     if (!targetTab) return setNotice("Choose a target page first.");
+    conversationStartedRef.current = true;
     const history = messages.slice(-20);
     setEvents([]);
     appendMessage("user", text);
@@ -415,29 +442,24 @@ export function App() {
 
   return (
     <main className="flex h-screen min-h-[520px] flex-col overflow-hidden bg-[#f7f8fa] text-slate-900">
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200/80 bg-white px-4">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <img src="assets/icon-48.png" className="h-8 w-8 rounded-[10px]" alt="" />
-          <div className="min-w-0"><h1 className="truncate text-[15px] font-semibold">Auto Page Agent</h1><p className="truncate text-[10px] text-slate-400">Current-page agent</p></div>
-        </div>
+      <header className="relative flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200/80 bg-white px-4">
+        <TargetTabHeader
+          target={targetTab}
+          tabs={tabs}
+          activeTabId={activeTabId}
+          open={targetPickerOpen}
+          queued={queuedTarget}
+          onToggle={() => setTargetPickerOpen((current) => !current)}
+          onChoose={(tab) => void chooseTarget(tab)}
+          onActivate={() => {
+            if (targetTab) void chrome.runtime.sendMessage({ type: "ui.tab.activate", targetTabId: targetTab.tabId });
+          }}
+        />
         <div className="flex items-center gap-1.5">
           <span className={`h-2 w-2 rounded-full ${health?.ok ? "bg-emerald-500" : "bg-amber-400"}`} title={health?.agent.error ?? health?.agent.name ?? "Bridge unavailable"} />
           <IconButton label="New conversation" onClick={() => void newConversation()}><SquarePen size={17} /></IconButton>
         </div>
       </header>
-
-      <TargetTabBar
-        target={targetTab}
-        tabs={tabs}
-        activeTabId={activeTabId}
-        open={targetPickerOpen}
-        queued={queuedTarget}
-        onToggle={() => setTargetPickerOpen((current) => !current)}
-        onChoose={(tab) => void chooseTarget(tab)}
-        onActivate={() => {
-          if (targetTab) void chrome.runtime.sendMessage({ type: "ui.tab.activate", targetTabId: targetTab.tabId });
-        }}
-      />
 
       <nav className="flex shrink-0 items-center justify-between border-b border-slate-200/70 bg-white px-3 py-2" aria-label="Page tools">
         <div className="flex items-center gap-1">
@@ -480,7 +502,7 @@ export function App() {
   );
 }
 
-function TargetTabBar(props: {
+function TargetTabHeader(props: {
   target: BrowserTabTarget | null;
   tabs: BrowserTabTarget[];
   activeTabId: number | null;
@@ -492,21 +514,27 @@ function TargetTabBar(props: {
 }) {
   const targetVisible = props.target?.tabId === props.activeTabId;
   return (
-    <section className="relative shrink-0 border-b border-slate-200/70 bg-white px-3 py-2">
-      <div className="flex items-center gap-2">
-        <button type="button" onClick={props.onToggle} className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 px-2.5 py-2 text-left transition hover:border-violet-200 hover:bg-violet-50/40" aria-expanded={props.open}>
-          {props.target?.favIconUrl ? <img src={props.target.favIconUrl} className="h-4 w-4 shrink-0 rounded-sm" alt="" /> : <Globe2 size={16} className="shrink-0 text-slate-400" />}
-          <span className="min-w-0 flex-1">
-            <strong className="block truncate text-[11px] font-medium">{props.target?.title ?? "Choose target page"}</strong>
-            <span className="block truncate text-[9px] text-slate-400">{props.target ? hostname(props.target.url) : "No http(s) tab selected"}</span>
+    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+      <img src="assets/icon-48.png" className="h-9 w-9 shrink-0 rounded-[11px]" alt="" />
+      <button type="button" onClick={props.onToggle} className="flex min-w-0 max-w-[calc(100%-96px)] items-center gap-1.5 rounded-xl px-1.5 py-1 text-left transition hover:bg-slate-50" aria-expanded={props.open}>
+        <span className="min-w-0">
+          <strong className="block truncate text-[15px] font-semibold">Auto Page Agent</strong>
+          <span className={`flex items-center gap-1 truncate text-[10px] ${targetVisible ? "text-slate-400" : "text-violet-600"}`}>
+            {props.target?.favIconUrl ? <img src={props.target.favIconUrl} className="h-3 w-3 shrink-0 rounded-[2px]" alt="" /> : <Globe2 size={12} className="shrink-0" />}
+            <span className="truncate">
+              {props.queued
+                ? `Next: ${props.queued.title}`
+                : props.target
+                  ? `${props.target.title} · ${hostname(props.target.url)}${targetVisible ? "" : " · bound"}`
+                  : "Open an http(s) page"}
+            </span>
           </span>
-          <ChevronDown size={14} className={`shrink-0 text-slate-400 transition ${props.open ? "rotate-180" : ""}`} />
-        </button>
-        {props.target && !targetVisible ? <button type="button" onClick={props.onActivate} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700" title="Switch to target page" aria-label="Switch to target page"><ExternalLink size={15} /></button> : null}
-      </div>
-      {props.queued ? <p className="mt-1.5 truncate px-1 text-[9px] text-amber-600">Next target: {props.queued.title}</p> : !targetVisible && props.target ? <p className="mt-1.5 truncate px-1 text-[9px] text-slate-400">You are viewing another tab. The agent remains bound here.</p> : null}
+        </span>
+        <ChevronDown size={14} className={`shrink-0 text-slate-400 transition ${props.open ? "rotate-180" : ""}`} />
+      </button>
+      {props.target && !targetVisible ? <button type="button" onClick={props.onActivate} className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700" title="Switch to target page" aria-label="Switch to target page"><ExternalLink size={14} /></button> : null}
       {props.open ? (
-        <div className="absolute left-3 right-3 top-[calc(100%-2px)] z-40 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl">
+        <div className="absolute left-3 right-3 top-[calc(100%-4px)] z-40 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl">
           {props.tabs.length ? props.tabs.map((tab) => (
             <button key={tab.tabId} type="button" onClick={() => props.onChoose(tab)} className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left hover:bg-slate-50">
               {tab.favIconUrl ? <img src={tab.favIconUrl} className="h-4 w-4 shrink-0 rounded-sm" alt="" /> : <Globe2 size={15} className="shrink-0 text-slate-400" />}
@@ -516,7 +544,7 @@ function TargetTabBar(props: {
           )) : <p className="px-3 py-5 text-center text-[11px] text-slate-400">No open http(s) pages.</p>}
         </div>
       ) : null}
-    </section>
+    </div>
   );
 }
 
