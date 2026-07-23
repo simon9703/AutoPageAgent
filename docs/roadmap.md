@@ -44,7 +44,9 @@ Goal: upgrade from single action execution to a reliable observe-plan-act-verify
 
 ### Agent Loop
 
-- [x] Observe → Plan → Act → Verify execution loop
+- [x] Internal Observe → Plan → Act → Verify execution loop
+- [x] Separate answer, complete, blocked, and needs-user decisions
+- [x] Require current-page evidence for browser-task completion
 - [x] Maximum step budget and timeout control
 - [x] Snapshot refresh after every action
 - [x] Action result validation
@@ -53,6 +55,7 @@ Goal: upgrade from single action execution to a reliable observe-plan-act-verify
 ### Agent Interaction UI
 
 - [x] Agent execution timeline
+- [x] Remove synthetic Observe/Plan timeline entries
 - [x] Streaming assistant events
 - [x] Real-time action status
 - [x] Enhanced AI cursor / target overlay

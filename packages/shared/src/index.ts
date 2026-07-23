@@ -205,7 +205,29 @@ export interface AgentAnswer {
   content: string;
 }
 
-export type AgentDecision = BrowserActionPlan | AgentAnswer;
+export interface AgentComplete {
+  kind: "complete";
+  summary: string;
+  evidence: string[];
+}
+
+export interface AgentBlocked {
+  kind: "blocked";
+  reason: string;
+  recoverable: boolean;
+}
+
+export interface AgentNeedsUser {
+  kind: "needs_user";
+  question: string;
+}
+
+export type AgentDecision =
+  | BrowserActionPlan
+  | AgentAnswer
+  | AgentComplete
+  | AgentBlocked
+  | AgentNeedsUser;
 
 export type RecordedActionKind = "click" | "fill" | "select" | "scroll" | "submit";
 

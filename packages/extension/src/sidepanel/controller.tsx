@@ -336,13 +336,22 @@ export function SidePanelController() {
       }) as ServerMessage;
       if (response.type === "agent.error") throw new Error(response.error);
       if (response.type !== "agent.result") throw new Error("Unexpected bridge response.");
-      if (response.decision.kind === "answer") {
-        appendMessage("assistant", response.decision.content);
-        setNotice(`Answered by ${response.provider}.`);
-      } else {
+      if (response.decision.kind === "action_plan") {
         setPendingPlan(response.decision);
         appendMessage("assistant", response.decision.summary);
         setNotice("Action ready. Confirm once to let the agent act, observe, and continue automatically.");
+      } else if (response.decision.kind === "answer") {
+        appendMessage("assistant", response.decision.content);
+        setNotice(`Answered by ${response.provider}.`);
+      } else if (response.decision.kind === "complete") {
+        appendMessage("assistant", response.decision.summary);
+        setNotice("The requested page state is already complete.");
+      } else if (response.decision.kind === "needs_user") {
+        appendMessage("assistant", response.decision.question);
+        setNotice("The agent needs more information.");
+      } else {
+        appendMessage("assistant", `Unable to continue: ${response.decision.reason}`);
+        setNotice(response.decision.reason);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -361,7 +370,20 @@ export function SidePanelController() {
     stopRequestedRef.current = false;
     setNotice("Agent is operating the page and verifying each step…");
     try {
-      const response = await chrome.runtime.sendMessage({ type: "ui.execute", plan }) as { ok?: boolean; answer?: string; steps?: number; error?: string };
+      const response = await chrome.runtime.sendMessage({ type: "ui.execute", plan }) as {
+        ok?: boolean;
+        status?: "completed" | "needs_user" | "blocked";
+        answer?: string;
+        question?: string;
+        evidence?: string[];
+        steps?: number;
+        error?: string;
+      };
+      if (response.status === "needs_user") {
+        appendMessage("assistant", response.question ?? "More information is required.");
+        setNotice("The agent needs more information.");
+        return;
+      }
       if (!response.ok) throw new Error(response.error ?? "Action failed.");
       const message = `${response.answer ?? "Task completed."}\n\nCompleted in ${response.steps ?? 1} agent step(s).`;
       appendMessage("assistant", message);
@@ -524,4 +546,3 @@ export function SidePanelController() {
     </main>
   );
 }
-

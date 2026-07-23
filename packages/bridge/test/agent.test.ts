@@ -17,12 +17,31 @@ test("extractJson supports fenced model output", () => {
 test("normalizeDecision rejects filling sensitive fields", () => {
   const sensitiveSnapshot = { ...snapshot, elements: [{ ...snapshot.elements[0], sensitive: true }] };
   const result = normalizeDecision({ kind: "action_plan", steps: [{ action: "fill", targetRef: "element-1", value: "secret" }] }, sensitiveSnapshot);
-  assert.equal(result.kind, "answer");
+  assert.deepEqual(result, { kind: "blocked", reason: "No safe action could be matched to the current page.", recoverable: true });
 });
 
 test("normalizeDecision rejects invented element refs", () => {
   const result = normalizeDecision({ kind: "action_plan", steps: [{ action: "click", targetRef: "element-99" }] }, snapshot);
-  assert.equal(result.kind, "answer");
+  assert.equal(result.kind, "blocked");
+});
+
+test("normalizeDecision requires evidence before completing a browser task", () => {
+  assert.equal(normalizeDecision({ kind: "complete", summary: "Done" }, snapshot).kind, "blocked");
+  assert.deepEqual(
+    normalizeDecision({ kind: "complete", summary: "BTC details opened", evidence: ["Heading BTC is visible"] }, snapshot),
+    { kind: "complete", summary: "BTC details opened", evidence: ["Heading BTC is visible"] },
+  );
+});
+
+test("normalizeDecision keeps blocked and needs-user states distinct from answers", () => {
+  assert.deepEqual(
+    normalizeDecision({ kind: "blocked", reason: "Login required", recoverable: false }, snapshot),
+    { kind: "blocked", reason: "Login required", recoverable: false },
+  );
+  assert.deepEqual(
+    normalizeDecision({ kind: "needs_user", question: "Which account?" }, snapshot),
+    { kind: "needs_user", question: "Which account?" },
+  );
 });
 
 test("normalizeDecision binds the current snapshot and requires confirmation", () => {

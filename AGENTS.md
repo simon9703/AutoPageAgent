@@ -63,9 +63,11 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 
 ## Agent-loop rules
 
-- Preserve the flow `Observe -> Plan -> confirm -> Act one step -> settle -> Observe -> Verify -> continue/stop`.
+- Preserve the internal flow `Observe -> Plan -> confirm -> Act one step -> settle -> Observe -> Verify -> continue/stop`.
 - A continuation turn receives the fresh snapshot, snapshot diff, prior action result, failure count, and remaining budget.
-- Emit provider deltas and runtime lifecycle updates through the shared `AgentEvent` protocol so the side panel timeline remains the observable source of truth.
+- Do not expose static Observe/Plan labels as fake progress. Emit only meaningful provider output, real action/verification updates, completion, and errors through the shared `AgentEvent` protocol.
+- Keep `answer`, `complete`, `blocked`, and `needs_user` semantically separate. After the first browser action, only evidence-backed `complete` may end the run successfully.
+- Navigation requires a fresh observation and never proves task completion by itself.
 - Normalize and validate every provider response in the bridge even when structured output is enabled upstream.
 - Keep Codex and Responses behavior aligned behind the provider abstraction. Provider-specific transport code must not leak into extension logic.
 - Navigation may reload the content script; preserve background-owned loop/recorder recovery behavior.

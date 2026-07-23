@@ -1,13 +1,11 @@
 import type { AgentEvent, RepositoryAnalysis } from "@auto-page-agent/shared";
 
 export function eventLabel(event: AgentEvent): string {
-  if (event.type === "observe") return `Observe · ${event.summary || event.snapshotId}`;
   if (event.type === "thinking") {
     return event.delta
-      ? `Thinking · ${event.content.replace(/\s+/gu, " ").slice(0, 120)}`
+      ? `Model · ${event.content.replace(/\s+/gu, " ").slice(0, 120)}`
       : event.content;
   }
-  if (event.type === "plan") return `Plan · ${event.summary}`;
   if (event.type === "action") {
     return `${event.status === "running" ? "Act" : "Action"} · ${event.action}${event.detail ? ` · ${event.detail}` : ""}`;
   }

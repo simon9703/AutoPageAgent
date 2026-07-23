@@ -358,7 +358,6 @@ async function runAgentLoop(initialPlan: BrowserActionPlan) {
     let iteration = 0;
     let failures = 0;
     let plan = initialPlan;
-    let latestAnswer = "Task completed.";
     while (iteration < maxSteps && Date.now() - startedAt < timeoutMs) {
       assertAgentRunActive(run);
       const step = plan.steps[0];
@@ -390,9 +389,40 @@ async function runAgentLoop(initialPlan: BrowserActionPlan) {
       assertAgentRunActive(run);
       if (response.type === "agent.error") throw new Error(response.error);
       if (response.type !== "agent.result") throw new Error("Unexpected agent loop response.");
+      if (response.decision.kind === "complete") {
+        return {
+          ok: true,
+          status: "completed" as const,
+          answer: response.decision.summary,
+          evidence: response.decision.evidence,
+          steps: iteration,
+        };
+      }
+      if (response.decision.kind === "needs_user") {
+        return {
+          ok: true,
+          status: "needs_user" as const,
+          question: response.decision.question,
+          steps: iteration,
+        };
+      }
+      if (response.decision.kind === "blocked") {
+        return {
+          ok: false,
+          status: "blocked" as const,
+          error: response.decision.reason,
+          recoverable: response.decision.recoverable,
+          steps: iteration,
+        };
+      }
       if (response.decision.kind === "answer") {
-        latestAnswer = response.decision.content;
-        return { ok: true, answer: latestAnswer, steps: iteration };
+        return {
+          ok: false,
+          status: "blocked" as const,
+          error: "The agent returned an answer after browser execution instead of verifying the whole task.",
+          recoverable: true,
+          steps: iteration,
+        };
       }
       if (iteration >= maxSteps || Date.now() - startedAt >= timeoutMs) throw new Error(`The agent stopped at its ${iteration >= maxSteps ? "step" : "time"} budget.`);
       plan = response.decision;
@@ -445,7 +475,17 @@ async function executePlanResilient(plan: BrowserActionPlan, tabId: number): Pro
     await waitForTabReady(tabId);
     const snapshot = await readSnapshot(tabId);
     const diff = { urlChanged: true, titleChanged: false, addedFingerprints: [], removedFingerprints: [], changedFingerprints: [], summary: ["The page navigated and a new document was observed."] };
-    return { ok: true, results: [{ action: plan.steps[0]?.action ?? "click", ok: true }], snapshot, verification: { success: true, summary: diff.summary[0]!, changes: diff.summary, diff } };
+    return {
+      ok: true,
+      results: [{ action: plan.steps[0]?.action ?? "click", ok: true }],
+      snapshot,
+      verification: {
+        success: false,
+        summary: "The page navigated; the new page must be checked before the task can complete.",
+        changes: diff.summary,
+        diff,
+      },
+    };
   }
 }
 

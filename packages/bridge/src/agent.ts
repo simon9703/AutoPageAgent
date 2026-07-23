@@ -9,6 +9,7 @@ export interface AgentRunContext {
   history: ChatMessage[];
   loop?: AgentLoopContext;
   signal?: AbortSignal;
+  selectedSkills?: SkillSelection[];
 }
 
 export type AgentEventSink = (event: AgentEvent) => void;
@@ -43,7 +44,7 @@ export class CodexProvider {
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return mockDecision(task, snapshot);
     const status = await this.status();
     if (!status.available || !status.authenticated) throw new Error(status.error || "Local Codex is unavailable.");
-    const skills = selectSkillContext(task, await loadSkills(), snapshot.url);
+    const skills = context.selectedSkills ?? selectSkillContext(task, await loadSkills(), snapshot.url);
     let threadId = this.#threads.get(context.conversationId);
     const isNewThread = !threadId;
     if (!threadId) {
@@ -145,7 +146,7 @@ export class OpenAIResponsesProvider {
   async run(task: string, snapshot: PageSnapshot, context: AgentRunContext, onEvent?: AgentEventSink): Promise<AgentDecision> {
     if (!this.#apiKey) throw new Error("OPENAI_API_KEY is not configured in the local bridge.");
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return mockDecision(task, snapshot);
-    const skills = selectSkillContext(task, await loadSkills(), snapshot.url);
+    const skills = context.selectedSkills ?? selectSkillContext(task, await loadSkills(), snapshot.url);
     const previousResponseId = this.#previousResponses.get(context.conversationId);
     const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), previousResponseId ? [] : context.history, context.loop, skills);
     const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: prompt }];
@@ -214,14 +215,12 @@ export class AgentRouter {
   async run(task: string, snapshot: PageSnapshot, context: AgentRunContext, onEvent?: AgentEventSink): Promise<{ decision: AgentDecision; provider: string; selectedSkills: Omit<SkillSelection, "body">[] }> {
     const status = await this.status();
     if (!status.available || !status.authenticated) throw new Error(status.error || "No agent provider is available.");
-    emit(onEvent, { type: "observe", snapshotId: snapshot.snapshotId, summary: context.loop ? `Observed loop step ${context.loop.iteration + 1}` : "Observed current page" });
-    emit(onEvent, { type: "thinking", content: "Planning the next safe browser step…" });
     const selectedSkills = selectSkillContext(task, await loadSkills(), snapshot.url);
+    const providerContext = { ...context, selectedSkills };
     const decision = status.id === "openai"
-      ? await this.openai.run(task, snapshot, context, onEvent)
-      : await this.codex.run(task, snapshot, context, onEvent);
-    if (decision.kind === "action_plan") emit(onEvent, { type: "plan", summary: decision.summary, stepCount: decision.steps.length });
-    else emit(onEvent, { type: "complete", summary: decision.content.slice(0, 240) });
+      ? await this.openai.run(task, snapshot, providerContext, onEvent)
+      : await this.codex.run(task, snapshot, providerContext, onEvent);
+    if (decision.kind === "complete") emit(onEvent, { type: "complete", summary: decision.summary.slice(0, 240) });
     return { decision, provider: status.name, selectedSkills: selectedSkills.map(({ body: _body, ...skill }) => skill) };
   }
 }
@@ -241,9 +240,13 @@ function toCodexAgentStatus(status: CodexRuntimeStatus): AgentRuntimeStatus {
 export const responsesDecisionSchema = {
   type: "object",
   properties: {
-    kind: { type: "string", enum: ["answer", "action_plan"] },
+    kind: { type: "string", enum: ["answer", "action_plan", "complete", "blocked", "needs_user"] },
     content: { type: "string" },
     summary: { type: "string" },
+    evidence: { type: "array", items: { type: "string" } },
+    reason: { type: "string" },
+    recoverable: { type: "boolean" },
+    question: { type: "string" },
     snapshotId: { type: "string" },
     requiresConfirmation: { type: "boolean" },
     confidence: { type: "number" },
@@ -338,13 +341,16 @@ export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: 
     ...(snapshot.context?.screenshot ? { context: { ...snapshot.context, screenshot: { title: snapshot.context.screenshot.title, url: snapshot.context.screenshot.url } } } : {}),
   };
   return [
-    "You are a current-page observe-plan-act-verify browser agent.",
+    "You are a current-page browser agent. Internally observe, decide, act, and verify without narrating those phase names.",
     "Return exactly one JSON object without Markdown.",
-    "For analysis, completion, or questions return: {\"kind\":\"answer\",\"content\":\"...\"}.",
+    "For a request that needs no browser action return: {\"kind\":\"answer\",\"content\":\"...\"}.",
     "For an explicit browser action return: {\"kind\":\"action_plan\",\"summary\":\"...\",\"snapshotId\":\"...\",\"requiresConfirmation\":true,\"confidence\":0.8,\"steps\":[{\"action\":\"click|fill|select|scroll|focus|submit\",\"targetRef\":\"element-ref\",\"value\":\"...\",\"reason\":\"...\"}]}.",
+    "When the entire original browser task is satisfied return: {\"kind\":\"complete\",\"summary\":\"...\",\"evidence\":[\"current page evidence\"]}.",
+    "When required user input or confirmation is missing return: {\"kind\":\"needs_user\",\"question\":\"...\"}.",
+    "When no safe action or recovery is available return: {\"kind\":\"blocked\",\"reason\":\"...\",\"recoverable\":false}.",
     "Plan exactly one next action. The runtime observes and verifies the page again before asking for another action.",
     "Use only data-ai-ref values present in simplifiedDom as targetRef. Prefer visible, unoccluded, enabled elements. Never output JavaScript, CSS selectors, XPath, payment, purchase, credential, destructive, or final irreversible actions.",
-    "If the goal is already satisfied, verification failed without a safe recovery, or the user only requested analysis, return an answer instead of an action plan.",
+    "A successful action is not task completion. Once an action has been executed, never use answer to report completion; use complete with evidence from the current snapshot. Navigation alone is not completion.",
     selectedSkills.length ? `Selected Skill context:\n${selectedSkills.map((skill) => `${skill.name} (${skill.scope}): ${skill.reason}`).join("\n")}` : "",
     skills.length ? `Applicable skills:\n${skills.join("\n\n")}` : "",
     history.length ? `Recent conversation:\n${history.slice(-12).map((message) => `${message.role}: ${message.content}`).join("\n")}` : "",
@@ -356,7 +362,31 @@ export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: 
 
 export function normalizeDecision(value: unknown, snapshot: PageSnapshot): AgentDecision {
   const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  if (raw.kind !== "action_plan") return { kind: "answer", content: String(raw.content || "The agent returned no answer.") };
+  if (raw.kind === "answer") {
+    return { kind: "answer", content: String(raw.content || "The agent returned no answer.").slice(0, 8_000) };
+  }
+  if (raw.kind === "complete") {
+    const evidence = Array.isArray(raw.evidence)
+      ? raw.evidence.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.slice(0, 500)).slice(0, 8)
+      : [];
+    if (!evidence.length) {
+      return { kind: "blocked", reason: "The agent claimed completion without current page evidence.", recoverable: true };
+    }
+    return { kind: "complete", summary: String(raw.summary || "Task completed.").slice(0, 2_000), evidence };
+  }
+  if (raw.kind === "needs_user") {
+    return { kind: "needs_user", question: String(raw.question || "More information is required.").slice(0, 2_000) };
+  }
+  if (raw.kind === "blocked") {
+    return {
+      kind: "blocked",
+      reason: String(raw.reason || "The agent could not continue safely.").slice(0, 2_000),
+      recoverable: raw.recoverable === true,
+    };
+  }
+  if (raw.kind !== "action_plan") {
+    return { kind: "blocked", reason: "The agent returned an unsupported decision.", recoverable: true };
+  }
   const validRefs = new Set(snapshot.elements.filter((element) => !element.occluded).map((element) => element.ref));
   const writableRefs = new Set(snapshot.elements.filter((element) => !element.disabled && !element.readonly && !element.sensitive && !element.occluded).map((element) => element.ref));
   const steps = Array.isArray(raw.steps) ? raw.steps.flatMap((value) => {
@@ -372,7 +402,9 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
       reason: String(step.reason || "User-requested action.").slice(0, 240),
     }];
   }).slice(0, 1) : [];
-  if (!steps.length) return { kind: "answer", content: "No safe action could be matched to the current page." };
+  if (!steps.length) {
+    return { kind: "blocked", reason: "No safe action could be matched to the current page.", recoverable: true };
+  }
   return {
     kind: "action_plan",
     summary: String(raw.summary || "Proposed browser actions."),

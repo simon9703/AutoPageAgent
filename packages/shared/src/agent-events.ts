@@ -1,7 +1,5 @@
 export type AgentEventType =
-  | "observe"
   | "thinking"
-  | "plan"
   | "action"
   | "verify"
   | "complete"
@@ -13,22 +11,10 @@ export interface AgentEventBase {
   timestamp: string;
 }
 
-export interface ObserveEvent extends AgentEventBase {
-  type: "observe";
-  snapshotId: string;
-  summary?: string;
-}
-
 export interface ThinkingEvent extends AgentEventBase {
   type: "thinking";
   content: string;
   delta?: boolean;
-}
-
-export interface PlanEvent extends AgentEventBase {
-  type: "plan";
-  summary: string;
-  stepCount: number;
 }
 
 export interface ActionEvent extends AgentEventBase {
@@ -61,9 +47,7 @@ export interface ErrorEvent extends AgentEventBase {
 }
 
 export type AgentEvent =
-  | ObserveEvent
   | ThinkingEvent
-  | PlanEvent
   | ActionEvent
   | VerifyEvent
   | CompleteEvent

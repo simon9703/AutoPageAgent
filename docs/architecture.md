@@ -76,9 +76,11 @@ The bridge listens only on `127.0.0.1`. It:
 3. routes the request to authenticated local Codex or the configured Responses API;
 4. reuses provider conversation state until the user starts a new conversation, which clears both Codex thread and Responses chaining state;
 5. parses and validates the JSON decision;
-6. returns an answer or confirmation-required action plan.
+6. returns an answer, confirmation-required action plan, evidence-backed completion, blocked state, or request for user input.
 
-After the initial plan is confirmed, the extension owns the V2 runtime loop. It executes one constrained action, waits for the DOM to settle, captures a fresh snapshot, computes a fingerprint-based diff, verifies the expected state, and sends the observation back to the provider. The loop stops on completion, two consecutive verification failures, eight actions, or 90 seconds. Provider deltas and runtime lifecycle events share the `AgentEvent` protocol and are rendered by the side-panel timeline.
+After the initial plan is confirmed, the extension owns the V2 runtime loop. It executes one constrained action, waits for the page effect, captures a fresh snapshot, computes a fingerprint-based diff, verifies the expected state, and sends the observation back to the provider. The loop stops only on evidence-backed completion, a blocked/needs-user decision, two consecutive execution failures, eight actions, or 90 seconds. A navigation dispatch triggers re-observation and is not itself success.
+
+Observe and plan remain internal runtime phases. They are not rendered as synthetic timeline entries because they add no user-visible evidence. The timeline contains streamed provider output plus real action, verification, completion, and error events.
 
 ### Agent provider router
 
@@ -115,14 +117,38 @@ An action result:
 }
 ```
 
+A completed browser task:
+
+```json
+{
+  "kind": "complete",
+  "summary": "BTC details are open",
+  "evidence": ["The current page heading is BTC and the details panel is visible"]
+}
+```
+
+Other terminal or paused states:
+
+```json
+{"kind":"blocked","reason":"The page requires login","recoverable":false}
+```
+
+```json
+{"kind":"needs_user","question":"Which account should be selected?"}
+```
+
 Invariant rules:
 
 - refs must exist in the supplied snapshot;
 - refs expire whenever a new snapshot is generated;
 - no model-generated selector, XPath, or JavaScript is accepted;
-- a plan contains at most four actions;
+- the current runtime accepts one action before re-observing;
 - values are length-limited;
 - all MVP plans require explicit confirmation.
+- `answer` is only a non-operational response;
+- after browser execution starts, only `complete` can report success;
+- `complete` is rejected when it has no current-page evidence;
+- invalid or unmatched actions normalize to `blocked`, never to a successful answer.
 
 ## Provider interface
 

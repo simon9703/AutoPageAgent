@@ -22,8 +22,8 @@ A lightweight Chrome side-panel agent that understands a conversation-bound targ
 - Select a page element or image and send it as explicit message context.
 - Send a Page Agent-inspired compact, indexed DOM instead of the full page tree.
 - Show an AI pointer, target ring, and action label while approved DOM actions execute.
-- Run a bounded observe-plan-act-verify loop with a fresh snapshot and verification after every action.
-- Stream provider and runtime events into a real-time execution timeline.
+- Run a bounded browser loop with a fresh snapshot and verification after every action.
+- Show only meaningful model output, browser actions, verification results, and completion state in the execution timeline.
 - Track stable element fingerprints, occlusion, viewport, read-only, checked, expanded, and busy state.
 - Rank page Skills with explicit match reasons and keep their context active across loop iterations.
 - Browse Current page, My Skills, and Marketplace views in one local Skill Registry.
@@ -45,7 +45,7 @@ Chrome Side Panel
       -> OpenAI Responses API
 ```
 
-The model never receives arbitrary JavaScript execution. It produces either an answer or a constrained JSON action plan. The bridge validates the plan, and the content script resolves only element references belonging to the latest snapshot.
+The model never receives arbitrary JavaScript execution. It produces a constrained decision: answer, action plan, complete, blocked, or needs user. The bridge validates every decision, and the content script resolves only element references belonging to the latest snapshot. An action result or navigation is never treated as whole-task completion; `complete` requires current-page evidence.
 
 ## Quick start
 
