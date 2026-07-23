@@ -11,13 +11,23 @@ import type {
 import { defaultSkillName, formatRepositoryAnalysis } from "./formatters.js";
 import { ApprovalCard, ComposerToolButton, ContextCard, EmptyState, Message, RecordingModal, ScreenshotCard, SkillsModal, TargetTabHeader, Timeline, type SkillView } from "./components.js";
 import { Button } from "../components/ui/button.js";
+import {
+  completedConversationMessage,
+  composeAgentTask,
+  conversationStorageKey,
+  legacyConversationSession,
+  LEGACY_CONVERSATION_STORAGE_KEYS,
+  normalizeConversationSession,
+  summarizeMessageContext,
+  toAgentHistory,
+} from "./conversation.js";
 
 type Health = Extract<ServerMessage, { type: "health.result" }>;
 type Modal = "skills" | "recording" | null;
+type ConversationScope = { conversationId: string; targetTabId: number; windowId: number };
 
 export function SidePanelController() {
   const [health, setHealth] = useState<Health | null>(null);
-  const [conversationId, setConversationId] = useState<string>(crypto.randomUUID());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -42,22 +52,23 @@ export function SidePanelController() {
   const [skillName, setSkillName] = useState("");
   const [skillDescription, setSkillDescription] = useState("");
   const [editingSkillSlug, setEditingSkillSlug] = useState("");
-  const [tabs, setTabs] = useState<BrowserTabTarget[]>([]);
   const [targetTab, setTargetTab] = useState<BrowserTabTarget | null>(null);
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
-  const [targetPickerOpen, setTargetPickerOpen] = useState(false);
-  const [queuedTarget, setQueuedTarget] = useState<BrowserTabTarget | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const targetTabRef = useRef<BrowserTabTarget | null>(null);
+  const conversationIdRef = useRef<string>(crypto.randomUUID());
+  const windowIdRef = useRef<number | null>(null);
   const busyRef = useRef(false);
   const stopRequestedRef = useRef(false);
-  const conversationStartedRef = useRef(false);
+  const activeTaskRef = useRef("");
+  const pendingUserTaskRef = useRef<string | null>(null);
 
   useEffect(() => {
     void initialize();
     const listener = (message: unknown) => {
-      const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; tabId?: number; screenshot?: { dataUrl: string; title: string; url: string }; reason?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent };
+      const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; tabId?: number; windowId?: number; targetTabId?: number; screenshot?: { dataUrl: string; title: string; url: string }; reason?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent; conversationId?: string };
+      if (typeof value.windowId === "number" && value.windowId !== windowIdRef.current) return;
       if (value.type === "ui.element.selected" && value.element && value.tabId === targetTabRef.current?.tabId) {
         setSelected({ element: value.element, pageUrl: value.pageUrl ?? "", screenshot: value.screenshot });
         setSelectionMode(null);
@@ -83,80 +94,92 @@ export function SidePanelController() {
         }
         void refreshTabs();
       }
-      if (value.type === "ui.agent.event" && value.event) appendEvent(value.event);
+      if (
+        value.type === "ui.agent.event"
+        && value.event
+        && value.conversationId === conversationIdRef.current
+        && value.targetTabId === targetTabRef.current?.tabId
+        && !stopRequestedRef.current
+      ) appendEvent(value.event);
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
 
   useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" }); }, [messages, pendingPlan]);
-  useEffect(() => { busyRef.current = busy; }, [busy]);
-  useEffect(() => {
-    if (!busy && !pendingPlan && !recording && queuedTarget) {
-      setQueuedTarget(null);
-      void switchTargetNow(queuedTarget);
-    }
-  }, [busy, pendingPlan, queuedTarget, recording]);
 
   async function initialize() {
+    const currentWindow = await chrome.windows.getCurrent();
+    if (typeof currentWindow.id !== "number") throw new Error("The current browser window is unavailable.");
+    windowIdRef.current = currentWindow.id;
+    const storageKey = conversationStorageKey(currentWindow.id);
     const [stored, tabState] = await Promise.all([
-      chrome.storage.session.get(["conversationId", "chatMessages", "conversationTargetTabId"]),
-      chrome.runtime.sendMessage({ type: "ui.tabs.list" }) as Promise<{ tabs?: BrowserTabTarget[]; activeTabId?: number }>,
+      chrome.storage.session.get([storageKey, ...LEGACY_CONVERSATION_STORAGE_KEYS]),
+      chrome.runtime.sendMessage({ type: "ui.tabs.list", windowId: currentWindow.id }) as Promise<{ tabs?: BrowserTabTarget[]; activeTabId?: number; windowId?: number }>,
     ]);
     const availableTabs = tabState.tabs ?? [];
-    const storedMessages = Array.isArray(stored.chatMessages) ? (stored.chatMessages as ChatMessage[]).slice(-40) : [];
-    const conversationStarted = storedMessages.length > 0;
-    const storedTargetId = conversationStarted && typeof stored.conversationTargetTabId === "number"
-      ? stored.conversationTargetTabId
-      : undefined;
-    const initialTarget = availableTabs.find((tab) => tab.tabId === storedTargetId)
-      ?? availableTabs.find((tab) => tab.tabId === tabState.activeTabId)
-      ?? availableTabs[0]
-      ?? null;
-    const initialConversationId = typeof stored.conversationId === "string" ? stored.conversationId : crypto.randomUUID();
-    conversationStartedRef.current = conversationStarted;
-    setConversationId(initialConversationId);
+    const session = normalizeConversationSession(stored[storageKey]) ?? legacyConversationSession(stored);
+    const storedMessages = session?.messages ?? [];
+    const initialTarget = session
+      ? availableTabs.find((tab) => tab.tabId === session.targetTabId) ?? null
+      : availableTabs.find((tab) => tab.tabId === tabState.activeTabId) ?? null;
+    const initialConversationId = session?.conversationId ?? crypto.randomUUID();
+    conversationIdRef.current = initialConversationId;
+    pendingUserTaskRef.current = session?.pendingTask ?? null;
     setMessages(storedMessages);
-    setTabs(availableTabs);
     setActiveTabId(tabState.activeTabId ?? null);
     setTargetTabValue(initialTarget);
-    await chrome.storage.session.set({
-      conversationId: initialConversationId,
-      ...(initialTarget ? { conversationTargetTabId: initialTarget.tabId } : {}),
-    });
+    await persistConversation(initialConversationId, storedMessages, initialTarget?.tabId);
+    if (!stored[storageKey]) await chrome.storage.session.remove([...LEGACY_CONVERSATION_STORAGE_KEYS]);
     await Promise.all([
       refreshHealth(),
       initialTarget ? restoreSelection(initialTarget.tabId) : Promise.resolve(),
       restoreRecording(),
       refreshSkills(initialTarget?.tabId),
     ]);
-    if (!initialTarget) setNotice("Open an http(s) page, then choose it as the target.");
+    if (!initialTarget) {
+      setNotice(session
+        ? "The conversation page was closed. Click New to bind the current page."
+        : "Open an http(s) page, then click New.");
+    }
   }
 
   async function persistConversation(id: string, next: ChatMessage[], targetTabId = targetTabRef.current?.tabId) {
+    const windowId = windowIdRef.current;
+    if (typeof windowId !== "number") return;
     await chrome.storage.session.set({
-      conversationId: id,
-      chatMessages: next.slice(-40),
-      ...(typeof targetTabId === "number" ? { conversationTargetTabId: targetTabId } : {}),
+      [conversationStorageKey(windowId)]: {
+        conversationId: id,
+        messages: next.slice(-40),
+        ...(typeof targetTabId === "number" ? { targetTabId } : {}),
+        ...(pendingUserTaskRef.current ? { pendingTask: pendingUserTaskRef.current } : {}),
+      },
     });
   }
 
-  function appendMessage(role: ChatMessage["role"], content: string) {
+  function appendMessage(role: ChatMessage["role"], content: string, attachments?: ChatMessage["attachments"]) {
     setMessages((current) => {
-      const next = [...current, { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString() }].slice(-40);
-      void persistConversation(conversationId, next);
+      const next = [...current, { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString(), ...(attachments ? { attachments } : {}) }].slice(-40);
+      void persistConversation(conversationIdRef.current, next);
       return next;
     });
   }
 
   function appendEvent(event: AgentEvent) {
     setEvents((current) => {
-      const last = current.at(-1);
-      if (event.type === "thinking" && event.delta && last?.type === "thinking" && last.delta) {
-        return [...current.slice(0, -1), { ...last, content: `${last.content}${event.content}`.slice(-1_000), timestamp: event.timestamp }];
-      }
       return [...current, event].slice(-80);
     });
+  }
+
+  function isCurrentScope(scope: ConversationScope): boolean {
+    return scope.conversationId === conversationIdRef.current
+      && scope.targetTabId === targetTabRef.current?.tabId
+      && scope.windowId === windowIdRef.current;
+  }
+
+  function setBusyValue(value: boolean) {
+    busyRef.current = value;
+    setBusy(value);
   }
 
   async function refreshHealth() {
@@ -200,36 +223,21 @@ export function SidePanelController() {
   }
 
   async function refreshTabs() {
-    const response = await chrome.runtime.sendMessage({ type: "ui.tabs.list" }) as { tabs?: BrowserTabTarget[]; activeTabId?: number };
+    const windowId = windowIdRef.current;
+    if (typeof windowId !== "number") return;
+    const response = await chrome.runtime.sendMessage({ type: "ui.tabs.list", windowId }) as { tabs?: BrowserTabTarget[]; activeTabId?: number; windowId?: number };
     const availableTabs = response.tabs ?? [];
-    setTabs(availableTabs);
     setActiveTabId(response.activeTabId ?? null);
     const current = targetTabRef.current;
-    if (!conversationStartedRef.current) {
-      const active = availableTabs.find((tab) => tab.tabId === response.activeTabId) ?? availableTabs[0] ?? null;
-      setTargetTabValue(active);
-      if (active?.tabId !== current?.tabId) {
-        setSelected(null);
-        setScreenshot(null);
-        setSelectionMode(null);
-        setPendingPlan(null);
-        await Promise.all([
-          active
-            ? chrome.storage.session.set({ conversationTargetTabId: active.tabId })
-            : chrome.storage.session.remove(["conversationTargetTabId"]),
-          chrome.runtime.sendMessage({ type: "ui.selection.clear" }).catch(() => undefined),
-        ]);
-        if (active) await refreshSkills(active.tabId);
-        setNotice(active ? "Ready on the current page." : "Open an http(s) page to get started.");
-      }
-      return;
-    }
     if (!current) return;
     const refreshed = availableTabs.find((tab) => tab.tabId === current.tabId) ?? null;
     setTargetTabValue(refreshed);
     if (!refreshed) {
       setPendingPlan(null);
-      setNotice("The target page was closed. Choose another tab.");
+      setSelected(null);
+      setScreenshot(null);
+      setSelectionMode(null);
+      setNotice("The conversation page was closed. Click New to bind the current page.");
       return;
     }
     if (refreshed.url !== current.url) void refreshSkills(refreshed.tabId);
@@ -240,52 +248,37 @@ export function SidePanelController() {
     setTargetTab(tab);
   }
 
-  async function chooseTarget(tab: BrowserTabTarget) {
-    setTargetPickerOpen(false);
-    if (tab.tabId === targetTabRef.current?.tabId) return;
-    if (busy || pendingPlan || recording) {
-      setQueuedTarget(tab);
-      setNotice(recording
-        ? "Target change queued. Stop recording before switching pages."
-        : "Target change queued. The current task will finish on its original page.");
-      return;
-    }
-    await switchTargetNow(tab);
-  }
-
-  async function switchTargetNow(tab: BrowserTabTarget) {
-    const previous = targetTabRef.current;
-    setTargetTabValue(tab);
-    setSelected(null);
-    setScreenshot(null);
-    setSelectionMode(null);
-    setPendingPlan(null);
-    await Promise.all([
-      chrome.storage.session.set({ conversationTargetTabId: tab.tabId }),
-      chrome.runtime.sendMessage({ type: "ui.selection.clear" }).catch(() => undefined),
-    ]);
-    await Promise.all([restoreSelection(tab.tabId), refreshSkills(tab.tabId)]);
-    setNotice(previous ? `Target changed to ${tab.title}.` : `Target set to ${tab.title}.`);
-  }
-
   async function newConversation() {
-    const oldId = conversationId;
+    if (busyRef.current) return;
+    const windowId = windowIdRef.current;
+    if (typeof windowId !== "number") return;
+    const tabState = await chrome.runtime.sendMessage({ type: "ui.tabs.list", windowId }) as { tabs?: BrowserTabTarget[]; activeTabId?: number };
+    const activeTarget = (tabState.tabs ?? []).find((tab) => tab.tabId === tabState.activeTabId) ?? null;
+    const oldId = conversationIdRef.current;
+    const oldTargetTabId = targetTabRef.current?.tabId;
     const nextId = crypto.randomUUID();
-    setConversationId(nextId);
+    conversationIdRef.current = nextId;
     setMessages([]);
     setEvents([]);
     setPendingPlan(null);
     setSelected(null);
     setScreenshot(null);
     setPrompt("");
-    conversationStartedRef.current = false;
-    const activeTarget = tabs.find((tab) => tab.tabId === activeTabId) ?? targetTabRef.current;
-    if (activeTarget) setTargetTabValue(activeTarget);
-    setQueuedTarget(null);
-    setNotice("New conversation. Bound to the page you are viewing now.");
-    await chrome.runtime.sendMessage({ type: "ui.conversation.reset", conversationId: oldId }).catch(() => undefined);
+    activeTaskRef.current = "";
+    pendingUserTaskRef.current = null;
+    setActiveTabId(tabState.activeTabId ?? null);
+    setTargetTabValue(activeTarget);
+    setNotice(activeTarget
+      ? "New conversation. Bound to the page you are viewing now."
+      : "Open an http(s) page, then click New.");
+    await chrome.runtime.sendMessage({
+      type: "ui.conversation.reset",
+      conversationId: oldId,
+      targetTabId: oldTargetTabId,
+      windowId,
+    }).catch(() => undefined);
     await persistConversation(nextId, [], activeTarget?.tabId);
-    if (activeTarget) await refreshSkills(activeTarget.tabId);
+    if (activeTarget) await Promise.all([restoreSelection(activeTarget.tabId), refreshSkills(activeTarget.tabId)]);
     inputRef.current?.focus();
   }
 
@@ -310,9 +303,14 @@ export function SidePanelController() {
   }
 
   async function clearContext() {
+    const targetTabId = targetTabRef.current?.tabId;
     setSelected(null);
     setScreenshot(null);
-    await chrome.runtime.sendMessage({ type: "ui.selection.clear" }).catch(() => undefined);
+    await chrome.runtime.sendMessage({
+      type: "ui.selection.clear",
+      targetTabId,
+      windowId: windowIdRef.current,
+    }).catch(() => undefined);
   }
 
   async function submitTask(event?: React.FormEvent) {
@@ -320,36 +318,49 @@ export function SidePanelController() {
     const text = prompt.trim();
     if (!text || busy) return;
     if (!targetTab) return setNotice("Choose a target page first.");
-    conversationStartedRef.current = true;
-    const history = messages.slice(-20);
+    const scope: ConversationScope = {
+      conversationId: conversationIdRef.current,
+      targetTabId: targetTab.tabId,
+      windowId: targetTab.windowId,
+    };
+    const task = composeAgentTask(text, pendingUserTaskRef.current);
+    activeTaskRef.current = task;
+    pendingUserTaskRef.current = null;
+    const history = toAgentHistory(messages.slice(-20));
+    const attachments = summarizeMessageContext(selected, screenshot);
     setEvents([]);
-    appendMessage("user", text);
+    appendMessage("user", text, attachments);
     setPrompt("");
-    setBusy(true);
+    setBusyValue(true);
     stopRequestedRef.current = false;
     setPendingPlan(null);
-    setNotice("Reading the current page and planning…");
+    setNotice("Agent is working…");
     try {
       const response = await chrome.runtime.sendMessage({
-        type: "ui.run", task: text, conversationId, history, targetTabId: targetTab.tabId,
+        type: "ui.run", task, history, ...scope,
         ...(screenshot ? { screenshot: { dataUrl: screenshot.dataUrl, title: screenshot.title, url: screenshot.url } } : {}),
       }) as ServerMessage;
+      if (stopRequestedRef.current || !isCurrentScope(scope)) return;
       if (response.type === "agent.error") throw new Error(response.error);
       if (response.type !== "agent.result") throw new Error("Unexpected bridge response.");
+      await clearContext();
       if (response.decision.kind === "action_plan") {
         setPendingPlan(response.decision);
-        appendMessage("assistant", response.decision.summary);
         setNotice("Action ready. Confirm once to let the agent act, observe, and continue automatically.");
       } else if (response.decision.kind === "answer") {
+        activeTaskRef.current = "";
         appendMessage("assistant", response.decision.content);
         setNotice(`Answered by ${response.provider}.`);
       } else if (response.decision.kind === "complete") {
+        activeTaskRef.current = "";
         appendMessage("assistant", response.decision.summary);
         setNotice("The requested page state is already complete.");
       } else if (response.decision.kind === "needs_user") {
+        pendingUserTaskRef.current = task;
         appendMessage("assistant", response.decision.question);
         setNotice("The agent needs more information.");
       } else {
+        activeTaskRef.current = "";
         appendMessage("assistant", `Unable to continue: ${response.decision.reason}`);
         setNotice(response.decision.reason);
       }
@@ -359,42 +370,55 @@ export function SidePanelController() {
         appendMessage("assistant", `Error: ${message}`);
         setNotice(message);
       }
-    } finally { setBusy(false); }
+    } finally { setBusyValue(false); }
   }
 
   async function executePlan() {
     if (!pendingPlan || busy) return;
     const plan = pendingPlan;
     setPendingPlan(null);
-    setBusy(true);
+    setBusyValue(true);
     stopRequestedRef.current = false;
     setNotice("Agent is operating the page and verifying each step…");
     try {
-      const response = await chrome.runtime.sendMessage({ type: "ui.execute", plan }) as {
+      const target = targetTabRef.current;
+      const windowId = windowIdRef.current;
+      if (!target || typeof windowId !== "number") throw new Error("The conversation page is unavailable. Click New to bind the current page.");
+      const scope: ConversationScope = { conversationId: conversationIdRef.current, targetTabId: target.tabId, windowId };
+      const response = await chrome.runtime.sendMessage({ type: "ui.execute", plan, ...scope }) as {
         ok?: boolean;
         status?: "completed" | "needs_user" | "blocked";
         answer?: string;
         question?: string;
         evidence?: string[];
         steps?: number;
+        recoverable?: boolean;
         error?: string;
       };
+      if (stopRequestedRef.current || !isCurrentScope(scope)) return;
       if (response.status === "needs_user") {
+        pendingUserTaskRef.current = activeTaskRef.current;
         appendMessage("assistant", response.question ?? "More information is required.");
         setNotice("The agent needs more information.");
         return;
       }
+      if (response.status === "blocked") {
+        activeTaskRef.current = "";
+        appendMessage("assistant", `Unable to continue: ${response.error ?? "The page task is blocked."}`);
+        setNotice(response.recoverable ? "The page changed. You can revise the request and try again." : "The agent cannot continue safely.");
+        return;
+      }
       if (!response.ok) throw new Error(response.error ?? "Action failed.");
-      const message = `${response.answer ?? "Task completed."}\n\nCompleted in ${response.steps ?? 1} agent step(s).`;
-      appendMessage("assistant", message);
-      setNotice("Page task completed.");
+      activeTaskRef.current = "";
+      appendMessage("assistant", completedConversationMessage(response.answer));
+      setNotice(`Page task completed in ${response.steps ?? 1} step(s).`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!stopRequestedRef.current) {
         appendMessage("assistant", `Action stopped: ${message}`);
         setNotice(message);
       }
-    } finally { setBusy(false); }
+    } finally { setBusyValue(false); }
   }
 
   async function stopAgent() {
@@ -402,9 +426,19 @@ export function SidePanelController() {
     stopRequestedRef.current = true;
     setPendingPlan(null);
     setNotice("Stopping the agent…");
-    const response = await chrome.runtime.sendMessage({ type: "ui.agent.stop", conversationId }) as { ok?: boolean; stopped?: boolean; error?: string };
-    setBusy(false);
+    const response = await chrome.runtime.sendMessage({
+      type: "ui.agent.stop",
+      conversationId: conversationIdRef.current,
+      targetTabId: targetTabRef.current?.tabId,
+      windowId: windowIdRef.current,
+    }) as { ok?: boolean; stopped?: boolean; error?: string };
     setNotice(response.ok ? "Agent stopped." : `Stop failed: ${response.error ?? "Unknown error"}`);
+  }
+
+  async function showConversationPage() {
+    const targetTabId = targetTabRef.current?.tabId;
+    if (typeof targetTabId !== "number") return;
+    await chrome.runtime.sendMessage({ type: "ui.tab.activate", targetTabId }).catch(() => undefined);
   }
 
   async function analyzeCode() {
@@ -492,16 +526,12 @@ export function SidePanelController() {
       <header className="relative flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200/80 bg-white px-4">
         <TargetTabHeader
           target={targetTab}
-          tabs={tabs}
           activeTabId={activeTabId}
-          open={targetPickerOpen}
-          queued={queuedTarget}
-          onToggle={() => setTargetPickerOpen((current) => !current)}
-          onChoose={(tab) => void chooseTarget(tab)}
+          onActivate={() => void showConversationPage()}
         />
         <div className="flex items-center gap-1.5">
           <span className={`h-2 w-2 rounded-full ${health?.ok ? "bg-emerald-500" : "bg-amber-400"}`} title={health?.agent.error ?? health?.agent.name ?? "Bridge unavailable"} />
-          <Button size="sm" onClick={() => void newConversation()} aria-label="New conversation">
+          <Button size="sm" disabled={busy} onClick={() => void newConversation()} aria-label="New conversation">
             <Plus size={14} />
             New
           </Button>

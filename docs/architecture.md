@@ -14,7 +14,7 @@ The MVP implements the browser-page domain, lightweight performance evidence, lo
 
 ### Chrome extension
 
-- **Side Panel** is a React + Tailwind interface with a conversation-bound target-tab selector, icon-first page tools, modal Skill/recording management, a fixed composer, and an adjacent action-approval card.
+- **Side Panel** is a React + Tailwind interface with a conversation-bound page summary, icon-first page tools, modal Skill/recording management, a fixed composer, and an adjacent action-approval card.
 - **Background service worker** owns the localhost connection and routes messages to explicit target tab ids.
 - **Content script** creates a bounded snapshot and executes approved actions.
 - **Element picker** captures source metadata and stable textual/attribute clues for repository analysis.
@@ -44,28 +44,33 @@ packages/extension/src/
 └── sidepanel/
     ├── App.tsx            # stable component entry
     ├── controller.tsx     # Chrome state, persistence, workflow orchestration
+    ├── conversation.ts    # pure continuation and message formatting rules
     ├── components.tsx     # presentation-only UI components
     └── formatters.ts      # pure presentation formatting
 ```
 
 Entrypoints stay minimal. Runtime/controller modules own browser lifecycle and orchestration, while feature modules own one bounded concern. Cross-process protocol types remain in `packages/shared`.
 
-The snapshot contains page metadata, selected text, a limited body-text extraction, headings, at most 160 interactive elements near the viewport, a Page Agent-inspired simplified DOM, page/scroll geometry, and at most 100 resource timing entries. DOM nodes remain inside the content script and are represented externally by ephemeral refs. Candidate elements are bounded to a 700-pixel expansion around the viewport and checked against the browser's top-layer hit target before inclusion.
+The normal agent snapshot contains page metadata, selected text, a limited body-text extraction, headings, at most 200 interactive elements near the viewport, a Page Agent-inspired simplified DOM, and page/scroll geometry. Performance evidence is an optional capability: Navigation and Resource Timing are attached only when the task explicitly asks about performance, network, requests, or APIs. Repository analysis reads the same evidence through a separate on-demand message. Ordinary action and verification snapshots never repeat Resource Timing collection. DOM nodes remain inside the content script and are represented externally by ephemeral refs. Candidate elements are bounded to a 700-pixel expansion around the viewport and checked against the browser's top-layer hit target before inclusion.
 
-The side panel can attach one inspected element, page image, or captured viewport to the current conversation. The Responses provider sends the selected visual as an image input. Local Codex receives the selected element or screenshot metadata, but screenshot data URLs are removed from its text prompt. Removing the context chip clears the background-owned selection as well.
+The side panel can attach one inspected element, page image, or captured viewport to the next message. The Responses provider sends the selected visual as an image input. Local Codex receives the selected element or screenshot metadata, but screenshot data URLs are removed from its text prompt. A successful initial agent response consumes the pending context and clears it from the composer. The user message keeps a compact, read-only attachment summary across side-panel reloads, while later agent-history requests omit the summary and all screenshot binary data.
 
 ### Conversation and tab lifecycle
 
-A conversation binds to the HTTP(S) tab that was active when the conversation was created. Browser focus and agent routing are separate:
+A browser window owns one current conversation. Its session is stored under a window-scoped key and binds to the HTTP(S) tab that was active when the conversation was created. Browser focus and agent routing are separate:
 
 - changing the browser's active tab only updates the side panel's viewing indicator;
 - questions, Skills, repository analysis, recording, and DOM actions continue to use the conversation target;
-- the target selector is the explicit way to rebind the conversation;
-- a target change requested while an agent run or approval is pending is queued for the next task;
+- the page summary activates the bound tab but never rebinds the conversation;
+- **New** discards the current conversation, creates a new id, and binds the currently viewed tab;
 - selection and screenshot commands activate the target because they depend on a visible page;
-- closing the target leaves the conversation intact but requires choosing another page.
+- navigation inside the target tab remains in the same conversation;
+- closing the target stops an active run and requires **New**; it never falls back to another open tab;
+- agent events and returned results are accepted only when `windowId`, `conversationId`, and `targetTabId` all match;
+- **New** remains disabled while a run is active; stopping keeps the UI busy until cancellation has reached the running provider;
+- a `needs_user` decision persists the original task and combines the next user reply with it instead of starting an unrelated task.
 
-Every planned run persists its `tabId`, initial page URL, and snapshot id. The confirmed observe-act-verify loop reuses that immutable `tabId` for every action, navigation recovery, observation, and verification step. It never falls back to the currently active browser tab.
+Every planned run persists its `windowId`, `conversationId`, `tabId`, initial page URL, and snapshot id. The confirmed observe-act-verify loop reuses that immutable scope for every action, navigation recovery, observation, and verification step. It never falls back to the currently active browser tab. Pending selected-element context is keyed by target tab so another window cannot overwrite it.
 
 ### Local bridge
 
@@ -78,9 +83,11 @@ The bridge listens only on `127.0.0.1`. It:
 5. parses and validates the JSON decision;
 6. returns an answer, confirmation-required action plan, evidence-backed completion, blocked state, or request for user input.
 
-After the initial plan is confirmed, the extension owns the V2 runtime loop. It executes one constrained action, waits for the page effect, captures a fresh snapshot, computes a fingerprint-based diff, verifies the expected state, and sends the observation back to the provider. The loop stops only on evidence-backed completion, a blocked/needs-user decision, two consecutive execution failures, eight actions, or 90 seconds. A navigation dispatch triggers re-observation and is not itself success.
+After the initial plan is confirmed, the extension owns the V2 runtime loop. It executes one constrained action, waits for the page effect with an action-specific settle budget, captures a fresh structural snapshot, computes a fingerprint-based diff, verifies the expected state, and sends the observation back to the provider. Each continuation request carries that fresh snapshot once; loop metadata contains only the action, verification, and remaining budget instead of duplicating the page payload. Direct state actions such as fill and focus use a short wait; select, scroll, click, and submit retain progressively longer bounds for asynchronous page effects. The loop stops only on evidence-backed completion, a blocked/needs-user decision, two consecutive execution failures, eight actions, or 90 seconds. A navigation dispatch triggers re-observation and is not itself success.
 
-Observe and plan remain internal runtime phases. They are not rendered as synthetic timeline entries because they add no user-visible evidence. The timeline contains streamed provider output plus real action, verification, completion, and error events.
+Observe and plan remain internal runtime phases. They are not rendered as synthetic timeline entries because they add no user-visible evidence. Structured provider output is also kept internal: partial JSON tokens are protocol data, not useful progress. The timeline contains only real action, verification, completion, and error events. The initial action plan is shown once in the approval card rather than duplicated as an assistant message. Final assistant messages contain the user-facing result only; internal action counts remain in the status/timeline UI.
+
+Completion evidence is validated against the latest snapshot. Every evidence item must be exact text or a URL present in that snapshot; a non-empty but invented explanation cannot close the loop. Click, submit, and scroll actions also require an observable page effect before verification succeeds.
 
 ### Agent provider router
 
@@ -88,7 +95,7 @@ Observe and plan remain internal runtime phases. They are not rendered as synthe
 
 ### Codex app-server adapter
 
-The bridge discovers the Codex executable, launches `codex app-server --listen stdio://`, initializes it, checks `account/read`, sends JSON-RPC requests, and consumes newline-delimited notifications. Provider API-key environment variables are removed from the spawned process; primary agent authentication uses the user's existing ChatGPT/Codex OAuth login. API-key Codex sessions are not used for main agent prompts, matching Chromex's boundary. A bridge-process conversation id maps to a reusable Codex thread.
+The bridge discovers the Codex executable, launches `codex app-server --listen stdio://`, initializes it, checks `account/read`, sends JSON-RPC requests, and consumes newline-delimited notifications. The runtime status is cached briefly so an active loop does not repeat the same account lookup on every turn. Provider API-key environment variables are removed from the spawned process; primary agent authentication uses the user's existing ChatGPT/Codex OAuth login. API-key Codex sessions are not used for main agent prompts, matching Chromex's boundary. A bridge-process conversation id maps to a reusable Codex thread.
 
 ### Responses API adapter
 

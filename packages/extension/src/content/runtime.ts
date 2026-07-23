@@ -10,6 +10,8 @@ import type {
   PageSnapshotDiff,
 } from "@auto-page-agent/shared";
 import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer } from "./agent-activity.js";
+import { getActionSettlePolicy } from "./action-settle.js";
+import { hasObservableActionEffect } from "./action-verification.js";
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
 import { buildSelector, buildSimplifiedDom, cleanText, collectPageInfo, createElementFingerprint, delay, getAccessibleLabel, inferRole, isHiddenInput, isNearViewport, isSensitiveElement, isTopLayerElement, isVisible, round, setElementValue, shouldExposeValue, simulateClick } from "./dom.js";
@@ -26,7 +28,7 @@ new MutationObserver((records) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "page.snapshot") {
-    sendResponse(createPageSnapshot());
+    sendResponse(createPageSnapshot(message.includePerformance === true));
     return false;
   }
   if (message?.type === "page.actions.execute") {
@@ -75,7 +77,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 
 
-function createPageSnapshot(): PageSnapshot {
+function createPageSnapshot(includePerformance = false): PageSnapshot {
   currentSnapshotId = `${Date.now()}-${crypto.randomUUID()}`;
   currentSnapshotUrl = location.href;
   elementRefs.clear();
@@ -135,7 +137,7 @@ function createPageSnapshot(): PageSnapshot {
     simplifiedDom,
     pageInfo,
     elements,
-    performance: collectPerformance(),
+    ...(includePerformance ? { performance: collectPerformance() } : {}),
     capturedAt: new Date().toISOString(),
     domVersion,
   };
@@ -192,17 +194,18 @@ async function executePlan(plan: BrowserActionPlan): Promise<ActionExecutionResu
   const targetFingerprint = step.targetRef ? before.elements.find((element) => element.ref === step.targetRef)?.fingerprint : undefined;
   try {
     const results = [await executeStep(step)];
-    await waitForDomSettled();
+    await waitForActionSettled(step);
     const after = createPageSnapshot();
     const diff = diffSnapshots(before, after);
-    const verification = verifyAction(step, after, diff, targetFingerprint);
+    const verification = verifyAction(step, before, after, diff, targetFingerprint);
     return { ok: verification.success, results, snapshot: after, verification, ...(!verification.success ? { error: verification.summary } : {}) };
   } finally {
     hideAgentFrame(650);
   }
 }
 
-async function waitForDomSettled(maxWaitMs = 1_800, quietMs = 250): Promise<void> {
+async function waitForActionSettled(step: BrowserActionStep): Promise<void> {
+  const { maxWaitMs, quietMs } = getActionSettlePolicy(step.action);
   const start = Date.now();
   let lastVersion = domVersion;
   let quietSince = Date.now();
@@ -233,7 +236,7 @@ export function diffSnapshots(before: PageSnapshot, after: PageSnapshot): PageSn
   return { urlChanged: before.url !== after.url, titleChanged: before.title !== after.title, addedFingerprints, removedFingerprints, changedFingerprints, summary };
 }
 
-function verifyAction(step: BrowserActionStep, snapshot: PageSnapshot, diff: PageSnapshotDiff, targetFingerprint?: string): ActionVerification {
+function verifyAction(step: BrowserActionStep, before: PageSnapshot, snapshot: PageSnapshot, diff: PageSnapshotDiff, targetFingerprint?: string): ActionVerification {
   const target = targetFingerprint ? snapshot.elements.find((element) => element.fingerprint === targetFingerprint) : undefined;
   let success = true;
   let summary = "Action dispatched and page observation completed.";
@@ -245,9 +248,11 @@ function verifyAction(step: BrowserActionStep, snapshot: PageSnapshot, diff: Pag
     success = Boolean(active && createElementFingerprint(active) === targetFingerprint?.split("-")[0]);
     summary = success ? "The target received focus." : "The target did not retain focus.";
   } else if (step.action === "scroll") {
-    summary = "The viewport position was observed after scrolling.";
-  } else if (diff.summary.length) {
-    summary = diff.summary.join("; ");
+    success = hasObservableActionEffect(step, before, snapshot, diff);
+    summary = success ? "The viewport position changed after scrolling." : "The viewport did not move after the scroll action.";
+  } else {
+    success = hasObservableActionEffect(step, before, snapshot, diff);
+    summary = success ? diff.summary.join("; ") : "The action produced no observable page change.";
   }
   return { success, summary, changes: diff.summary, diff };
 }
@@ -256,6 +261,14 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   if (!["click", "fill", "select", "scroll", "focus", "submit"].includes(step.action)) throw new Error("Unsupported browser action.");
   if (step.action === "scroll") {
     const amount = Math.min(Math.max(step.amountPx ?? 600, 0), 2_000);
+    if (step.direction === "top") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return { action: step.action, ok: true };
+    }
+    if (step.direction === "bottom") {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+      return { action: step.action, ok: true };
+    }
     const sign = step.direction === "up" || step.direction === "left" ? -1 : 1;
     window.scrollBy({ top: step.direction === "left" || step.direction === "right" ? 0 : amount * sign, left: step.direction === "left" || step.direction === "right" ? amount * sign : 0, behavior: "smooth" });
     return { action: step.action, ok: true };

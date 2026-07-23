@@ -131,7 +131,22 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  attachments?: ChatMessageAttachment[];
 }
+
+export type ChatMessageAttachment =
+  | {
+      kind: "element";
+      tagName: string;
+      label: string;
+      pageUrl: string;
+      captured: boolean;
+    }
+  | {
+      kind: "screenshot";
+      title: string;
+      pageUrl: string;
+    };
 
 export interface BrowserTabTarget {
   tabId: number;
@@ -168,7 +183,7 @@ export interface PageSnapshot {
     screenshot?: { dataUrl: string; title: string; url: string };
   };
   elements: PageElementSnapshot[];
-  performance: PerformanceSnapshot;
+  performance?: PerformanceSnapshot;
   capturedAt: string;
   domVersion: number;
 }
@@ -329,7 +344,6 @@ export interface AgentLoopContext {
   maxSteps: number;
   timeoutMs: number;
   startedAt: number;
-  previousSnapshot?: PageSnapshot;
   lastAction?: BrowserActionStep;
   lastVerification?: ActionVerification;
 }

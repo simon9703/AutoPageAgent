@@ -6,8 +6,8 @@ A lightweight Chrome side-panel agent that understands a conversation-bound targ
 
 - Ask questions about the current page, selected text, headings, fields, links, and visible content.
 - Keep a conversation bound to its target tab while freely viewing other browser tabs.
-- Inspect or explicitly switch the target from the page selector at the top of the side panel.
-- Inspect Navigation Timing and the slowest/largest Resource Timing entries.
+- Click the page summary at the top of the side panel to return to the bound tab.
+- Inspect Navigation Timing and the slowest/largest Resource Timing entries when a task explicitly asks for performance or network analysis.
 - Plan `click`, `fill`, `select`, `scroll`, `focus`, and `submit` actions.
 - Validate every element reference against a versioned page snapshot.
 - Show an approval card before actions execute.
@@ -19,11 +19,14 @@ A lightweight Chrome side-panel agent that understands a conversation-bound targ
 - Save a recording as a reusable `SKILL.md` plus declarative `workflow.json` with runtime variables.
 - Discover a page-specific Skill function list in the side panel and refresh it automatically on tab/navigation changes.
 - Continue a conversation in the side panel, with a reusable Codex thread or Responses `previous_response_id`.
-- Select a page element or image and send it as explicit message context.
+- Resume the original browser task when the agent asks for missing user input.
+- Select a page element or image as explicit one-message model context, with a compact attachment summary retained in the conversation.
 - Send a Page Agent-inspired compact, indexed DOM instead of the full page tree.
 - Show an AI pointer, target ring, and action label while approved DOM actions execute.
 - Run a bounded browser loop with a fresh snapshot and verification after every action.
+- Keep ordinary snapshots structural; collect Performance and API request evidence only for explicit analysis tasks.
 - Show only meaningful model output, browser actions, verification results, and completion state in the execution timeline.
+- Keep plan summaries in the approval card and runtime step counts in status/timeline UI instead of duplicating them in assistant messages.
 - Track stable element fingerprints, occlusion, viewport, read-only, checked, expanded, and busy state.
 - Rank page Skills with explicit match reasons and keep their context active across loop iterations.
 - Browse Current page, My Skills, and Marketplace views in one local Skill Registry.
@@ -32,6 +35,8 @@ A lightweight Chrome side-panel agent that understands a conversation-bound targ
 - Keep user Skills in durable local storage outside the extension/repository package.
 - Use a compact React + Tailwind side panel with icon-first page tools, modal Skill browsing, and a fixed conversation composer.
 - Start a genuinely fresh provider conversation with **New**, clearing chat, pending actions, selected page context, Codex thread mapping, and Responses chaining state.
+- Keep **New** unavailable until an active run has stopped, and ignore late results or events from a stopped or different conversation.
+- Keep one current conversation per browser window, with messages and pending follow-up state isolated by window.
 
 ## Architecture
 
@@ -65,7 +70,7 @@ Then:
 4. Select `packages/extension/dist`.
 5. Open an HTTP(S) page and click the extension icon.
 
-A new conversation binds to the tab that is active when it is created. Switching browser tabs does not move or stop the agent; use the target-page selector to change the conversation target explicitly.
+A new conversation binds to the HTTP(S) tab that is active in that browser window when it is created. Switching browser tabs does not move or stop the agent, and navigation inside the bound tab remains part of the same conversation. The target cannot be rebound in place: click **New** to start over on the currently viewed tab. If the bound tab closes, the agent stops and asks you to click **New**.
 
 To exercise the complete extension/bridge flow without starting Codex:
 

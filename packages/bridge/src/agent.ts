@@ -20,11 +20,26 @@ export class CodexProvider {
   readonly name = "Local Codex";
   #client = new CodexAppServerClient();
   #threads = new Map<string, string>();
+  #statusCache?: { expiresAt: number; value: CodexRuntimeStatus };
+  #statusRequest?: Promise<CodexRuntimeStatus>;
 
   reset(conversationId: string): void { this.#threads.delete(conversationId); }
 
   async status(): Promise<CodexRuntimeStatus> {
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return { available: true, authenticated: true, authMode: "chatgpt", command: "mock" };
+    if (this.#statusCache && this.#statusCache.expiresAt > Date.now()) return this.#statusCache.value;
+    if (this.#statusRequest) return this.#statusRequest;
+    this.#statusRequest = this.#readStatus();
+    try {
+      const value = await this.#statusRequest;
+      this.#statusCache = { expiresAt: Date.now() + 15_000, value };
+      return value;
+    } finally {
+      this.#statusRequest = undefined;
+    }
+  }
+
+  async #readStatus(): Promise<CodexRuntimeStatus> {
     const runtime = await this.#client.inspectRuntime();
     if (!runtime.available) return { available: false, authenticated: false, authMode: null, error: runtime.configuredCommandInvalid ? "Invalid CODEX_PATH." : "Codex CLI not found." };
     try {
@@ -40,7 +55,7 @@ export class CodexProvider {
     }
   }
 
-  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext, onEvent?: AgentEventSink): Promise<AgentDecision> {
+  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext, _onEvent?: AgentEventSink): Promise<AgentDecision> {
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return mockDecision(task, snapshot);
     const status = await this.status();
     if (!status.available || !status.authenticated) throw new Error(status.error || "Local Codex is unavailable.");
@@ -59,10 +74,10 @@ export class CodexProvider {
       this.#threads.set(context.conversationId, threadId);
     }
     const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), isNewThread ? context.history : [], context.loop, skills);
-    return this.#runTurn(threadId, prompt, snapshot, context.signal, onEvent);
+    return this.#runTurn(threadId, prompt, snapshot, context.signal);
   }
 
-  async #runTurn(threadId: string, prompt: string, snapshot: PageSnapshot, signal?: AbortSignal, onEvent?: AgentEventSink): Promise<AgentDecision> {
+  async #runTurn(threadId: string, prompt: string, snapshot: PageSnapshot, signal?: AbortSignal): Promise<AgentDecision> {
     if (signal?.aborted) throw new Error("Agent run stopped.");
     let turnId = "";
     let text = "";
@@ -78,7 +93,7 @@ export class CodexProvider {
         }
         if (notification.method === "item/agentMessage/delta" || notification.method === "item/outputText/delta") {
           const delta = typeof params.delta === "string" ? params.delta : "";
-          if (delta) { text += delta; emit(onEvent, { type: "thinking", content: delta, delta: true }); }
+          if (delta) text += delta;
         }
         if (notification.method === "error") { unsubscribe(); reject(new Error(readErrorMessage(params.error) || "Codex app-server reported an error.")); }
         if (notification.method === "turn/completed") {
@@ -143,7 +158,7 @@ export class OpenAIResponsesProvider {
     };
   }
 
-  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext, onEvent?: AgentEventSink): Promise<AgentDecision> {
+  async run(task: string, snapshot: PageSnapshot, context: AgentRunContext, _onEvent?: AgentEventSink): Promise<AgentDecision> {
     if (!this.#apiKey) throw new Error("OPENAI_API_KEY is not configured in the local bridge.");
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return mockDecision(task, snapshot);
     const skills = context.selectedSkills ?? selectSkillContext(task, await loadSkills(), snapshot.url);
@@ -176,7 +191,7 @@ export class OpenAIResponsesProvider {
         const payload = await response.json() as Record<string, unknown>;
         throw new Error(readResponsesError(payload) || `OpenAI Responses API failed with HTTP ${response.status}.`);
       }
-      const streamed = await readResponsesStream(response, onEvent);
+      const streamed = await readResponsesStream(response);
       if (streamed.responseId) this.#previousResponses.set(context.conversationId, streamed.responseId);
       return normalizeDecision(extractJson(streamed.text), snapshot);
     } catch (error) {
@@ -270,7 +285,7 @@ export function extractResponsesText(value: unknown): string {
   }).join("\n").trim();
 }
 
-export async function readResponsesStream(response: Response, onEvent?: AgentEventSink): Promise<{ text: string; responseId?: string }> {
+export async function readResponsesStream(response: Response): Promise<{ text: string; responseId?: string }> {
   if (!response.headers.get("content-type")?.includes("text/event-stream")) {
     const payload = await response.json() as Record<string, unknown>;
     return { text: extractResponsesText(payload), ...(typeof payload.id === "string" ? { responseId: payload.id } : {}) };
@@ -288,7 +303,6 @@ export async function readResponsesStream(response: Response, onEvent?: AgentEve
     try { event = JSON.parse(data) as Record<string, unknown>; } catch { return; }
     if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
       text += event.delta;
-      emit(onEvent, { type: "thinking", content: event.delta, delta: true });
     }
     const completed = event.response && typeof event.response === "object" ? event.response as Record<string, unknown> : undefined;
     if (completed) {
@@ -345,12 +359,12 @@ export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: 
     "Return exactly one JSON object without Markdown.",
     "For a request that needs no browser action return: {\"kind\":\"answer\",\"content\":\"...\"}.",
     "For an explicit browser action return: {\"kind\":\"action_plan\",\"summary\":\"...\",\"snapshotId\":\"...\",\"requiresConfirmation\":true,\"confidence\":0.8,\"steps\":[{\"action\":\"click|fill|select|scroll|focus|submit\",\"targetRef\":\"element-ref\",\"value\":\"...\",\"reason\":\"...\"}]}.",
-    "When the entire original browser task is satisfied return: {\"kind\":\"complete\",\"summary\":\"...\",\"evidence\":[\"current page evidence\"]}.",
+    "When the entire original browser task is satisfied return: {\"kind\":\"complete\",\"summary\":\"...\",\"evidence\":[\"exact text or URL copied from the current snapshot\"]}.",
     "When required user input or confirmation is missing return: {\"kind\":\"needs_user\",\"question\":\"...\"}.",
     "When no safe action or recovery is available return: {\"kind\":\"blocked\",\"reason\":\"...\",\"recoverable\":false}.",
     "Plan exactly one next action. The runtime observes and verifies the page again before asking for another action.",
     "Use only data-ai-ref values present in simplifiedDom as targetRef. Prefer visible, unoccluded, enabled elements. Never output JavaScript, CSS selectors, XPath, payment, purchase, credential, destructive, or final irreversible actions.",
-    "A successful action is not task completion. Once an action has been executed, never use answer to report completion; use complete with evidence from the current snapshot. Navigation alone is not completion.",
+    "A successful action is not task completion. Once an action has been executed, never use answer to report completion; use complete with exact evidence copied from the current snapshot. Navigation alone is not completion.",
     selectedSkills.length ? `Selected Skill context:\n${selectedSkills.map((skill) => `${skill.name} (${skill.scope}): ${skill.reason}`).join("\n")}` : "",
     skills.length ? `Applicable skills:\n${skills.join("\n\n")}` : "",
     history.length ? `Recent conversation:\n${history.slice(-12).map((message) => `${message.role}: ${message.content}`).join("\n")}` : "",
@@ -371,6 +385,9 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
       : [];
     if (!evidence.length) {
       return { kind: "blocked", reason: "The agent claimed completion without current page evidence.", recoverable: true };
+    }
+    if (!evidence.every((item) => completionEvidenceMatchesSnapshot(item, snapshot))) {
+      return { kind: "blocked", reason: "The agent claimed completion with evidence that is not present in the current page snapshot.", recoverable: true };
     }
     return { kind: "complete", summary: String(raw.summary || "Task completed.").slice(0, 2_000), evidence };
   }
@@ -415,6 +432,31 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
   };
 }
 
+export function completionEvidenceMatchesSnapshot(evidence: string, snapshot: PageSnapshot): boolean {
+  const normalizedEvidence = normalizeEvidence(evidence);
+  if (normalizedEvidence.length < 2) return false;
+  const pageEvidence = [
+    snapshot.url,
+    snapshot.title,
+    snapshot.selectedText,
+    snapshot.mainText,
+    snapshot.simplifiedDom,
+    ...snapshot.headings.map((heading) => heading.text),
+    ...snapshot.elements.flatMap((element) => [
+      element.label,
+      element.text,
+      element.value ?? "",
+      element.href ?? "",
+      element.placeholder ?? "",
+    ]),
+  ].map(normalizeEvidence);
+  return pageEvidence.some((candidate) => candidate.includes(normalizedEvidence));
+}
+
+function normalizeEvidence(value: string): string {
+  return value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+}
+
 export function extractJson(text: string): unknown {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/iu.exec(text)?.[1];
   const candidate = fenced ?? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
@@ -423,7 +465,10 @@ export function extractJson(text: string): unknown {
 }
 
 function mockDecision(task: string, snapshot: PageSnapshot): AgentDecision {
-  return { kind: "answer", content: `Mock analysis for ${snapshot.title}\n\nTask: ${task}\nInteractive elements: ${snapshot.elements.length}\nRequests: ${snapshot.performance.summary.requestCount}\nSlow requests: ${snapshot.performance.summary.slowRequestCount}` };
+  const performanceSummary = snapshot.performance
+    ? `\nRequests: ${snapshot.performance.summary.requestCount}\nSlow requests: ${snapshot.performance.summary.slowRequestCount}`
+    : "";
+  return { kind: "answer", content: `Mock analysis for ${snapshot.title}\n\nTask: ${task}\nInteractive elements: ${snapshot.elements.length}${performanceSummary}` };
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {

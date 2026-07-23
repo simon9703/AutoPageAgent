@@ -65,7 +65,13 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 
 - Preserve the internal flow `Observe -> Plan -> confirm -> Act one step -> settle -> Observe -> Verify -> continue/stop`.
 - A continuation turn receives the fresh snapshot, snapshot diff, prior action result, failure count, and remaining budget.
-- Do not expose static Observe/Plan labels as fake progress. Emit only meaningful provider output, real action/verification updates, completion, and errors through the shared `AgentEvent` protocol.
+- Send the fresh snapshot only once per continuation request; do not duplicate it inside loop metadata.
+- Do not expose static Observe/Plan labels or partial provider JSON as progress. Emit only real action/verification updates, completion, and errors through the shared `AgentEvent` protocol.
+- Scope every UI agent event and returned result to `windowId + conversationId + targetTabId`. A stopped or different conversation must not mutate the current timeline or append a late assistant result.
+- Keep one current conversation per browser window. **New** binds the active tab in that window; tab focus changes never rebind it, target navigation stays in the conversation, and a closed target requires **New**.
+- Keep initial plans in the approval card, runtime step counts in status/timeline UI, and user-facing answers in chat. Do not duplicate plan or execution metadata as assistant messages.
+- Treat selected-element and screenshot attachments as one-message model context after a successful initial agent response. Retain only a compact, read-only attachment summary on the user message; never resend that summary or screenshot binary in later agent history.
+- Preserve `needs_user` continuation: the next user reply must resume the pending original task, including after the side panel reloads.
 - Keep `answer`, `complete`, `blocked`, and `needs_user` semantically separate. After the first browser action, only evidence-backed `complete` may end the run successfully.
 - Navigation requires a fresh observation and never proves task completion by itself.
 - Normalize and validate every provider response in the bridge even when structured output is enabled upstream.
@@ -75,10 +81,12 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 ## DOM snapshot and action rules
 
 - Keep snapshots compact and bounded; do not send the full DOM or raw page HTML.
+- Keep Performance and API request evidence on demand. Ordinary action/verification snapshots must not repeatedly collect or transmit Resource Timing.
 - Prefer accessibility semantics, visible text, stable fingerprints, viewport geometry, and interaction state over CSS implementation detail.
 - Selectors are content-script/recorder hints only. Do not expose them as trusted model-authored inputs.
 - New action kinds require coordinated changes in shared types, bridge validation/prompting, content execution, verification, UI labels, security docs, and tests.
-- Every mutating action needs an explicit verification rule. A successful DOM method call alone is not proof of task success.
+- Every mutating action needs an explicit verification rule. A successful DOM method call alone is not proof of task success, and completion evidence must match exact text or a URL in the latest snapshot.
+- Use action-specific settle budgets. Direct state updates should not inherit the longest click/submit wait.
 
 ## Skill rules
 

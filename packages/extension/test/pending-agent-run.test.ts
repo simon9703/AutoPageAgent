@@ -37,6 +37,7 @@ test("restores a planned task after the background worker restarts", async () =>
     history,
     snapshotId: "snapshot-1",
     tabId: 17,
+    windowId: 3,
     pageUrl: "https://example.com/form",
   });
 
@@ -46,6 +47,7 @@ test("restores a planned task after the background worker restarts", async () =>
   assert.equal(restored.task, "Submit the form");
   assert.equal(restored.conversationId, "conversation-1");
   assert.equal(restored.tabId, 17);
+  assert.equal(restored.windowId, 3);
   assert.equal(restored.pageUrl, "https://example.com/form");
   assert.deepEqual(restored.history, history);
 });
@@ -59,6 +61,7 @@ test("rejects a plan whose snapshot does not match the persisted task", async ()
     history,
     snapshotId: "snapshot-1",
     tabId: 17,
+    windowId: 3,
     pageUrl: "https://example.com/form",
   });
 
@@ -77,6 +80,7 @@ test("an old run cannot clear a newer pending task", async () => {
     history,
     snapshotId: "snapshot-old",
     tabId: 17,
+    windowId: 3,
     pageUrl: "https://example.com/form",
   });
   await store.save({
@@ -85,6 +89,7 @@ test("an old run cannot clear a newer pending task", async () => {
     history,
     snapshotId: "snapshot-new",
     tabId: 22,
+    windowId: 3,
     pageUrl: "https://example.com/next",
   });
 
@@ -104,6 +109,7 @@ test("conversation reset clears only the matching pending task", async () => {
     history,
     snapshotId: "snapshot-new",
     tabId: 17,
+    windowId: 3,
     pageUrl: "https://example.com/form",
   });
 

@@ -1,5 +1,4 @@
 export type AgentEventType =
-  | "thinking"
   | "action"
   | "verify"
   | "complete"
@@ -9,12 +8,6 @@ export interface AgentEventBase {
   id: string;
   type: AgentEventType;
   timestamp: string;
-}
-
-export interface ThinkingEvent extends AgentEventBase {
-  type: "thinking";
-  content: string;
-  delta?: boolean;
 }
 
 export interface ActionEvent extends AgentEventBase {
@@ -47,7 +40,6 @@ export interface ErrorEvent extends AgentEventBase {
 }
 
 export type AgentEvent =
-  | ThinkingEvent
   | ActionEvent
   | VerifyEvent
   | CompleteEvent

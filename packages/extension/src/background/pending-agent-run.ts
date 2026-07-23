@@ -8,6 +8,7 @@ export interface PendingAgentRun {
   history: ChatMessage[];
   snapshotId: string;
   tabId: number;
+  windowId: number;
   pageUrl: string;
 }
 
@@ -83,6 +84,9 @@ function parsePendingAgentRun(value: unknown): PendingAgentRun | null {
     || typeof candidate.tabId !== "number"
     || !Number.isInteger(candidate.tabId)
     || candidate.tabId < 0
+    || typeof candidate.windowId !== "number"
+    || !Number.isInteger(candidate.windowId)
+    || candidate.windowId < 0
     || typeof candidate.pageUrl !== "string"
     || !/^https?:\/\//u.test(candidate.pageUrl)
     || !Array.isArray(candidate.history)
@@ -92,6 +96,7 @@ function parsePendingAgentRun(value: unknown): PendingAgentRun | null {
     conversationId: candidate.conversationId,
     snapshotId: candidate.snapshotId,
     tabId: candidate.tabId,
+    windowId: candidate.windowId,
     pageUrl: candidate.pageUrl,
     history: candidate.history,
   };

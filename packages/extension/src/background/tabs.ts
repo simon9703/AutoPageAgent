@@ -14,12 +14,14 @@ export async function getTargetTab(tabId: number): Promise<chrome.tabs.Tab & { i
   return tab as chrome.tabs.Tab & { id: number };
 }
 
-export async function listTargetTabs(): Promise<{ tabs: BrowserTabTarget[]; activeTabId?: number }> {
+export async function listTargetTabs(windowId: number): Promise<{ tabs: BrowserTabTarget[]; activeTabId?: number; windowId: number }> {
+  if (!Number.isInteger(windowId) || windowId < 0) throw new Error("The current browser window is unavailable.");
   const [tabs, activeTab] = await Promise.all([
-    chrome.tabs.query({}),
-    getActiveTab().catch(() => undefined),
+    chrome.tabs.query({ windowId }),
+    getActiveTab(windowId).catch(() => undefined),
   ]);
   return {
+    windowId,
     tabs: tabs
       .filter((tab): tab is chrome.tabs.Tab & { id: number } => typeof tab.id === "number" && /^https?:/u.test(tab.url ?? ""))
       .map(toBrowserTabTarget),
@@ -69,8 +71,8 @@ export async function waitForTabReady(tabId: number, timeoutMs = 8_000): Promise
   });
 }
 
-async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number }> {
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+async function getActiveTab(windowId: number): Promise<chrome.tabs.Tab & { id: number }> {
+  const [tab] = await chrome.tabs.query({ active: true, windowId });
   if (!tab || typeof tab.id !== "number" || !/^https?:/u.test(tab.url ?? "")) {
     throw new Error("Open an http(s) page before running the agent.");
   }
