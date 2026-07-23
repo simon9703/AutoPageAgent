@@ -21,6 +21,28 @@ The MVP implements the browser-page domain, lightweight performance evidence, lo
 - **Screenshot capture** uses `captureVisibleTab`, keeps the JPEG data URL inside the extension, and attaches it only when the user sends a message while the preview is selected.
 - **Workflow recorder** captures bounded declarative actions in Chrome session storage and never records sensitive values.
 
+The extension source follows entrypoint-first boundaries:
+
+```text
+packages/extension/src/
+├── background.ts          # Chrome listeners, message routing, agent-loop orchestration
+├── background/
+│   ├── bridge-client.ts   # localhost WebSocket request/event transport
+│   ├── tabs.ts            # explicit target-tab lookup, activation, content messaging
+│   ├── screenshot.ts      # viewport and selected-element capture
+│   ├── recording.ts       # session-backed recorder lifecycle
+│   └── pending-agent-run.ts
+├── content.ts             # page events, snapshots, actions, verification
+├── content/
+│   └── agent-visuals.ts   # picker and persistent selection overlays
+├── sidepanel.tsx          # React mount only
+└── sidepanel/
+    ├── App.tsx            # UI state and workflow orchestration
+    └── formatters.ts      # pure presentation formatting
+```
+
+Entrypoints own browser lifecycle and orchestration. Submodules own reusable stateful services or pure helpers; they do not register additional global Chrome listeners. Cross-process protocol types remain in `packages/shared`.
+
 The snapshot contains page metadata, selected text, a limited body-text extraction, headings, at most 160 interactive elements near the viewport, a Page Agent-inspired simplified DOM, page/scroll geometry, and at most 100 resource timing entries. DOM nodes remain inside the content script and are represented externally by ephemeral refs. Candidate elements are bounded to a 700-pixel expansion around the viewport and checked against the browser's top-layer hit target before inclusion.
 
 The side panel can attach one inspected element, page image, or captured viewport to the current conversation. The Responses provider sends the selected visual as an image input. Local Codex receives the selected element or screenshot metadata, but screenshot data URLs are removed from its text prompt. Removing the context chip clears the background-owned selection as well.

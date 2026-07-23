@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculateScreenshotCrop } from "../src/screenshot-crop.js";
+import { calculateScreenshotCrop } from "../src/background/screenshot-crop.js";
 
 test("crop coordinates scale from CSS viewport pixels to screenshot pixels", () => {
   const crop = calculateScreenshotCrop({

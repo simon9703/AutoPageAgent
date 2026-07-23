@@ -11,20 +11,20 @@ import type {
   RecordedBrowserAction,
   PageSnapshotDiff,
 } from "@auto-page-agent/shared";
+import {
+  clearSelectedTarget,
+  createPickerVisuals,
+  setSelectedTarget,
+} from "./content/agent-visuals.js";
 
 const elementRefs = new Map<string, Element>();
 let currentSnapshotId = "";
 let currentSnapshotUrl = "";
 let currentSnapshot: PageSnapshot | null = null;
 let selectionCleanup: (() => void) | null = null;
-let selectedTarget: Element | null = null;
 let recordingActive = false;
 let scrollTimer: number | undefined;
 let aiPointer: HTMLElement | null = null;
-let pickerPointer: HTMLElement | null = null;
-let pickerOutline: HTMLElement | null = null;
-let selectedOutline: HTMLElement | null = null;
-let selectedOutlineCleanup: (() => void) | null = null;
 let actionOutline: HTMLElement | null = null;
 let agentFrame: HTMLElement | null = null;
 let persistentAgentActivity = false;
@@ -375,8 +375,7 @@ function startElementSelection(mode: "element" | "image") {
   selectionCleanup?.();
   ensureAgentStyles();
   document.documentElement.classList.add("auto-page-agent-picking");
-  pickerPointer = createPointer("auto-page-agent-picker-pointer");
-  pickerOutline = createElementOutline("picker");
+  const visuals = createPickerVisuals();
   const notice = document.createElement("div");
   notice.dataset.autoPageAgentOverlay = "true";
   notice.className = "auto-page-agent-notice";
@@ -385,17 +384,16 @@ function startElementSelection(mode: "element" | "image") {
   let hovered: Element | null = null;
   const restore = () => {
     hovered = null;
-    pickerOutline?.classList.remove("visible");
+    visuals.clearTarget();
   };
   const onMove = (event: MouseEvent) => {
-    positionPointer(pickerPointer, event.clientX, event.clientY);
+    visuals.movePointer(event.clientX, event.clientY);
     const raw = event.target instanceof Element ? event.target : null;
     const next = mode === "image" ? findImageTarget(raw) ?? raw : raw;
     if (!next || next === hovered) return;
     restore();
     hovered = next;
-    positionElementOutline(pickerOutline, next, describeElement(next));
-    pickerOutline?.classList.add("visible");
+    visuals.showTarget(next);
   };
   const cleanup = () => {
     restore();
@@ -404,10 +402,7 @@ function startElementSelection(mode: "element" | "image") {
     document.removeEventListener("keydown", onKey, true);
     document.documentElement.classList.remove("auto-page-agent-picking");
     notice.remove();
-    pickerPointer?.remove();
-    pickerPointer = null;
-    pickerOutline?.remove();
-    pickerOutline = null;
+    visuals.destroy();
     selectionCleanup = null;
   };
   const onClick = (event: MouseEvent) => {
@@ -446,48 +441,6 @@ function startElementSelection(mode: "element" | "image") {
   document.addEventListener("click", onClick, true);
   document.addEventListener("keydown", onKey, true);
   selectionCleanup = cleanup;
-}
-
-function setSelectedTarget(target: Element) {
-  clearSelectedTarget();
-  ensureAgentStyles();
-  selectedTarget = target;
-  selectedOutline = createElementOutline("selected");
-  let updateFrame: number | undefined;
-  const update = () => {
-    if (!selectedTarget?.isConnected || !selectedOutline) {
-      clearSelectedTarget();
-      return;
-    }
-    positionElementOutline(selectedOutline, selectedTarget, `Selected · ${describeElement(selectedTarget)}`);
-    selectedOutline.classList.add("visible");
-  };
-  const scheduleUpdate = () => {
-    if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
-    updateFrame = requestAnimationFrame(() => {
-      updateFrame = undefined;
-      update();
-    });
-  };
-  const observer = new ResizeObserver(scheduleUpdate);
-  observer.observe(target);
-  window.addEventListener("resize", scheduleUpdate);
-  document.addEventListener("scroll", scheduleUpdate, true);
-  selectedOutlineCleanup = () => {
-    if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
-    observer.disconnect();
-    window.removeEventListener("resize", scheduleUpdate);
-    document.removeEventListener("scroll", scheduleUpdate, true);
-  };
-  update();
-}
-
-function clearSelectedTarget() {
-  selectedOutlineCleanup?.();
-  selectedOutlineCleanup = null;
-  selectedOutline?.remove();
-  selectedOutline = null;
-  selectedTarget = null;
 }
 
 function inspectElement(element: Element): InspectedElement {

@@ -1,31 +1,36 @@
-import type { ActionExecutionResult, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, BrowserTabTarget, ChatMessage, ClientMessage, ElementSelectionGeometry, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
-import { PendingAgentRunStore } from "./pending-agent-run.js";
-import { calculateScreenshotCrop } from "./screenshot-crop.js";
+import type { ActionExecutionResult, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ElementSelectionGeometry, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
+import { requestBridge } from "./background/bridge-client.js";
+import { PendingAgentRunStore } from "./background/pending-agent-run.js";
+import {
+  appendRecordedAction,
+  getRecordingState,
+  replayRecording,
+  resumeRecordingForSender,
+  startRecording,
+  stopRecording,
+} from "./background/recording.js";
+import {
+  captureScreenshot,
+  captureSelectedElement,
+  MAX_SCREENSHOT_DATA_URL_LENGTH,
+} from "./background/screenshot.js";
+import {
+  activateTargetTab,
+  getTargetTab,
+  listTargetTabs,
+  sendPageMessage,
+  waitForTabReady,
+} from "./background/tabs.js";
 
-const BRIDGE_URL = "ws://127.0.0.1:3210";
-let socket: WebSocket | null = null;
-let connecting: Promise<WebSocket> | null = null;
-const RECORDING_KEY = "automationRecording";
 const SELECTION_STORAGE_KEYS = [
   "selectedElement",
   "selectedElementPageUrl",
   "selectedElementTabId",
   "selectedElementScreenshot",
 ] as const;
-const MAX_SCREENSHOT_DATA_URL_LENGTH = 2_000_000;
-const MAX_SCREENSHOT_BYTES = 1_400_000;
-const MAX_SCREENSHOT_DIMENSION = 1_600;
 const pendingAgentRuns = new PendingAgentRunStore(chrome.storage.session);
 type EventWithoutMeta<T> = T extends unknown ? Omit<T, "id" | "timestamp"> : never;
 type AgentEventInput = EventWithoutMeta<AgentEvent>;
-
-interface RecordingState {
-  active: boolean;
-  tabId: number;
-  startedAt: number;
-  startUrl: string;
-  actions: RecordedBrowserAction[];
-}
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -388,17 +393,6 @@ async function executePlanResilient(plan: BrowserActionPlan, tabId: number): Pro
   }
 }
 
-async function waitForTabReady(tabId: number, timeoutMs = 8_000): Promise<void> {
-  const tab = await chrome.tabs.get(tabId);
-  if (tab.status === "complete") return;
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(done, timeoutMs);
-    function done() { clearTimeout(timeout); chrome.tabs.onUpdated.removeListener(onUpdated); resolve(); }
-    function onUpdated(updatedTabId: number, info: chrome.tabs.TabChangeInfo) { if (updatedTabId === tabId && info.status === "complete") done(); }
-    chrome.tabs.onUpdated.addListener(onUpdated);
-  });
-}
-
 async function readSnapshot(tabId: number): Promise<PageSnapshot> {
   await getTargetTab(tabId);
   return sendPageMessage<PageSnapshot>(tabId, { type: "page.snapshot" });
@@ -415,254 +409,6 @@ function createEvent(event: AgentEventInput): AgentEvent {
 async function listPageSkills(targetTabId: number): Promise<ServerMessage> {
   const tab = await getTargetTab(targetTabId);
   return requestBridge({ id: crypto.randomUUID(), type: "skill.list", pageUrl: tab.url!, pageTitle: tab.title ?? "" });
-}
-
-async function captureScreenshot(targetTabId: number) {
-  const tab = await getTargetTab(targetTabId);
-  await activateTargetTab(tab.id);
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 82 });
-  if (dataUrl.length > MAX_SCREENSHOT_DATA_URL_LENGTH) {
-    throw new Error("The viewport screenshot is too large. Reduce the window size or display scale and try again.");
-  }
-  return { ok: true, dataUrl, url: tab.url, title: tab.title, capturedAt: new Date().toISOString() };
-}
-
-async function captureSelectedElement(tab: chrome.tabs.Tab, geometry: ElementSelectionGeometry | undefined, tagName: string) {
-  if (!geometry) throw new Error("The selected element did not provide capture coordinates.");
-  const [activeTab] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
-  if (activeTab?.id !== tab.id) throw new Error("The selected tab must remain visible while it is captured.");
-
-  const viewportDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 90 });
-  const response = await fetch(viewportDataUrl);
-  const bitmap = await createImageBitmap(await response.blob());
-  try {
-    const crop = calculateScreenshotCrop(geometry, bitmap.width, bitmap.height);
-    const dataUrl = await encodeCroppedJpeg(bitmap, crop.source);
-    return {
-      dataUrl,
-      url: tab.url ?? "",
-      title: `Selected <${tagName}>`,
-    };
-  } finally {
-    bitmap.close();
-  }
-}
-
-async function encodeCroppedJpeg(bitmap: ImageBitmap, source: { x: number; y: number; width: number; height: number }) {
-  let outputScale = Math.min(1, MAX_SCREENSHOT_DIMENSION / Math.max(source.width, source.height));
-  let quality = 0.82;
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const width = Math.max(1, Math.round(source.width * outputScale));
-    const height = Math.max(1, Math.round(source.height * outputScale));
-    const canvas = new OffscreenCanvas(width, height);
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Canvas is unavailable for the selected-element capture.");
-    context.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, width, height);
-    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality });
-    if (blob.size <= MAX_SCREENSHOT_BYTES) return blobToDataUrl(blob);
-    outputScale *= Math.min(0.82, Math.sqrt(MAX_SCREENSHOT_BYTES / blob.size) * 0.92);
-    quality = Math.max(0.5, quality - 0.08);
-  }
-  throw new Error("The selected element screenshot is too large. Select a smaller visible area.");
-}
-
-async function blobToDataUrl(blob: Blob) {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  }
-  return `data:${blob.type};base64,${btoa(binary)}`;
-}
-
-async function startRecording(targetTabId: number) {
-  const tab = await getTargetTab(targetTabId);
-  const state: RecordingState = { active: true, tabId: tab.id, startedAt: Date.now(), startUrl: tab.url!, actions: [] };
-  await chrome.storage.session.set({ [RECORDING_KEY]: state });
-  await sendPageMessage(tab.id, { type: "page.recording.start" });
-  return state;
-}
-
-async function stopRecording() {
-  const state = await getRecordingState();
-  if (!state) return { active: false, actions: [] };
-  await chrome.tabs.sendMessage(state.tabId, { type: "page.recording.stop" }).catch(() => undefined);
-  const stopped = { ...state, active: false };
-  await chrome.storage.session.set({ [RECORDING_KEY]: stopped });
-  return stopped;
-}
-
-async function replayRecording(actions: RecordedBrowserAction[], targetTabId: number) {
-  if (!Array.isArray(actions) || !actions.length) throw new Error("There are no recorded actions to replay.");
-  if (actions.length > 100) throw new Error("At most 100 actions can be replayed.");
-  const tab = await getTargetTab(targetTabId);
-  await sendPageMessage(tab.id, { type: "page.agent.activity", active: true }).catch(() => undefined);
-  try {
-    return await sendPageMessage(tab.id, { type: "page.recording.replay", actions });
-  } finally {
-    await sendPageMessage(tab.id, { type: "page.agent.activity", active: false }).catch(() => undefined);
-  }
-}
-
-async function resumeRecordingForSender(tabId: number | undefined) {
-  if (typeof tabId !== "number") return;
-  const state = await getRecordingState();
-  if (state?.active && state.tabId === tabId) await sendPageMessage(tabId, { type: "page.recording.start" }).catch(() => undefined);
-}
-
-async function appendRecordedAction(action: RecordedBrowserAction, tabId: number | undefined) {
-  if (typeof tabId !== "number") return;
-  const state = await getRecordingState();
-  if (!state?.active || state.tabId !== tabId || state.actions.length >= 100) return;
-  const sanitized: RecordedBrowserAction = {
-    ...action,
-    id: crypto.randomUUID(),
-    value: action.sensitive ? undefined : action.value?.slice(0, 4_000),
-    timestamp: Date.now(),
-  };
-  const actions = [...state.actions];
-  const last = actions.at(-1);
-  const replaceLast = last && (
-    ((sanitized.action === "fill" || sanitized.action === "select") && last.action === sanitized.action && last.selector === sanitized.selector)
-    || (sanitized.action === "scroll" && last.action === "scroll" && sanitized.timestamp - last.timestamp < 2_000)
-  );
-  if (replaceLast) actions[actions.length - 1] = sanitized;
-  else actions.push(sanitized);
-  await chrome.storage.session.set({ [RECORDING_KEY]: { ...state, actions } });
-  void chrome.runtime.sendMessage({ type: "ui.recording.updated", actions }).catch(() => undefined);
-}
-
-async function getRecordingState(): Promise<RecordingState | undefined> {
-  const stored = await chrome.storage.session.get(RECORDING_KEY);
-  return stored[RECORDING_KEY] as RecordingState | undefined;
-}
-
-async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number }> {
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (!tab || typeof tab.id !== "number" || !/^https?:/u.test(tab.url ?? "")) {
-    throw new Error("Open an http(s) page before running the agent.");
-  }
-  return tab as chrome.tabs.Tab & { id: number };
-}
-
-async function getTargetTab(tabId: number): Promise<chrome.tabs.Tab & { id: number }> {
-  if (!Number.isInteger(tabId) || tabId < 0) throw new Error("Choose a target page before running the agent.");
-  let tab: chrome.tabs.Tab;
-  try { tab = await chrome.tabs.get(tabId); }
-  catch { throw new Error("The target page was closed. Choose another tab."); }
-  if (typeof tab.id !== "number" || !/^https?:/u.test(tab.url ?? "")) {
-    throw new Error("The target must be an open http(s) page.");
-  }
-  return tab as chrome.tabs.Tab & { id: number };
-}
-
-async function listTargetTabs(): Promise<{ tabs: BrowserTabTarget[]; activeTabId?: number }> {
-  const [tabs, activeTab] = await Promise.all([
-    chrome.tabs.query({}),
-    getActiveTab().catch(() => undefined),
-  ]);
-  return {
-    tabs: tabs
-      .filter((tab): tab is chrome.tabs.Tab & { id: number } => typeof tab.id === "number" && /^https?:/u.test(tab.url ?? ""))
-      .map(toBrowserTabTarget),
-    ...(activeTab ? { activeTabId: activeTab.id } : {}),
-  };
-}
-
-function toBrowserTabTarget(tab: chrome.tabs.Tab & { id: number }): BrowserTabTarget {
-  return {
-    tabId: tab.id,
-    windowId: tab.windowId,
-    title: tab.title || new URL(tab.url!).hostname,
-    url: tab.url!,
-    ...(tab.favIconUrl ? { favIconUrl: tab.favIconUrl } : {}),
-    active: Boolean(tab.active),
-  };
-}
-
-async function activateTargetTab(targetTabId: number): Promise<{ ok: true }> {
-  const tab = await getTargetTab(targetTabId);
-  await chrome.tabs.update(tab.id, { active: true });
-  await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
-  return { ok: true };
-}
-
-async function sendPageMessage<T = unknown>(tabId: number, message: unknown): Promise<T> {
-  try {
-    return await chrome.tabs.sendMessage(tabId, message) as T;
-  } catch (error) {
-    if (!isMissingPageReceiver(error)) throw error;
-  }
-
-  await waitForTabReady(tabId);
-  try {
-    return await chrome.tabs.sendMessage(tabId, message) as T;
-  } catch (error) {
-    if (!isMissingPageReceiver(error)) throw error;
-  }
-
-  await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
-  return chrome.tabs.sendMessage(tabId, message) as Promise<T>;
-}
-
-function isMissingPageReceiver(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /could not establish connection|receiving end does not exist/iu.test(message);
-}
-
-async function requestBridge(message: ClientMessage, onEvent?: (event: AgentEvent) => void): Promise<ServerMessage> {
-  const ws = await connect();
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      ws.removeEventListener("message", onMessage);
-      reject(new Error("Local bridge timed out."));
-    }, 75_000);
-    const onMessage = (event: MessageEvent<string>) => {
-      let response: ServerMessage;
-      try { response = JSON.parse(event.data) as ServerMessage; }
-      catch { clearTimeout(timeout); ws.removeEventListener("message", onMessage); reject(new Error("Local bridge returned malformed JSON.")); return; }
-      if (response.id !== message.id) return;
-      if (response.type === "agent.event") { onEvent?.(response.event); return; }
-      clearTimeout(timeout);
-      ws.removeEventListener("message", onMessage);
-      resolve(response);
-    };
-    ws.addEventListener("message", onMessage);
-    ws.send(JSON.stringify(message));
-  });
-}
-
-async function connect(): Promise<WebSocket> {
-  if (socket?.readyState === WebSocket.OPEN) return socket;
-  if (connecting) return connecting;
-  connecting = new Promise((resolve, reject) => {
-    const ws = new WebSocket(BRIDGE_URL);
-    let settled = false;
-    const timeout = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      connecting = null;
-      ws.close();
-      reject(new Error("Local bridge is not running. Start it with npm run dev:bridge."));
-    }, 3_000);
-    ws.addEventListener("open", () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      socket = ws;
-      connecting = null;
-      resolve(ws);
-    });
-    ws.addEventListener("error", () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      connecting = null;
-      reject(new Error("Cannot connect to the local bridge at 127.0.0.1:3210."));
-    });
-    ws.addEventListener("close", () => { if (socket === ws) socket = null; });
-  });
-  return connecting;
 }
 
 function toErrorResponse(sendResponse: (response?: unknown) => void) {

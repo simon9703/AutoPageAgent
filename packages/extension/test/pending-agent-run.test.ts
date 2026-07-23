@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ChatMessage } from "@auto-page-agent/shared";
-import { PendingAgentRunStore, type SessionStorageArea } from "../src/pending-agent-run.js";
+import { PendingAgentRunStore, type SessionStorageArea } from "../src/background/pending-agent-run.js";
 
 class FakeSessionStorage implements SessionStorageArea {
   readonly values: Record<string, unknown> = {};

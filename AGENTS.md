@@ -21,9 +21,12 @@ Read `README.md` for usage, `docs/architecture.md` for component boundaries, `do
 - `packages/bridge/src/codex-app-server.ts`: Codex app-server JSON-RPC adapter.
 - `packages/bridge/src/skills.ts`: Marketplace, local Registry, page matching, selection, migration, and persistence.
 - `packages/bridge/src/repositories.ts`: bounded local `rg` evidence search.
-- `packages/extension/src/background.ts`: extension-to-bridge transport and target-tab routing.
-- `packages/extension/src/content.ts`: compact DOM snapshots, recorder, constrained actions, verification, and visual pointer.
-- `packages/extension/src/sidepanel.ts`: conversation, approval, timeline, picker, recorder, and Skill Registry UI.
+- `packages/extension/src/background.ts`: service-worker entry, Chrome event listeners, message dispatch, and agent-loop orchestration.
+- `packages/extension/src/background/`: bridge transport, target-tab messaging, screenshots, recorder state, and pending-run persistence.
+- `packages/extension/src/content.ts`: content-script entry, compact DOM snapshots, recorder hooks, constrained actions, and verification.
+- `packages/extension/src/content/`: page-overlay and element-selection visual lifecycle.
+- `packages/extension/src/sidepanel.tsx`: minimal React mount entry.
+- `packages/extension/src/sidepanel/`: conversation UI orchestration and presentation helpers.
 - `skills/*`: bundled Marketplace templates. These are distribution assets, not user data.
 - `packages/bridge/test`: Node test suite for agent, runtime, repository, and Skill behavior.
 
