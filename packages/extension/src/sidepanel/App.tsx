@@ -55,7 +55,6 @@ export function App() {
       const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; tabId?: number; screenshot?: { dataUrl: string; title: string; url: string }; reason?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent };
       if (value.type === "ui.element.selected" && value.element && value.tabId === targetTabRef.current?.tabId) {
         setSelected({ element: value.element, pageUrl: value.pageUrl ?? "" });
-        setScreenshot(value.screenshot ?? null);
         setSelectionMode(null);
         setNotice(value.screenshot
           ? `Captured visible <${value.element.tagName}>. It will be included in the next message.`
@@ -165,7 +164,6 @@ export function App() {
   async function restoreSelection(targetTabId: number) {
     const stored = await chrome.runtime.sendMessage({ type: "ui.selection.current", targetTabId }) as { selectedElement?: InspectedElement; selectedElementPageUrl?: string; selectedElementScreenshot?: { dataUrl: string; title: string; url: string } };
     if (stored.selectedElement) setSelected({ element: stored.selectedElement, pageUrl: stored.selectedElementPageUrl ?? "" });
-    if (stored.selectedElementScreenshot) setScreenshot(stored.selectedElementScreenshot);
   }
 
   async function restoreRecording() {

@@ -16,6 +16,9 @@ test("manifest injects the isolated browser-agent visual stylesheet", async () =
   assert.ok(manifest.content_scripts?.some((entry) => entry.css?.includes("content.css")));
   assert.match(stylesheet, /html > \.auto-page-agent-element-outline\.selected/u);
   assert.match(stylesheet, /html > \.auto-page-agent-viewport-frame\.visible/u);
+  assert.match(stylesheet, /html > \.auto-page-agent-viewport-frame::before/u);
+  assert.match(stylesheet, /mask-composite: exclude !important/u);
+  assert.match(stylesheet, /background: transparent !important/u);
   assert.match(stylesheet, /html > \.auto-page-agent-pointer\.visible/u);
   assert.match(stylesheet, /\.auto-page-agent-pointer-label/u);
 });

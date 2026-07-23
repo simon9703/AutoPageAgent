@@ -390,7 +390,9 @@ function startElementSelection(mode: "element" | "image") {
   const onMove = (event: MouseEvent) => {
     visuals.movePointer(event.clientX, event.clientY);
     const raw = event.target instanceof Element ? event.target : null;
-    const next = raw;
+    const next = raw && mode === "image"
+      ? resolveCaptureTarget(event.clientX, event.clientY, raw)
+      : raw;
     if (!next || next === hovered) return;
     restore();
     hovered = next;
@@ -408,7 +410,9 @@ function startElementSelection(mode: "element" | "image") {
   };
   const onClick = (event: MouseEvent) => {
     if (!(event.target instanceof Element)) return;
-    const target = event.target;
+    const target = mode === "image"
+      ? resolveCaptureTarget(event.clientX, event.clientY, event.target)
+      : event.target;
     event.preventDefault();
     event.stopImmediatePropagation();
     if (mode === "image" && isSensitiveCaptureTarget(target)) {
@@ -642,6 +646,34 @@ function getImageInfo(element: Element): InspectedElement["image"] {
   catch { return undefined; }
 }
 
+function resolveCaptureTarget(x: number, y: number, fallback: Element): Element {
+  const hitElements = document.elementsFromPoint(x, y)
+    .filter((element) => !element.closest("[data-auto-page-agent-overlay]"));
+  const media = hitElements.map(getVisualMediaTarget).find((element): element is Element => Boolean(element));
+  if (media) return media;
+
+  const direct = hitElements[0] ?? fallback;
+  if (hasBackgroundImage(direct)) return direct;
+  let ancestor = direct.parentElement;
+  for (let depth = 0; ancestor && ancestor !== document.body && depth < 3; depth += 1, ancestor = ancestor.parentElement) {
+    if (hasBackgroundImage(ancestor)) return ancestor;
+  }
+  return direct;
+}
+
+function getVisualMediaTarget(element: Element): Element | null {
+  if (element instanceof SVGElement) return element.closest("svg") ?? element;
+  if (element instanceof HTMLImageElement
+    || element instanceof HTMLCanvasElement
+    || element instanceof HTMLVideoElement
+    || element.getAttribute("role") === "img") return element;
+  return null;
+}
+
+function hasBackgroundImage(element: Element): boolean {
+  return element instanceof HTMLElement && /(?:^|,)\s*url\(/u.test(getComputedStyle(element).backgroundImage);
+}
+
 async function simulateClick(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
   const options = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, button: 0 };
@@ -793,11 +825,12 @@ function ensureAgentStyles() {
     .auto-page-agent-outline-label { position: absolute; left: -1px; bottom: calc(100% + 7px); max-width: min(280px,70vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 8px; border: 1px solid #ffffff40; border-radius: 7px; color: white; background: linear-gradient(135deg,#5b31d2,#7657f5); box-shadow: 0 5px 16px #4c1d9545; font: 650 10px/1.25 system-ui,-apple-system,sans-serif; }
     .auto-page-agent-element-outline.label-below .auto-page-agent-outline-label { top: calc(100% + 7px); bottom: auto; }
     .auto-page-agent-element-outline.action .auto-page-agent-outline-label { background: linear-gradient(135deg,#4338ca,#0891b2); }
-    .auto-page-agent-viewport-frame { position: fixed; z-index: 2147483643; inset: 0; box-sizing: border-box; opacity: 0; pointer-events: none; border: 3px solid transparent; border-radius: 10px; background: linear-gradient(transparent,transparent) padding-box,linear-gradient(115deg,#22d3ee,#6366f1,#a855f7,#ec4899,#22d3ee) border-box; background-size: 100% 100%,300% 300%; box-shadow: inset 0 0 34px #6366f120,0 0 24px #7c3aed38; transition: opacity .28s ease; animation: auto-page-agent-frame-flow 4s linear infinite; }
+    .auto-page-agent-viewport-frame { position: fixed; z-index: 2147483643; inset: 0; box-sizing: border-box; opacity: 0; pointer-events: none; border: 0; border-radius: 12px; background: transparent; box-shadow: none; transition: opacity .28s ease; }
+    .auto-page-agent-viewport-frame::before { content: ""; position: absolute; inset: 0; box-sizing: border-box; padding: 4px; border-radius: inherit; background: linear-gradient(115deg,#22d3ee,#6366f1,#a855f7,#ec4899,#22d3ee); background-size: 300% 300%; -webkit-mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); mask-composite: exclude; filter: drop-shadow(0 0 8px #6366f180); animation: auto-page-agent-frame-flow 4s linear infinite; }
     .auto-page-agent-viewport-frame.visible { opacity: 1; }
     .auto-page-agent-frame-status { position: absolute; right: 15px; bottom: 14px; display: flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid #ffffff3d; border-radius: 999px; color: white; background: #17132bdc; backdrop-filter: blur(12px); box-shadow: 0 8px 24px #312e8150; font: 650 10px/1 system-ui,-apple-system,sans-serif; letter-spacing: .02em; }
     .auto-page-agent-frame-status i { width: 7px; height: 7px; border-radius: 50%; background: #67e8f9; box-shadow: 0 0 0 4px #22d3ee25,0 0 12px #22d3ee; animation: auto-page-agent-status-pulse 1.4s ease-in-out infinite; }
-    @keyframes auto-page-agent-frame-flow { to { background-position: 0 0,300% 50%; } }
+    @keyframes auto-page-agent-frame-flow { to { background-position: 300% 50%; } }
     @keyframes auto-page-agent-status-pulse { 50% { opacity: .45; transform: scale(.72); } }
     @keyframes auto-page-agent-pointer-press { 50% { transform: scale(.82) rotate(-3deg); } }
     @keyframes auto-page-agent-click-ripple { 0% { opacity: .95; transform: scale(.25); } 100% { opacity: 0; transform: scale(2.25); } }
