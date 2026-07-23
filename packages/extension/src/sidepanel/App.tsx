@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot, Camera, Check, ChevronDown, CircleStop, Code2, Copy, Image,
-  ExternalLink, Globe2, LoaderCircle, MousePointer2, Play, RefreshCw,
-  Send, Sparkles, SquarePen, WandSparkles, X,
+  Globe2, LoaderCircle, MousePointer2, Play, Plus, RefreshCw,
+  Send, Sparkles, WandSparkles, X,
 } from "lucide-react";
 import type {
   AgentEvent, AutomationSkillDraft, BrowserActionPlan, BrowserTabTarget, ChatMessage,
@@ -10,6 +10,7 @@ import type {
   RecordedBrowserAction, RepositoryAnalysis, ServerMessage, SkillCatalogItem,
 } from "@auto-page-agent/shared";
 import { defaultSkillName, eventLabel, formatRepositoryAnalysis, hostname } from "./formatters.js";
+import { Button } from "../components/ui/button.js";
 
 type Health = Extract<ServerMessage, { type: "health.result" }>;
 type SkillView = "page" | "installed" | "marketplace";
@@ -476,13 +477,13 @@ export function App() {
           queued={queuedTarget}
           onToggle={() => setTargetPickerOpen((current) => !current)}
           onChoose={(tab) => void chooseTarget(tab)}
-          onActivate={() => {
-            if (targetTab) void chrome.runtime.sendMessage({ type: "ui.tab.activate", targetTabId: targetTab.tabId });
-          }}
         />
         <div className="flex items-center gap-1.5">
           <span className={`h-2 w-2 rounded-full ${health?.ok ? "bg-emerald-500" : "bg-amber-400"}`} title={health?.agent.error ?? health?.agent.name ?? "Bridge unavailable"} />
-          <IconButton label="New conversation" onClick={() => void newConversation()}><SquarePen size={17} /></IconButton>
+          <Button size="sm" onClick={() => void newConversation()} aria-label="New conversation">
+            <Plus size={14} />
+            New
+          </Button>
         </div>
       </header>
 
@@ -533,13 +534,12 @@ function TargetTabHeader(props: {
   queued: BrowserTabTarget | null;
   onToggle: () => void;
   onChoose: (tab: BrowserTabTarget) => void;
-  onActivate: () => void;
 }) {
   const targetVisible = props.target?.tabId === props.activeTabId;
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2.5">
       <img src="assets/icon-48.png" className="h-9 w-9 shrink-0 rounded-[11px]" alt="" />
-      <button type="button" onClick={props.onToggle} className="flex min-w-0 max-w-[calc(100%-96px)] items-center gap-1.5 rounded-xl px-1.5 py-1 text-left transition hover:bg-slate-50" aria-expanded={props.open}>
+      <button type="button" onClick={props.onToggle} className="flex min-w-0 max-w-[calc(100%-46px)] items-center gap-1.5 rounded-xl px-1.5 py-1 text-left transition hover:bg-slate-50" aria-expanded={props.open}>
         <span className="min-w-0">
           <strong className="block truncate text-[14px] font-semibold">{props.queued ? props.queued.title : props.target?.title ?? "Select a page"}</strong>
           <span className={`flex items-center gap-1 truncate text-[10px] ${targetVisible ? "text-slate-400" : "text-violet-600"}`}>
@@ -555,7 +555,6 @@ function TargetTabHeader(props: {
         </span>
         <ChevronDown size={14} className={`shrink-0 text-slate-400 transition ${props.open ? "rotate-180" : ""}`} />
       </button>
-      {props.target && !targetVisible ? <button type="button" onClick={props.onActivate} className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700" title="Switch to target page" aria-label="Switch to target page"><ExternalLink size={14} /></button> : null}
       {props.open ? (
         <div className="absolute left-3 right-3 top-[calc(100%-4px)] z-40 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl">
           {props.tabs.length ? props.tabs.map((tab) => (

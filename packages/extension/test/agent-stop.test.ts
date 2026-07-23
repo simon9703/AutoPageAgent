@@ -30,3 +30,12 @@ test("page tools and compact run controls share the composer", async () => {
   assert.match(sidePanel, /h-8 w-8[^>]+aria-label="Send"/u);
   assert.match(stylesheet, /\.composer \.composer-input:focus-visible \{ outline: none;/u);
 });
+
+test("header uses the shared primary New action without a page-forward shortcut", async () => {
+  const sidePanel = await readFile(new URL("../src/sidepanel/App.tsx", import.meta.url), "utf8");
+
+  assert.match(sidePanel, /<Button size="sm"[\s\S]+?aria-label="New conversation">/u);
+  assert.match(sidePanel, /<Plus size=\{14\} \/>[\s\S]+New[\s\S]+<\/Button>/u);
+  assert.doesNotMatch(sidePanel, /ExternalLink/u);
+  assert.doesNotMatch(sidePanel, /aria-label="Switch to target page"/u);
+});

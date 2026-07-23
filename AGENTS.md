@@ -107,6 +107,14 @@ Do not commit `node_modules`, workspace-local configuration, API keys, generated
 - Keep user-visible errors actionable but redact secrets and sensitive field values.
 - Preserve the current dependency-light design. Add a dependency only when it materially improves correctness or maintainability.
 
+## Extension UI conventions
+
+- Use `lucide-react` for interface icons. Import individual icons and keep sizes aligned with the surrounding control.
+- Prefer shared controls from `packages/extension/src/components/ui/`, starting with `Button`, instead of duplicating button class strings in new UI.
+- Compose conditional Tailwind classes with `packages/extension/src/lib/utils.ts` (`cn`) so conflicting utilities are merged predictably.
+- Use black backgrounds with white text for primary actions; use outline or ghost variants for secondary actions.
+- Icon-only buttons must have an accessible label and title. Prefer a short text label for important actions such as starting a new conversation.
+
 ## Definition of done
 
 A change is complete when the owning package and all affected boundaries agree, unsafe inputs fail closed, relevant documentation reflects the behavior, the project version has been incremented consistently, the full validation suite passes, and the worktree contains only intentional files.
