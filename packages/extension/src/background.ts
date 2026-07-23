@@ -149,7 +149,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 async function runTask(task: string, conversationId: string, history: ChatMessage[], screenshot?: { dataUrl?: string; title?: string; url?: string }): Promise<ServerMessage> {
   if (!task.trim()) throw new Error("Enter a task first.");
   const tab = await getActiveTab();
-  const snapshot = await chrome.tabs.sendMessage(tab.id, { type: "page.snapshot" }) as PageSnapshot;
+  const snapshot = await sendPageMessage<PageSnapshot>(tab.id, { type: "page.snapshot" });
   const stored = await chrome.storage.session.get(["selectedElement", "selectedElementPageUrl"]);
   const selectedElement = stored.selectedElement && stored.selectedElementPageUrl === tab.url ? stored.selectedElement as InspectedElement : undefined;
   const selectedScreenshot = screenshot?.dataUrl?.startsWith("data:image/")
@@ -162,7 +162,7 @@ async function runTask(task: string, conversationId: string, history: ChatMessag
 
 async function startSelection(mode: "element" | "image") {
   const tab = await getActiveTab();
-  const response = await chrome.tabs.sendMessage(tab.id, { type: "page.selection.start", mode });
+  const response = await sendPageMessage(tab.id, { type: "page.selection.start", mode });
   await chrome.tabs.update(tab.id, { active: true });
   if (typeof tab.windowId === "number") await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
   return response;
@@ -170,13 +170,13 @@ async function startSelection(mode: "element" | "image") {
 
 async function analyzeRepository(element: InspectedElement, pageUrl: string): Promise<ServerMessage> {
   const tab = await getActiveTab();
-  const performance = await chrome.tabs.sendMessage(tab.id, { type: "page.performance" }) as PageSnapshot["performance"];
+  const performance = await sendPageMessage<PageSnapshot["performance"]>(tab.id, { type: "page.performance" });
   return requestBridge({ id: crypto.randomUUID(), type: "repository.analyze", pageUrl, element, apiRequests: performance.apiRequests });
 }
 
 async function executePlan(plan: BrowserActionPlan) {
   const tab = await getActiveTab();
-  return chrome.tabs.sendMessage(tab.id, { type: "page.actions.execute", plan });
+  return sendPageMessage(tab.id, { type: "page.actions.execute", plan });
 }
 
 async function runAgentLoop(initialPlan: BrowserActionPlan) {
@@ -239,18 +239,23 @@ async function executePlanResilient(plan: BrowserActionPlan): Promise<ActionExec
 
 async function waitForActiveTabReady(timeoutMs = 8_000): Promise<void> {
   const tab = await getActiveTab();
+  await waitForTabReady(tab.id, timeoutMs);
+}
+
+async function waitForTabReady(tabId: number, timeoutMs = 8_000): Promise<void> {
+  const tab = await chrome.tabs.get(tabId);
   if (tab.status === "complete") return;
   await new Promise<void>((resolve) => {
     const timeout = setTimeout(done, timeoutMs);
     function done() { clearTimeout(timeout); chrome.tabs.onUpdated.removeListener(onUpdated); resolve(); }
-    function onUpdated(tabId: number, info: chrome.tabs.TabChangeInfo) { if (tabId === tab.id && info.status === "complete") done(); }
+    function onUpdated(updatedTabId: number, info: chrome.tabs.TabChangeInfo) { if (updatedTabId === tabId && info.status === "complete") done(); }
     chrome.tabs.onUpdated.addListener(onUpdated);
   });
 }
 
 async function readCurrentSnapshot(): Promise<PageSnapshot> {
   const tab = await getActiveTab();
-  return chrome.tabs.sendMessage(tab.id, { type: "page.snapshot" }) as Promise<PageSnapshot>;
+  return sendPageMessage<PageSnapshot>(tab.id, { type: "page.snapshot" });
 }
 
 function emitUiEvent(event: AgentEvent) {
@@ -276,7 +281,7 @@ async function startRecording() {
   const tab = await getActiveTab();
   const state: RecordingState = { active: true, tabId: tab.id, startedAt: Date.now(), startUrl: tab.url!, actions: [] };
   await chrome.storage.session.set({ [RECORDING_KEY]: state });
-  await chrome.tabs.sendMessage(tab.id, { type: "page.recording.start" });
+  await sendPageMessage(tab.id, { type: "page.recording.start" });
   return state;
 }
 
@@ -293,13 +298,13 @@ async function replayRecording(actions: RecordedBrowserAction[]) {
   if (!Array.isArray(actions) || !actions.length) throw new Error("There are no recorded actions to replay.");
   if (actions.length > 100) throw new Error("At most 100 actions can be replayed.");
   const tab = await getActiveTab();
-  return chrome.tabs.sendMessage(tab.id, { type: "page.recording.replay", actions });
+  return sendPageMessage(tab.id, { type: "page.recording.replay", actions });
 }
 
 async function resumeRecordingForSender(tabId: number | undefined) {
   if (typeof tabId !== "number") return;
   const state = await getRecordingState();
-  if (state?.active && state.tabId === tabId) await chrome.tabs.sendMessage(tabId, { type: "page.recording.start" }).catch(() => undefined);
+  if (state?.active && state.tabId === tabId) await sendPageMessage(tabId, { type: "page.recording.start" }).catch(() => undefined);
 }
 
 async function appendRecordedAction(action: RecordedBrowserAction, tabId: number | undefined) {
@@ -335,6 +340,29 @@ async function getActiveTab(): Promise<chrome.tabs.Tab & { id: number }> {
     throw new Error("Open an http(s) page before running the agent.");
   }
   return tab as chrome.tabs.Tab & { id: number };
+}
+
+async function sendPageMessage<T = unknown>(tabId: number, message: unknown): Promise<T> {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message) as T;
+  } catch (error) {
+    if (!isMissingPageReceiver(error)) throw error;
+  }
+
+  await waitForTabReady(tabId);
+  try {
+    return await chrome.tabs.sendMessage(tabId, message) as T;
+  } catch (error) {
+    if (!isMissingPageReceiver(error)) throw error;
+  }
+
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+  return chrome.tabs.sendMessage(tabId, message) as Promise<T>;
+}
+
+function isMissingPageReceiver(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /could not establish connection|receiving end does not exist/iu.test(message);
 }
 
 async function requestBridge(message: ClientMessage, onEvent?: (event: AgentEvent) => void): Promise<ServerMessage> {
