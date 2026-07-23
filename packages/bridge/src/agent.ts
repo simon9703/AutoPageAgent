@@ -8,6 +8,7 @@ export interface AgentRunContext {
   conversationId: string;
   history: ChatMessage[];
   loop?: AgentLoopContext;
+  signal?: AbortSignal;
 }
 
 export type AgentEventSink = (event: AgentEvent) => void;
@@ -57,10 +58,11 @@ export class CodexProvider {
       this.#threads.set(context.conversationId, threadId);
     }
     const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), isNewThread ? context.history : [], context.loop, skills);
-    return this.#runTurn(threadId, prompt, snapshot, onEvent);
+    return this.#runTurn(threadId, prompt, snapshot, context.signal, onEvent);
   }
 
-  async #runTurn(threadId: string, prompt: string, snapshot: PageSnapshot, onEvent?: AgentEventSink): Promise<AgentDecision> {
+  async #runTurn(threadId: string, prompt: string, snapshot: PageSnapshot, signal?: AbortSignal, onEvent?: AgentEventSink): Promise<AgentDecision> {
+    if (signal?.aborted) throw new Error("Agent run stopped.");
     let turnId = "";
     let text = "";
     let unsubscribe: () => void = () => undefined;
@@ -98,7 +100,15 @@ export class CodexProvider {
         approvalPolicy: "never",
       });
       turnId = turn.turn?.id ?? "";
-      await withTimeout(completed, 40_000);
+      const interrupt = () => {
+        if (turnId) void this.#client.request("turn/interrupt", { threadId, turnId }).catch(() => undefined);
+      };
+      signal?.addEventListener("abort", interrupt, { once: true });
+      try {
+        await withTimeout(completed, 40_000, signal);
+      } finally {
+        signal?.removeEventListener("abort", interrupt);
+      }
       return normalizeDecision(extractJson(text), snapshot);
     } finally {
       unsubscribe();
@@ -143,7 +153,9 @@ export class OpenAIResponsesProvider {
       ?? snapshot.context?.selectedElement?.image?.src;
     if (imageUrl && /^(?:https?:|data:image\/)/iu.test(imageUrl)) userContent.push({ type: "input_image", image_url: imageUrl, detail: "auto" });
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000);
+    const timeout = setTimeout(() => controller.abort("timeout"), 60_000);
+    const cancel = () => controller.abort("cancelled");
+    context.signal?.addEventListener("abort", cancel, { once: true });
     try {
       const response = await this.#fetch("https://api.openai.com/v1/responses", {
         method: "POST",
@@ -167,9 +179,15 @@ export class OpenAIResponsesProvider {
       if (streamed.responseId) this.#previousResponses.set(context.conversationId, streamed.responseId);
       return normalizeDecision(extractJson(streamed.text), snapshot);
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") throw new Error("OpenAI Responses API timed out.");
+      if (error instanceof Error && error.name === "AbortError") {
+        if (context.signal?.aborted) throw new Error("Agent run stopped.");
+        throw new Error("OpenAI Responses API timed out.");
+      }
       throw error;
-    } finally { clearTimeout(timeout); }
+    } finally {
+      clearTimeout(timeout);
+      context.signal?.removeEventListener("abort", cancel);
+    }
   }
 }
 
@@ -376,8 +394,21 @@ function mockDecision(task: string, snapshot: PageSnapshot): AgentDecision {
   return { kind: "answer", content: `Mock analysis for ${snapshot.title}\n\nTask: ${task}\nInteractive elements: ${snapshot.elements.length}\nRequests: ${snapshot.performance.summary.requestCount}\nSlow requests: ${snapshot.performance.summary.slowRequestCount}` };
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
   let timeout: NodeJS.Timeout | undefined;
-  try { return await Promise.race([promise, new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("Codex turn timed out.")), timeoutMs); })]); }
-  finally { if (timeout) clearTimeout(timeout); }
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("Codex turn timed out.")), timeoutMs); }),
+      new Promise<never>((_, reject) => {
+        onAbort = () => reject(new Error("Agent run stopped."));
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener("abort", onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  }
 }

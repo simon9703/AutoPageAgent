@@ -330,6 +330,7 @@ export interface ActionExecutionResult {
 export type ClientMessage =
   | { id: string; type: "health.check" }
   | { id: string; type: "agent.reset"; conversationId: string }
+  | { id: string; type: "agent.cancel"; requestId: string; conversationId: string }
   | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot; conversationId: string; history: ChatMessage[]; loop?: AgentLoopContext }
   | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement; apiRequests: ApiRequestSnapshot[] }
   | { id: string; type: "skill.list"; pageUrl: string; pageTitle: string }
@@ -342,6 +343,7 @@ export type ClientMessage =
 export type ServerMessage =
   | { id: string; type: "health.result"; ok: boolean; provider: string; repositories: string[]; codex: CodexRuntimeStatus; agent: AgentRuntimeStatus }
   | { id: string; type: "agent.reset.result"; conversationId: string }
+  | { id: string; type: "agent.cancel.result"; requestId: string; cancelled: boolean }
   | { id: string; type: "agent.event"; event: AgentEvent }
   | { id: string; type: "agent.result"; decision: AgentDecision; provider: string; conversationId: string; selectedSkills: Omit<SkillSelection, "body">[] }
   | { id: string; type: "repository.result"; analysis: RepositoryAnalysis }

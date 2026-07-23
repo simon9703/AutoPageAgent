@@ -29,6 +29,8 @@ const SELECTION_STORAGE_KEYS = [
   "selectedElementScreenshot",
 ] as const;
 const pendingAgentRuns = new PendingAgentRunStore(chrome.storage.session);
+type ActiveAgentRun = { conversationId: string; tabId: number; bridgeRequestId?: string; cancelled: boolean };
+let activeAgentRun: ActiveAgentRun | null = null;
 type EventWithoutMeta<T> = T extends unknown ? Omit<T, "id" | "timestamp"> : never;
 type AgentEventInput = EventWithoutMeta<AgentEvent>;
 
@@ -109,6 +111,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       emitUiEvent(createEvent({ type: "error", error: error instanceof Error ? error.message : String(error), recoverable: false }));
       toErrorResponse(sendResponse)(error);
     });
+    return true;
+  }
+  if (message?.type === "ui.agent.stop") {
+    void stopActiveAgentRun(String(message.conversationId ?? "")).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.selection.start") {
@@ -264,46 +270,56 @@ function normalizeScreenshot(
 
 async function runTask(task: string, conversationId: string, history: ChatMessage[], targetTabId: number, screenshot?: { dataUrl?: string; title?: string; url?: string }): Promise<ServerMessage> {
   if (!task.trim()) throw new Error("Enter a task first.");
-  const tab = await getTargetTab(targetTabId);
-  const snapshot = await sendPageMessage<PageSnapshot>(tab.id, { type: "page.snapshot" });
-  const stored = await chrome.storage.session.get([...SELECTION_STORAGE_KEYS]);
-  const selectionIsCurrent = stored.selectedElementPageUrl === tab.url && stored.selectedElementTabId === tab.id;
-  const selectedElement = selectionIsCurrent && stored.selectedElement ? stored.selectedElement as InspectedElement : undefined;
-  const selectedScreenshot = normalizeScreenshot(
-    screenshot?.dataUrl?.startsWith("data:image/") ? screenshot : selectionIsCurrent ? stored.selectedElementScreenshot as { dataUrl?: string; title?: string; url?: string } | undefined : undefined,
-    tab,
-  );
-  if (selectedElement || selectedScreenshot) snapshot.context = { ...(selectedElement ? { selectedElement } : {}), ...(selectedScreenshot ? { screenshot: selectedScreenshot } : {}) };
-  const pendingRun = {
-    task,
-    conversationId: conversationId || crypto.randomUUID(),
-    history: history.slice(-20),
-    snapshotId: snapshot.snapshotId,
-    tabId: tab.id,
-    pageUrl: snapshot.url,
-  };
-  await pendingAgentRuns.save(pendingRun);
+  const run = beginAgentRun(conversationId, targetTabId);
   try {
-    const response = await requestBridge({
-      id: crypto.randomUUID(),
-      type: "agent.run",
+    const tab = await getTargetTab(targetTabId);
+    assertAgentRunActive(run);
+    const snapshot = await sendPageMessage<PageSnapshot>(tab.id, { type: "page.snapshot" });
+    assertAgentRunActive(run);
+    const stored = await chrome.storage.session.get([...SELECTION_STORAGE_KEYS]);
+    const selectionIsCurrent = stored.selectedElementPageUrl === tab.url && stored.selectedElementTabId === tab.id;
+    const selectedElement = selectionIsCurrent && stored.selectedElement ? stored.selectedElement as InspectedElement : undefined;
+    const selectedScreenshot = normalizeScreenshot(
+      screenshot?.dataUrl?.startsWith("data:image/") ? screenshot : selectionIsCurrent ? stored.selectedElementScreenshot as { dataUrl?: string; title?: string; url?: string } | undefined : undefined,
+      tab,
+    );
+    if (selectedElement || selectedScreenshot) snapshot.context = { ...(selectedElement ? { selectedElement } : {}), ...(selectedScreenshot ? { screenshot: selectedScreenshot } : {}) };
+    const pendingRun = {
       task,
-      snapshot,
-      conversationId: pendingRun.conversationId,
-      history: pendingRun.history,
-    }, emitUiEvent);
-    if (response.type === "agent.result" && response.decision.kind === "action_plan") {
-      if (response.decision.snapshotId !== pendingRun.snapshotId) {
-        await pendingAgentRuns.clearForSnapshot(pendingRun.snapshotId);
-        throw new Error("The agent returned a plan for an expired page snapshot.");
+      conversationId: conversationId || crypto.randomUUID(),
+      history: history.slice(-20),
+      snapshotId: snapshot.snapshotId,
+      tabId: tab.id,
+      pageUrl: snapshot.url,
+    };
+    await pendingAgentRuns.save(pendingRun);
+    try {
+      const requestId = crypto.randomUUID();
+      run.bridgeRequestId = requestId;
+      const response = await requestBridge({
+        id: requestId,
+        type: "agent.run",
+        task,
+        snapshot,
+        conversationId: pendingRun.conversationId,
+        history: pendingRun.history,
+      }, emitUiEvent);
+      assertAgentRunActive(run);
+      if (response.type === "agent.result" && response.decision.kind === "action_plan") {
+        if (response.decision.snapshotId !== pendingRun.snapshotId) {
+          await pendingAgentRuns.clearForSnapshot(pendingRun.snapshotId);
+          throw new Error("The agent returned a plan for an expired page snapshot.");
+        }
+        return response;
       }
+      await pendingAgentRuns.clearForSnapshot(pendingRun.snapshotId);
       return response;
+    } catch (error) {
+      await pendingAgentRuns.clearForSnapshot(pendingRun.snapshotId);
+      throw error;
     }
-    await pendingAgentRuns.clearForSnapshot(pendingRun.snapshotId);
-    return response;
-  } catch (error) {
-    await pendingAgentRuns.clearForSnapshot(pendingRun.snapshotId);
-    throw error;
+  } finally {
+    finishAgentRun(run);
   }
 }
 
@@ -327,7 +343,9 @@ async function executePlan(plan: BrowserActionPlan, tabId: number) {
 
 async function runAgentLoop(initialPlan: BrowserActionPlan) {
   const pendingRun = await pendingAgentRuns.loadForPlan(initialPlan.snapshotId);
+  const run = beginAgentRun(pendingRun.conversationId, pendingRun.tabId);
   try {
+    assertAgentRunActive(run);
     const initialTab = await getTargetTab(pendingRun.tabId);
     if (initialTab.url !== pendingRun.pageUrl) {
       throw new Error("The target page navigated after this plan was created. Run the task again.");
@@ -342,10 +360,12 @@ async function runAgentLoop(initialPlan: BrowserActionPlan) {
     let plan = initialPlan;
     let latestAnswer = "Task completed.";
     while (iteration < maxSteps && Date.now() - startedAt < timeoutMs) {
+      assertAgentRunActive(run);
       const step = plan.steps[0];
       if (!step) throw new Error("The agent returned an empty action plan.");
       emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: "running", step: iteration + 1, detail: step.reason }));
       let execution = await executePlanResilient({ ...plan, steps: [step] }, pendingRun.tabId);
+      assertAgentRunActive(run);
       if (!execution.snapshot) execution = { ...execution, snapshot: await readSnapshot(pendingRun.tabId) };
       const observedSnapshot = execution.snapshot!;
       emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: execution.ok ? "success" : "failed", step: iteration + 1, detail: execution.error }));
@@ -361,10 +381,13 @@ async function runAgentLoop(initialPlan: BrowserActionPlan) {
         lastAction: step,
         ...(verification ? { lastVerification: verification } : {}),
       };
+      const requestId = crypto.randomUUID();
+      run.bridgeRequestId = requestId;
       const response = await requestBridge({
-        id: crypto.randomUUID(), type: "agent.run", task: pendingRun.task, snapshot: observedSnapshot,
+        id: requestId, type: "agent.run", task: pendingRun.task, snapshot: observedSnapshot,
         conversationId: pendingRun.conversationId, history: pendingRun.history, loop,
       }, emitUiEvent);
+      assertAgentRunActive(run);
       if (response.type === "agent.error") throw new Error(response.error);
       if (response.type !== "agent.result") throw new Error("Unexpected agent loop response.");
       if (response.decision.kind === "answer") {
@@ -376,9 +399,42 @@ async function runAgentLoop(initialPlan: BrowserActionPlan) {
     }
     throw new Error("The agent stopped at its time budget.");
   } finally {
+    finishAgentRun(run);
     await sendPageMessage(pendingRun.tabId, { type: "page.agent.activity", active: false }).catch(() => undefined);
     await pendingAgentRuns.clearForSnapshot(initialPlan.snapshotId);
   }
+}
+
+function beginAgentRun(conversationId: string, tabId: number): ActiveAgentRun {
+  if (activeAgentRun) throw new Error("Another agent run is already active.");
+  const run = { conversationId, tabId, cancelled: false };
+  activeAgentRun = run;
+  return run;
+}
+
+function finishAgentRun(run: ActiveAgentRun) {
+  if (activeAgentRun === run) activeAgentRun = null;
+}
+
+function assertAgentRunActive(run: ActiveAgentRun) {
+  if (run.cancelled || activeAgentRun !== run) throw new Error("Agent run stopped.");
+}
+
+async function stopActiveAgentRun(conversationId: string) {
+  const run = activeAgentRun;
+  if (!run || (conversationId && run.conversationId !== conversationId)) return { ok: true, stopped: false };
+  run.cancelled = true;
+  await sendPageMessage(run.tabId, { type: "page.agent.activity", active: false }).catch(() => undefined);
+  await pendingAgentRuns.clearForConversation(run.conversationId);
+  if (run.bridgeRequestId) {
+    await requestBridge({
+      id: crypto.randomUUID(),
+      type: "agent.cancel",
+      requestId: run.bridgeRequestId,
+      conversationId: run.conversationId,
+    }).catch(() => undefined);
+  }
+  return { ok: true, stopped: true };
 }
 
 async function executePlanResilient(plan: BrowserActionPlan, tabId: number): Promise<ActionExecutionResult> {

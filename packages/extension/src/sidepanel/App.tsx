@@ -51,6 +51,7 @@ export function App() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const targetTabRef = useRef<BrowserTabTarget | null>(null);
   const busyRef = useRef(false);
+  const stopRequestedRef = useRef(false);
   const conversationStartedRef = useRef(false);
 
   useEffect(() => {
@@ -325,6 +326,7 @@ export function App() {
     appendMessage("user", text);
     setPrompt("");
     setBusy(true);
+    stopRequestedRef.current = false;
     setPendingPlan(null);
     setNotice("Reading the current page and planning…");
     try {
@@ -344,8 +346,10 @@ export function App() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      appendMessage("assistant", `Error: ${message}`);
-      setNotice(message);
+      if (!stopRequestedRef.current) {
+        appendMessage("assistant", `Error: ${message}`);
+        setNotice(message);
+      }
     } finally { setBusy(false); }
   }
 
@@ -354,6 +358,7 @@ export function App() {
     const plan = pendingPlan;
     setPendingPlan(null);
     setBusy(true);
+    stopRequestedRef.current = false;
     setNotice("Agent is operating the page and verifying each step…");
     try {
       const response = await chrome.runtime.sendMessage({ type: "ui.execute", plan }) as { ok?: boolean; answer?: string; steps?: number; error?: string };
@@ -363,9 +368,21 @@ export function App() {
       setNotice("Page task completed.");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      appendMessage("assistant", `Action stopped: ${message}`);
-      setNotice(message);
+      if (!stopRequestedRef.current) {
+        appendMessage("assistant", `Action stopped: ${message}`);
+        setNotice(message);
+      }
     } finally { setBusy(false); }
+  }
+
+  async function stopAgent() {
+    if (!busyRef.current) return;
+    stopRequestedRef.current = true;
+    setPendingPlan(null);
+    setNotice("Stopping the agent…");
+    const response = await chrome.runtime.sendMessage({ type: "ui.agent.stop", conversationId }) as { ok?: boolean; stopped?: boolean; error?: string };
+    setBusy(false);
+    setNotice(response.ok ? "Agent stopped." : `Stop failed: ${response.error ?? "Unknown error"}`);
   }
 
   async function analyzeCode() {
@@ -498,7 +515,9 @@ export function App() {
           <textarea ref={inputRef} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitTask(); } }} rows={2} placeholder="Ask about this page or tell the agent what to do…" className="max-h-32 min-h-12 w-full resize-none border-0 bg-transparent px-1 text-[14px] leading-5 outline-none placeholder:text-slate-400" />
           <div className="mt-1 flex items-center justify-between">
             <div className="flex gap-1"><IconButton label="Select element" onClick={() => void startSelection("element")}><MousePointer2 size={16} /></IconButton><IconButton label="Open Skills" onClick={() => setModal("skills")}><Sparkles size={16} /></IconButton></div>
-            <button type="submit" disabled={!prompt.trim() || busy} className="grid h-10 w-10 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-violet-600 disabled:cursor-not-allowed disabled:bg-slate-200" aria-label="Send"><Send size={17} /></button>
+            {busy
+              ? <button type="button" onClick={() => void stopAgent()} className="grid h-10 w-10 place-items-center rounded-full bg-rose-600 text-white transition hover:bg-rose-700" aria-label="Stop agent" title="Stop agent"><CircleStop size={18} /></button>
+              : <button type="submit" disabled={!prompt.trim()} className="grid h-10 w-10 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-violet-600 disabled:cursor-not-allowed disabled:bg-slate-200" aria-label="Send"><Send size={17} /></button>}
           </div>
         </form>
         <p className="mt-1.5 truncate px-2 text-center text-[10px] text-slate-400">{notice}</p>

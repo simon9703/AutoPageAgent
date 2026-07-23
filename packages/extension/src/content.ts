@@ -774,27 +774,65 @@ function showAgentFrame() {
   window.clearTimeout(agentFrameHideTimer);
   agentFrameHideTimer = undefined;
   if (!agentFrame) {
-    agentFrame = document.createElement("div");
+    agentFrame = document.createElement("auto-page-agent-frame");
     agentFrame.dataset.autoPageAgentOverlay = "true";
     agentFrame.className = "auto-page-agent-viewport-frame";
-    agentFrame.innerHTML = `
-      <span class="auto-page-agent-frame-edge top"></span>
-      <span class="auto-page-agent-frame-edge right"></span>
-      <span class="auto-page-agent-frame-edge bottom"></span>
-      <span class="auto-page-agent-frame-edge left"></span>
-      <span class="auto-page-agent-frame-status"><i></i> AI is operating</span>
+    setAgentFrameHostStyles(agentFrame);
+    const shadow = agentFrame.attachShadow({ mode: "closed" });
+    shadow.innerHTML = `
+      <style>
+        :host { color-scheme: light; }
+        .edge { position: absolute; display: block; pointer-events: none; background: linear-gradient(115deg,#22d3ee,#6366f1,#a855f7,#ec4899,#22d3ee); background-size: 300% 300%; box-shadow: 0 0 10px #6366f180; animation: flow 4s linear infinite; }
+        .top { top: 0; right: 0; left: 0; height: 4px; }
+        .right { top: 0; right: 0; bottom: 0; width: 4px; }
+        .bottom { right: 0; bottom: 0; left: 0; height: 4px; }
+        .left { top: 0; bottom: 0; left: 0; width: 4px; }
+        .status { position: absolute; right: 15px; bottom: 14px; display: flex; align-items: center; gap: 7px; padding: 7px 11px; border: 1px solid #ffffff3d; border-radius: 999px; color: white; background: #17132be8; backdrop-filter: blur(12px); box-shadow: 0 8px 24px #312e8150; font: 650 11px/1 Inter,ui-sans-serif,system-ui,sans-serif; letter-spacing: .02em; white-space: nowrap; pointer-events: none; }
+        .status i { display: block; width: 7px; height: 7px; border-radius: 50%; background: #67e8f9; box-shadow: 0 0 0 4px #22d3ee25,0 0 12px #22d3ee; animation: pulse 1.4s ease-in-out infinite; }
+        @keyframes flow { to { background-position: 300% 50%; } }
+        @keyframes pulse { 50% { opacity: .45; transform: scale(.72); } }
+        @media (prefers-reduced-motion: reduce) { .edge,.status i { animation: none; } }
+      </style>
+      <span class="edge top"></span>
+      <span class="edge right"></span>
+      <span class="edge bottom"></span>
+      <span class="edge left"></span>
+      <span class="status"><i></i> AI is operating</span>
     `;
     document.documentElement.append(agentFrame);
   }
-  requestAnimationFrame(() => agentFrame?.classList.add("visible"));
+  requestAnimationFrame(() => agentFrame?.style.setProperty("opacity", "1", "important"));
 }
 
 function hideAgentFrame(delayMs = 0) {
   window.clearTimeout(agentFrameHideTimer);
   agentFrameHideTimer = window.setTimeout(() => {
     if (persistentAgentActivity) return;
-    agentFrame?.classList.remove("visible");
+    agentFrame?.style.setProperty("opacity", "0", "important");
   }, delayMs);
+}
+
+function setAgentFrameHostStyles(host: HTMLElement) {
+  const styles: Record<string, string> = {
+    all: "initial",
+    position: "fixed",
+    zIndex: "2147483643",
+    inset: "0",
+    display: "block",
+    boxSizing: "border-box",
+    opacity: "0",
+    pointerEvents: "none",
+    overflow: "visible",
+    border: "0",
+    borderRadius: "0",
+    background: "transparent",
+    boxShadow: "none",
+    transition: "opacity .28s ease",
+    contain: "strict",
+  };
+  for (const [property, value] of Object.entries(styles)) {
+    host.style.setProperty(property.replace(/[A-Z]/gu, (match) => `-${match.toLowerCase()}`), value, "important");
+  }
 }
 
 function ensureAgentStyles() {
