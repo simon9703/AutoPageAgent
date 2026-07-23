@@ -91,8 +91,10 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 2. Make the smallest coherent change in the owning package; avoid duplicating protocol types between packages.
 3. Update `packages/shared` first for cross-boundary changes, then bridge, extension, tests, and relevant docs.
 4. Add regression tests for validation, parsing, selection, persistence, retry, or security-boundary changes. For content-script UI/DOM changes without a browser harness, keep logic small and verify with typecheck/build plus a manual mock-mode flow when practical.
-5. Run `npm run typecheck`, `npm test`, `npm run build`, and `git diff --check`.
-6. Review the final diff for secrets, accidental generated files, and unrelated user changes before commit or push.
+5. Every completed change must include a version bump before it is committed, including fixes, features, refactors, documentation, and configuration changes. Use SemVer: increment patch by default, minor for backward-compatible feature releases, and major for breaking changes.
+6. Keep the version synchronized in the root `package.json`, every workspace `package.json`, `packages/extension/manifest.json`, internal workspace dependency versions, and `package-lock.json`. Never leave mixed project versions in one commit.
+7. Run `npm run typecheck`, `npm test`, `npm run build`, and `git diff --check`.
+8. Review the final diff for secrets, accidental generated files, unrelated user changes, and inconsistent versions before commit or push.
 
 Do not commit `node_modules`, workspace-local configuration, API keys, generated screenshots, or user Registry data. Do not rewrite or discard unrelated working-tree changes.
 
@@ -107,4 +109,4 @@ Do not commit `node_modules`, workspace-local configuration, API keys, generated
 
 ## Definition of done
 
-A change is complete when the owning package and all affected boundaries agree, unsafe inputs fail closed, relevant documentation reflects the behavior, the full validation suite passes, and the worktree contains only intentional files.
+A change is complete when the owning package and all affected boundaries agree, unsafe inputs fail closed, relevant documentation reflects the behavior, the project version has been incremented consistently, the full validation suite passes, and the worktree contains only intentional files.
