@@ -36,6 +36,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void chrome.runtime.sendMessage({ type: "ui.element.selected", element: message.element, pageUrl: message.pageUrl }).catch(() => undefined);
     return false;
   }
+  if (message?.type === "page.selection.cancelled") {
+    void chrome.runtime.sendMessage({ type: "ui.selection.cancelled" }).catch(() => undefined);
+    return false;
+  }
   if (message?.type === "page.recording.ready") {
     void resumeRecordingForSender(_sender.tab?.id);
     return false;
@@ -48,8 +52,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void requestBridge({ id: crypto.randomUUID(), type: "health.check" }).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
+  if (message?.type === "ui.conversation.reset") {
+    const conversationId = String(message.conversationId ?? "");
+    pendingAgentRun = pendingAgentRun?.conversationId === conversationId ? null : pendingAgentRun;
+    void Promise.all([
+      chrome.storage.session.remove(["selectedElement", "selectedElementPageUrl"]),
+      conversationId ? requestBridge({ id: crypto.randomUUID(), type: "agent.reset", conversationId }) : Promise.resolve(undefined),
+    ]).then(() => sendResponse({ ok: true })).catch(toErrorResponse(sendResponse));
+    return true;
+  }
   if (message?.type === "ui.selection.current") {
     void chrome.storage.session.get(["selectedElement", "selectedElementPageUrl"]).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.selection.clear") {
+    void chrome.storage.session.remove(["selectedElement", "selectedElementPageUrl"]).then(() => sendResponse({ ok: true })).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.run") {
@@ -136,7 +153,10 @@ async function runTask(task: string, conversationId: string, history: ChatMessag
 
 async function startSelection(mode: "element" | "image") {
   const tab = await getActiveTab();
-  return chrome.tabs.sendMessage(tab.id, { type: "page.selection.start", mode });
+  const response = await chrome.tabs.sendMessage(tab.id, { type: "page.selection.start", mode });
+  await chrome.tabs.update(tab.id, { active: true });
+  if (typeof tab.windowId === "number") await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
+  return response;
 }
 
 async function analyzeRepository(element: InspectedElement, pageUrl: string): Promise<ServerMessage> {

@@ -388,7 +388,11 @@ function startElementSelection(mode: "element" | "image") {
     cleanup();
     void chrome.runtime.sendMessage({ type: "page.element.selected", element: selected, pageUrl: location.href });
   };
-  const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") cleanup(); };
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    cleanup();
+    void chrome.runtime.sendMessage({ type: "page.selection.cancelled" }).catch(() => undefined);
+  };
   document.addEventListener("mousemove", onMove, true);
   document.addEventListener("click", onClick, true);
   document.addEventListener("keydown", onKey, true);

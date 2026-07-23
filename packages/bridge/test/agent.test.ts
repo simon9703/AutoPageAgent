@@ -101,6 +101,26 @@ test("Responses API provider chains turns by conversation", async () => {
   assert.equal(bodies[2]?.previous_response_id, undefined);
 });
 
+test("Responses API provider reset starts a fresh conversation chain", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  let call = 0;
+  const provider = new OpenAIResponsesProvider({
+    apiKey: "test-key",
+    fetchImpl: (async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      call += 1;
+      return new Response(JSON.stringify({ id: `response-${call}`, output_text: '{"kind":"answer","content":"ok"}' }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch,
+  });
+
+  await provider.run("First turn", snapshot, { conversationId: "conversation-reset", history: [] });
+  provider.reset("conversation-reset");
+  await provider.run("Fresh turn", snapshot, { conversationId: "conversation-reset", history: [] });
+
+  assert.equal(bodies[0]?.previous_response_id, undefined);
+  assert.equal(bodies[1]?.previous_response_id, undefined);
+});
+
 test("Responses output and conversation history parsing is bounded", () => {
   assert.equal(extractResponsesText({ output: [{ content: [{ type: "output_text", text: "hello" }] }] }), "hello");
   const prompt = createAgentPrompt("continue", snapshot, [], [{ id: "1", role: "user", content: "prior", createdAt: new Date().toISOString() }]);

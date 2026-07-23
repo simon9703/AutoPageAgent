@@ -31,6 +31,10 @@ wss.on("connection", (socket, request) => {
         const agent = await provider.status(codex);
         response = { id: requestMessage.id, type: "health.result", ok: agent.available && agent.authenticated, provider: agent.name, repositories: repositoryProvider.roots.map((root) => root.name), codex, agent };
       }
+      else if (requestMessage.type === "agent.reset") {
+        provider.reset(requestMessage.conversationId);
+        response = { id: requestMessage.id, type: "agent.reset.result", conversationId: requestMessage.conversationId };
+      }
       else if (requestMessage.type === "agent.run") {
         const result = await provider.run(
           requestMessage.task,

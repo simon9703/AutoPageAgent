@@ -19,6 +19,8 @@ export class CodexProvider {
   #client = new CodexAppServerClient();
   #threads = new Map<string, string>();
 
+  reset(conversationId: string): void { this.#threads.delete(conversationId); }
+
   async status(): Promise<CodexRuntimeStatus> {
     if (process.env.AUTO_PAGE_AGENT_MOCK === "1") return { available: true, authenticated: true, authMode: "chatgpt", command: "mock" };
     const runtime = await this.#client.inspectRuntime();
@@ -111,6 +113,8 @@ export class OpenAIResponsesProvider {
   readonly #fetch: typeof fetch;
   readonly #previousResponses = new Map<string, string>();
 
+  reset(conversationId: string): void { this.#previousResponses.delete(conversationId); }
+
   constructor(options: { apiKey?: string; model?: string; fetchImpl?: typeof fetch } = {}) {
     this.#apiKey = options.apiKey ?? process.env.OPENAI_API_KEY ?? "";
     this.model = options.model ?? process.env.OPENAI_MODEL ?? "gpt-5.6-sol";
@@ -173,6 +177,11 @@ export class AgentRouter {
   readonly openai: OpenAIResponsesProvider;
 
   constructor(openai = new OpenAIResponsesProvider()) { this.openai = openai; }
+
+  reset(conversationId: string): void {
+    this.codex.reset(conversationId);
+    this.openai.reset(conversationId);
+  }
 
   async status(codexStatus?: CodexRuntimeStatus): Promise<AgentRuntimeStatus> {
     const preference = normalizeProviderPreference(process.env.AUTO_PAGE_AGENT_PROVIDER);

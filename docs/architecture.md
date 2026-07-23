@@ -14,7 +14,7 @@ The MVP implements the browser-page domain, lightweight performance evidence, lo
 
 ### Chrome extension
 
-- **Side Panel** presents prompts, answers, plans, and approval controls.
+- **Side Panel** is a React + Tailwind interface with icon-first page tools, modal Skill/recording management, a fixed composer, and an adjacent action-approval card.
 - **Background service worker** owns the localhost connection and routes messages to the active tab.
 - **Content script** creates a bounded snapshot and executes approved actions.
 - **Element picker** captures source metadata and stable textual/attribute clues for repository analysis.
@@ -32,7 +32,7 @@ The bridge listens only on `127.0.0.1`. It:
 1. accepts a page snapshot and user task;
 2. selects applicable `SKILL.md` workflows;
 3. routes the request to authenticated local Codex or the configured Responses API;
-4. reuses provider conversation state and sends a constrained planning prompt;
+4. reuses provider conversation state until the user starts a new conversation, which clears both Codex thread and Responses chaining state;
 5. parses and validates the JSON decision;
 6. returns an answer or confirmation-required action plan.
 
