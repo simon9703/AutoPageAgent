@@ -7,6 +7,7 @@ import type {
   PageSnapshot,
   PerformanceSnapshot,
   InspectedElement,
+  ElementSelectionGeometry,
   RecordedBrowserAction,
   PageSnapshotDiff,
 } from "@auto-page-agent/shared";
@@ -351,23 +352,20 @@ function startElementSelection(mode: "element" | "image") {
   const notice = document.createElement("div");
   notice.dataset.autoPageAgentOverlay = "true";
   notice.className = "auto-page-agent-notice";
-  notice.textContent = mode === "image" ? "AI · Select an image · Esc to cancel" : "AI · Select an element · Esc to cancel";
+  notice.textContent = mode === "image" ? "AI · Select an element to capture · Esc to cancel" : "AI · Select an element · Esc to cancel";
   document.documentElement.append(notice);
-  let hovered: HTMLElement | null = null;
-  let previousOutline = "";
+  let hovered: Element | null = null;
   const restore = () => {
-    if (hovered) hovered.style.outline = previousOutline;
+    hovered?.classList.remove("auto-page-agent-picker-target");
     hovered = null;
   };
   const onMove = (event: MouseEvent) => {
     const raw = event.target instanceof Element ? event.target : null;
-    const candidate = mode === "image" ? findImageTarget(raw) : raw;
-    const next = candidate instanceof HTMLElement ? candidate : null;
+    const next = mode === "image" ? findImageTarget(raw) ?? raw : raw;
     if (!next || next === hovered) return;
     restore();
     hovered = next;
-    previousOutline = next.style.outline;
-    next.style.outline = "3px solid #7c5cff";
+    next.classList.add("auto-page-agent-picker-target");
   };
   const cleanup = () => {
     restore();
@@ -380,13 +378,25 @@ function startElementSelection(mode: "element" | "image") {
   };
   const onClick = (event: MouseEvent) => {
     if (!(event.target instanceof Element)) return;
-    const target = mode === "image" ? findImageTarget(event.target) : event.target;
-    if (!target) return;
+    const target = mode === "image"
+      ? findImageTarget(event.target) ?? event.target
+      : event.target;
     event.preventDefault();
     event.stopImmediatePropagation();
+    if (mode === "image" && isSensitiveCaptureTarget(target)) {
+      cleanup();
+      void chrome.runtime.sendMessage({ type: "page.selection.cancelled", reason: "Sensitive fields cannot be captured." }).catch(() => undefined);
+      return;
+    }
     const selected = inspectElement(target);
+    const rect = target.getBoundingClientRect();
+    const geometry: ElementSelectionGeometry = {
+      rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    };
     cleanup();
-    void chrome.runtime.sendMessage({ type: "page.element.selected", element: selected, pageUrl: location.href });
+    void chrome.runtime.sendMessage({ type: "page.element.selected", mode, element: selected, geometry, pageUrl: location.href });
   };
   const onKey = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return;
@@ -473,6 +483,22 @@ function isHiddenInput(element: Element): boolean {
 function isSensitiveElement(element: Element): boolean {
   if (!(element instanceof HTMLInputElement)) return false;
   return ["password", "file"].includes(element.type) || /password|secret|token|otp|card|cvv|credential/iu.test(`${element.name} ${element.autocomplete}`);
+}
+
+function isSensitiveCaptureTarget(element: Element): boolean {
+  const candidates = [element, ...Array.from(element.querySelectorAll("input,textarea,select"))];
+  return candidates.some((candidate) => {
+    if (isSensitiveElement(candidate)) return true;
+    const attributes = [
+      candidate.getAttribute("type"),
+      candidate.getAttribute("name"),
+      candidate.getAttribute("id"),
+      candidate.getAttribute("autocomplete"),
+      candidate.getAttribute("placeholder"),
+      candidate.getAttribute("aria-label"),
+    ].filter(Boolean).join(" ");
+    return /password|passcode|secret|token|otp|one.?time|payment|card|cvv|cvc|iban|credential|file/iu.test(attributes);
+  });
 }
 
 function shouldExposeValue(element: Element): element is HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement {
@@ -640,6 +666,7 @@ function ensureAgentStyles() {
     .auto-page-agent-pointer-dot { position: absolute; width: 24px; height: 24px; margin: -12px; border: 3px solid #8b5cf6; border-radius: 50%; background: #ffffff99; box-shadow: 0 0 0 7px #8b5cf633, 0 5px 18px #4c1d9566; }
     .auto-page-agent-pointer-dot::after { content: ''; position: absolute; left: 7px; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: #6d3bd1; }
     .auto-page-agent-pointer-label { position: absolute; left: 15px; top: 13px; width: max-content; max-width: 180px; padding: 4px 7px; border-radius: 7px; color: white; background: #6d3bd1; font: 600 10px system-ui; }
+    .auto-page-agent-picker-target { outline: 3px solid #7c5cff !important; outline-offset: 2px !important; }
     .auto-page-agent-target-ring { outline: 3px solid #8b5cf6 !important; outline-offset: 4px !important; box-shadow: 0 0 0 8px #8b5cf633 !important; }
   `;
   document.documentElement.append(style);

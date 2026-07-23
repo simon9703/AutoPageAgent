@@ -57,6 +57,12 @@ export interface InspectedElement {
   };
 }
 
+export interface ElementSelectionGeometry {
+  rect: ViewportRect;
+  viewportWidth: number;
+  viewportHeight: number;
+}
+
 export type RepositoryEvidenceKind = "source" | "api" | "text" | "symbol";
 
 export interface RepositoryEvidence {

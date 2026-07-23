@@ -1,10 +1,20 @@
-import type { ActionExecutionResult, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ClientMessage, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
+import type { ActionExecutionResult, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ClientMessage, ElementSelectionGeometry, InspectedElement, PageSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
 import { PendingAgentRunStore } from "./pending-agent-run.js";
+import { calculateScreenshotCrop } from "./screenshot-crop.js";
 
 const BRIDGE_URL = "ws://127.0.0.1:3210";
 let socket: WebSocket | null = null;
 let connecting: Promise<WebSocket> | null = null;
 const RECORDING_KEY = "automationRecording";
+const SELECTION_STORAGE_KEYS = [
+  "selectedElement",
+  "selectedElementPageUrl",
+  "selectedElementTabId",
+  "selectedElementScreenshot",
+] as const;
+const MAX_SCREENSHOT_DATA_URL_LENGTH = 2_000_000;
+const MAX_SCREENSHOT_BYTES = 1_400_000;
+const MAX_SCREENSHOT_DIMENSION = 1_600;
 const pendingAgentRuns = new PendingAgentRunStore(chrome.storage.session);
 type EventWithoutMeta<T> = T extends unknown ? Omit<T, "id" | "timestamp"> : never;
 type AgentEventInput = EventWithoutMeta<AgentEvent>;
@@ -26,6 +36,7 @@ chrome.tabs.onActivated.addListener(() => {
 });
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (changeInfo.url) void clearSelectionForTab(_tabId);
   if (tab.active && (changeInfo.url || changeInfo.status === "complete")) {
     void chrome.runtime.sendMessage({ type: "ui.page.changed" }).catch(() => undefined);
   }
@@ -33,12 +44,11 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "page.element.selected") {
-    void chrome.storage.session.set({ selectedElement: message.element, selectedElementPageUrl: message.pageUrl });
-    void chrome.runtime.sendMessage({ type: "ui.element.selected", element: message.element, pageUrl: message.pageUrl }).catch(() => undefined);
+    void handleElementSelected(message, _sender);
     return false;
   }
   if (message?.type === "page.selection.cancelled") {
-    void chrome.runtime.sendMessage({ type: "ui.selection.cancelled" }).catch(() => undefined);
+    void chrome.runtime.sendMessage({ type: "ui.selection.cancelled", reason: message.reason }).catch(() => undefined);
     return false;
   }
   if (message?.type === "page.recording.ready") {
@@ -56,18 +66,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "ui.conversation.reset") {
     const conversationId = String(message.conversationId ?? "");
     void Promise.all([
-      chrome.storage.session.remove(["selectedElement", "selectedElementPageUrl"]),
+      chrome.storage.session.remove([...SELECTION_STORAGE_KEYS]),
       conversationId ? pendingAgentRuns.clearForConversation(conversationId) : Promise.resolve(),
       conversationId ? requestBridge({ id: crypto.randomUUID(), type: "agent.reset", conversationId }) : Promise.resolve(undefined),
     ]).then(() => sendResponse({ ok: true })).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.selection.current") {
-    void chrome.storage.session.get(["selectedElement", "selectedElementPageUrl"]).then(sendResponse).catch(toErrorResponse(sendResponse));
+    void currentSelection().then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.selection.clear") {
-    void chrome.storage.session.remove(["selectedElement", "selectedElementPageUrl"]).then(() => sendResponse({ ok: true })).catch(toErrorResponse(sendResponse));
+    void chrome.storage.session.remove([...SELECTION_STORAGE_KEYS]).then(() => sendResponse({ ok: true })).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.run") {
@@ -147,15 +157,87 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
+async function handleElementSelected(message: {
+  mode?: string;
+  element?: InspectedElement;
+  geometry?: ElementSelectionGeometry;
+  pageUrl?: string;
+}, sender: chrome.runtime.MessageSender) {
+  const tab = sender.tab;
+  if (typeof tab?.id !== "number" || typeof tab.windowId !== "number" || !message.element || typeof message.pageUrl !== "string") {
+    await chrome.runtime.sendMessage({ type: "ui.selection.cancelled", reason: "The selected page is no longer available." }).catch(() => undefined);
+    return;
+  }
+  try {
+    const screenshot = message.mode === "image"
+      ? await captureSelectedElement(tab, message.geometry, message.element.tagName)
+      : undefined;
+    const currentTab = await chrome.tabs.get(tab.id);
+    if (currentTab.url !== message.pageUrl) throw new Error("The page navigated before the selection could be captured.");
+    await chrome.storage.session.set({
+      selectedElement: message.element,
+      selectedElementPageUrl: message.pageUrl,
+      selectedElementTabId: tab.id,
+    });
+    if (screenshot) await chrome.storage.session.set({ selectedElementScreenshot: screenshot });
+    else await chrome.storage.session.remove(["selectedElementScreenshot"]);
+    await chrome.runtime.sendMessage({
+      type: "ui.element.selected",
+      element: message.element,
+      pageUrl: message.pageUrl,
+      screenshot,
+    }).catch(() => undefined);
+  } catch (error) {
+    await chrome.runtime.sendMessage({
+      type: "ui.selection.cancelled",
+      reason: error instanceof Error ? error.message : String(error),
+    }).catch(() => undefined);
+  }
+}
+
+async function currentSelection() {
+  const tab = await getActiveTab();
+  const stored = await chrome.storage.session.get([...SELECTION_STORAGE_KEYS]);
+  if (stored.selectedElementPageUrl !== tab.url || stored.selectedElementTabId !== tab.id) {
+    await chrome.storage.session.remove([...SELECTION_STORAGE_KEYS]);
+    return {};
+  }
+  return stored;
+}
+
+async function clearSelectionForTab(tabId: number) {
+  const stored = await chrome.storage.session.get(["selectedElementTabId"]);
+  if (stored.selectedElementTabId !== tabId) return;
+  await chrome.storage.session.remove([...SELECTION_STORAGE_KEYS]);
+  await chrome.runtime.sendMessage({ type: "ui.page.changed" }).catch(() => undefined);
+}
+
+function normalizeScreenshot(
+  screenshot: { dataUrl?: string; title?: string; url?: string } | undefined,
+  tab: chrome.tabs.Tab,
+): { dataUrl: string; title: string; url: string } | undefined {
+  if (!screenshot?.dataUrl?.startsWith("data:image/")) return undefined;
+  if (screenshot.dataUrl.length > MAX_SCREENSHOT_DATA_URL_LENGTH) {
+    throw new Error("The screenshot is too large. Select a smaller visible element or capture it at a lower display scale.");
+  }
+  return {
+    dataUrl: screenshot.dataUrl,
+    title: String(screenshot.title ?? "Current viewport").slice(0, 300),
+    url: String(screenshot.url ?? tab.url ?? "").slice(0, 2_000),
+  };
+}
+
 async function runTask(task: string, conversationId: string, history: ChatMessage[], screenshot?: { dataUrl?: string; title?: string; url?: string }): Promise<ServerMessage> {
   if (!task.trim()) throw new Error("Enter a task first.");
   const tab = await getActiveTab();
   const snapshot = await sendPageMessage<PageSnapshot>(tab.id, { type: "page.snapshot" });
-  const stored = await chrome.storage.session.get(["selectedElement", "selectedElementPageUrl"]);
-  const selectedElement = stored.selectedElement && stored.selectedElementPageUrl === tab.url ? stored.selectedElement as InspectedElement : undefined;
-  const selectedScreenshot = screenshot?.dataUrl?.startsWith("data:image/")
-    ? { dataUrl: screenshot.dataUrl.slice(0, 1_900_000), title: String(screenshot.title ?? "Current viewport").slice(0, 300), url: String(screenshot.url ?? tab.url ?? "").slice(0, 2_000) }
-    : undefined;
+  const stored = await chrome.storage.session.get([...SELECTION_STORAGE_KEYS]);
+  const selectionIsCurrent = stored.selectedElementPageUrl === tab.url && stored.selectedElementTabId === tab.id;
+  const selectedElement = selectionIsCurrent && stored.selectedElement ? stored.selectedElement as InspectedElement : undefined;
+  const selectedScreenshot = normalizeScreenshot(
+    screenshot?.dataUrl?.startsWith("data:image/") ? screenshot : selectionIsCurrent ? stored.selectedElementScreenshot as { dataUrl?: string; title?: string; url?: string } | undefined : undefined,
+    tab,
+  );
   if (selectedElement || selectedScreenshot) snapshot.context = { ...(selectedElement ? { selectedElement } : {}), ...(selectedScreenshot ? { screenshot: selectedScreenshot } : {}) };
   const pendingRun = {
     task,
@@ -306,7 +388,58 @@ async function listPageSkills(): Promise<ServerMessage> {
 async function captureScreenshot() {
   const tab = await getActiveTab();
   const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 82 });
+  if (dataUrl.length > MAX_SCREENSHOT_DATA_URL_LENGTH) {
+    throw new Error("The viewport screenshot is too large. Reduce the window size or display scale and try again.");
+  }
   return { ok: true, dataUrl, url: tab.url, title: tab.title, capturedAt: new Date().toISOString() };
+}
+
+async function captureSelectedElement(tab: chrome.tabs.Tab, geometry: ElementSelectionGeometry | undefined, tagName: string) {
+  if (!geometry) throw new Error("The selected element did not provide capture coordinates.");
+  const [activeTab] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  if (activeTab?.id !== tab.id) throw new Error("The selected tab must remain visible while it is captured.");
+
+  const viewportDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 90 });
+  const response = await fetch(viewportDataUrl);
+  const bitmap = await createImageBitmap(await response.blob());
+  try {
+    const crop = calculateScreenshotCrop(geometry, bitmap.width, bitmap.height);
+    const dataUrl = await encodeCroppedJpeg(bitmap, crop.source);
+    return {
+      dataUrl,
+      url: tab.url ?? "",
+      title: `Selected <${tagName}>`,
+    };
+  } finally {
+    bitmap.close();
+  }
+}
+
+async function encodeCroppedJpeg(bitmap: ImageBitmap, source: { x: number; y: number; width: number; height: number }) {
+  let outputScale = Math.min(1, MAX_SCREENSHOT_DIMENSION / Math.max(source.width, source.height));
+  let quality = 0.82;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const width = Math.max(1, Math.round(source.width * outputScale));
+    const height = Math.max(1, Math.round(source.height * outputScale));
+    const canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas is unavailable for the selected-element capture.");
+    context.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, width, height);
+    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality });
+    if (blob.size <= MAX_SCREENSHOT_BYTES) return blobToDataUrl(blob);
+    outputScale *= Math.min(0.82, Math.sqrt(MAX_SCREENSHOT_BYTES / blob.size) * 0.92);
+    quality = Math.max(0.5, quality - 0.08);
+  }
+  throw new Error("The selected element screenshot is too large. Select a smaller visible area.");
+}
+
+async function blobToDataUrl(blob: Blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return `data:${blob.type};base64,${btoa(binary)}`;
 }
 
 async function startRecording() {

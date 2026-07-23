@@ -139,7 +139,8 @@ export class OpenAIResponsesProvider {
     const previousResponseId = this.#previousResponses.get(context.conversationId);
     const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), previousResponseId ? [] : context.history, context.loop, skills);
     const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: prompt }];
-    const imageUrl = snapshot.context?.selectedElement?.image?.src ?? snapshot.context?.screenshot?.dataUrl;
+    const imageUrl = snapshot.context?.screenshot?.dataUrl
+      ?? snapshot.context?.selectedElement?.image?.src;
     if (imageUrl && /^(?:https?:|data:image\/)/iu.test(imageUrl)) userContent.push({ type: "input_image", image_url: imageUrl, detail: "auto" });
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60_000);

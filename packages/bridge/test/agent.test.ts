@@ -98,6 +98,29 @@ test("Responses API provider sends a selected viewport screenshot without embedd
   assert.match(text, /Viewport/u);
 });
 
+test("Responses API provider prefers a cropped screenshot over selected image metadata", async () => {
+  let requestBody = "";
+  const provider = new OpenAIResponsesProvider({
+    apiKey: "test-key",
+    fetchImpl: (async (_input, init) => {
+      requestBody = String(init?.body);
+      return new Response(JSON.stringify({ output_text: '{"kind":"answer","content":"crop understood"}' }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch,
+  });
+  const crop = "data:image/jpeg;base64,Y3JvcA==";
+  await provider.run("Describe the selection", {
+    ...snapshot,
+    context: {
+      selectedElement: { tagName: "img", role: "img", label: "Chart", text: "", attributes: {}, nearbyText: "", image: { src: "https://example.com/original.png", alt: "Chart", width: 400, height: 200 } },
+      screenshot: { dataUrl: crop, title: "Selected element", url: snapshot.url },
+    },
+  }, { conversationId: "screenshot-priority", history: [] });
+
+  const request = JSON.parse(requestBody) as { input: Array<{ content: Array<Record<string, unknown>> }> };
+  const image = request.input[0]?.content.find((item) => item.type === "input_image");
+  assert.equal(image?.image_url, crop);
+});
+
 test("Responses API provider chains turns by conversation", async () => {
   const bodies: Array<Record<string, unknown>> = [];
   let call = 0;

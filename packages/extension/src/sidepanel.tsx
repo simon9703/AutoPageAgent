@@ -44,18 +44,26 @@ function App() {
   useEffect(() => {
     void Promise.all([restoreConversation(), refreshHealth(), restoreSelection(), restoreRecording(), refreshSkills()]);
     const listener = (message: unknown) => {
-      const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent };
+      const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; screenshot?: { dataUrl: string; title: string; url: string }; reason?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent };
       if (value.type === "ui.element.selected" && value.element) {
         setSelected({ element: value.element, pageUrl: value.pageUrl ?? "" });
+        setScreenshot(value.screenshot ?? null);
         setSelectionMode(null);
-        setNotice(`Selected <${value.element.tagName}>. It will be included in the next message.`);
+        setNotice(value.screenshot
+          ? `Captured visible <${value.element.tagName}>. It will be included in the next message.`
+          : `Selected <${value.element.tagName}>. It will be included in the next message.`);
       }
       if (value.type === "ui.selection.cancelled") {
         setSelectionMode(null);
-        setNotice("Selection cancelled.");
+        setNotice(value.reason || "Selection cancelled.");
       }
       if (value.type === "ui.recording.updated") setRecordedActions(value.actions ?? []);
-      if (value.type === "ui.page.changed") void refreshSkills();
+      if (value.type === "ui.page.changed") {
+        setSelected(null);
+        setScreenshot(null);
+        setSelectionMode(null);
+        void refreshSkills();
+      }
       if (value.type === "ui.agent.event" && value.event) appendEvent(value.event);
     };
     chrome.runtime.onMessage.addListener(listener);
@@ -100,8 +108,9 @@ function App() {
   }
 
   async function restoreSelection() {
-    const stored = await chrome.runtime.sendMessage({ type: "ui.selection.current" }) as { selectedElement?: InspectedElement; selectedElementPageUrl?: string };
+    const stored = await chrome.runtime.sendMessage({ type: "ui.selection.current" }) as { selectedElement?: InspectedElement; selectedElementPageUrl?: string; selectedElementScreenshot?: { dataUrl: string; title: string; url: string } };
     if (stored.selectedElement) setSelected({ element: stored.selectedElement, pageUrl: stored.selectedElementPageUrl ?? "" });
+    if (stored.selectedElementScreenshot) setScreenshot(stored.selectedElementScreenshot);
   }
 
   async function restoreRecording() {
@@ -142,7 +151,7 @@ function App() {
 
   async function startSelection(mode: "element" | "image") {
     setSelectionMode(mode);
-    setNotice(mode === "image" ? "Click an image on the page · Esc to cancel" : "Click any element on the page · Esc to cancel");
+    setNotice(mode === "image" ? "Click any visible element to capture it · Esc to cancel" : "Click any element on the page · Esc to cancel");
     const response = await chrome.runtime.sendMessage({ type: "ui.selection.start", mode }) as { ok?: boolean; error?: string };
     if (!response?.ok) {
       setSelectionMode(null);
