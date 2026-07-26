@@ -7,6 +7,8 @@ import {
   shouldIncludeSnapshotCandidate,
   SNAPSHOT_CANDIDATE_SELECTOR,
 } from "../src/content/snapshot-policy.js";
+import { buildSimplifiedDom } from "../src/content/dom.js";
+import type { PageElementSnapshot } from "@auto-page-agent/shared";
 
 const available = {
   visible: true,
@@ -44,11 +46,11 @@ test("ARIA relations accept multiple whitespace-separated ids", () => {
   assert.deepEqual(parseAriaIdRefs(null), []);
 });
 
-test("hidden, zero-size, covered, disabled, and readonly candidates are excluded", () => {
+test("hidden, zero-size, covered, and disabled candidates are excluded while readonly remains observable", () => {
   assert.equal(shouldIncludeSnapshotCandidate({ ...available, visible: false }), false);
   assert.equal(shouldIncludeSnapshotCandidate({ ...available, topLayer: false }), false);
   assert.equal(shouldIncludeSnapshotCandidate({ ...available, disabled: true }), false);
-  assert.equal(shouldIncludeSnapshotCandidate({ ...available, readonly: true }), false);
+  assert.equal(shouldIncludeSnapshotCandidate({ ...available, readonly: true }), true);
   assert.equal(shouldIncludeSnapshotCandidate(available), true);
 });
 
@@ -56,4 +58,34 @@ test("aria-selected fallback receives option semantics without overriding an exp
   assert.equal(resolveSnapshotRole(null, "", true), "option");
   assert.equal(resolveSnapshotRole("tab", "", true), "tab");
   assert.equal(resolveSnapshotRole(null, "combobox", false), "combobox");
+});
+
+test("simplified DOM exposes readonly combobox state and selected display values", () => {
+  const element: PageElementSnapshot = {
+    ref: "site",
+    tagName: "input",
+    role: "combobox",
+    label: "Site",
+    text: "",
+    selector: "#site",
+    value: "",
+    displayValue: "global",
+    selectedValues: ["global", "cloud"],
+    disabled: false,
+    sensitive: false,
+    contentEditable: false,
+    fingerprint: "site-1",
+    inViewport: true,
+    occluded: false,
+    readonly: true,
+    expanded: false,
+    controls: "site-list",
+    viewportRect: { x: 0, y: 0, width: 200, height: 32 },
+  };
+  const simplified = buildSimplifiedDom([element], new Map());
+  assert.match(simplified, /readonly/u);
+  assert.match(simplified, /aria-expanded="false"/u);
+  assert.match(simplified, /aria-controls="site-list"/u);
+  assert.match(simplified, /data-display-value="global"/u);
+  assert.match(simplified, /data-selected-values="global \| cloud"/u);
 });

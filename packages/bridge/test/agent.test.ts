@@ -35,6 +35,89 @@ test("normalizeDecision rejects filling sensitive fields", () => {
   assert.deepEqual(result, { kind: "blocked", reason: "No safe action could be matched to the current page.", recoverable: true });
 });
 
+test("readonly combobox can be clicked but cannot be filled or selected", () => {
+  const comboboxSnapshot = {
+    ...snapshot,
+    elements: [{
+      ...snapshot.elements[0],
+      tagName: "input",
+      role: "combobox",
+      label: "Site",
+      text: "",
+      readonly: true,
+      controls: "site-list",
+    }],
+  };
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "click", targetRef: "element-1" }],
+  }, comboboxSnapshot).kind, "action_plan");
+  for (const action of ["fill", "select"] as const) {
+    assert.equal(normalizeDecision({
+      kind: "action_plan",
+      steps: [{ action, targetRef: "element-1", value: "global" }],
+    }, comboboxSnapshot).kind, "blocked");
+  }
+});
+
+test("readonly ordinary input remains observable but cannot be filled", () => {
+  const readonlyInput = {
+    ...snapshot,
+    elements: [{
+      ...snapshot.elements[0],
+      tagName: "input",
+      role: "textbox",
+      label: "Generated id",
+      text: "",
+      readonly: true,
+    }],
+  };
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "click", targetRef: "element-1" }],
+  }, readonlyInput).kind, "action_plan");
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "fill", targetRef: "element-1", value: "replacement" }],
+  }, readonlyInput).kind, "blocked");
+});
+
+test("custom combobox rejects fill/select while native select remains supported", () => {
+  const customCombobox = {
+    ...snapshot,
+    elements: [{
+      ...snapshot.elements[0],
+      tagName: "input",
+      role: "combobox",
+      label: "Project",
+      text: "",
+    }],
+  };
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "fill", targetRef: "element-1", value: "cloud" }],
+  }, customCombobox).kind, "blocked");
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "select", targetRef: "element-1", value: "cloud" }],
+  }, customCombobox).kind, "blocked");
+
+  const nativeSelect = {
+    ...snapshot,
+    elements: [{
+      ...snapshot.elements[0],
+      tagName: "select",
+      role: "combobox",
+      label: "Project",
+      text: "",
+    }],
+  };
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "select", targetRef: "element-1", value: "cloud" }],
+  }, nativeSelect).kind, "action_plan");
+});
+
 test("normalizeDecision rejects invented element refs", () => {
   const result = normalizeDecision({ kind: "action_plan", steps: [{ action: "click", targetRef: "element-99" }] }, snapshot);
   assert.equal(result.kind, "blocked");
@@ -68,6 +151,10 @@ test("completion evidence must be copied from the latest snapshot", () => {
   assert.equal(completionEvidenceMatchesSnapshot("https://example.com", snapshot), true);
   assert.equal(completionEvidenceMatchesSnapshot("Save", snapshot), true);
   assert.equal(completionEvidenceMatchesSnapshot("Payment succeeded", snapshot), false);
+  assert.equal(completionEvidenceMatchesSnapshot("global", {
+    ...snapshot,
+    elements: [{ ...snapshot.elements[0], displayValue: "global", selectedValues: ["global"] }],
+  }), true);
 });
 
 test("unselected popup option text is not completion evidence", () => {
@@ -179,7 +266,9 @@ test("agent prompt authorizes the requested test flow while preserving runtime b
   assert.match(prompt, /Do not refuse merely because/u);
   assert.match(prompt, /runtime confirmation card is the user's confirmation/u);
   assert.match(prompt, /latest-snapshot validation/u);
-  assert.match(prompt, /filling search text does not select an option/u);
+  assert.match(prompt, /Readonly and custom role=combobox controls cannot use fill or select/u);
+  assert.match(prompt, /Click the combobox to expand it/u);
+  assert.match(prompt, /fresh snapshot/u);
   assert.match(prompt, /Use select only for a native select element/u);
   assert.match(prompt, /Use click for buttons and button-like controls/u);
   assert.match(prompt, /Use submit only when targetRef is the native form element itself/u);

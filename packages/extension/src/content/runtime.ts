@@ -14,7 +14,7 @@ import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "./acti
 import { hasObservableActionEffect, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
-import { buildSelector, buildSimplifiedDom, cleanText, collectPageInfo, createElementFingerprint, delay, getAccessibleLabel, inferRole, isAvailableOption, isComboboxLike, isDisabledElement, isHiddenInput, isNearViewport, isReadonlyElement, isSensitiveElement, isTopLayerElement, isVisible, round, setElementValue, shouldExposeValue, simulateClick } from "./dom.js";
+import { buildSelector, buildSimplifiedDom, cleanText, collectPageInfo, createElementFingerprint, delay, getAccessibleLabel, getSelectedValues, inferRole, isAvailableOption, isComboboxLike, isDisabledElement, isHiddenInput, isNearViewport, isReadonlyElement, isSensitiveElement, isTopLayerElement, isVisible, round, setElementValue, shouldExposeValue, simulateClick } from "./dom.js";
 import { getSnapshotCandidatePriority, parseAriaIdRefs, resolveSnapshotRole, shouldIncludeSnapshotCandidate, SNAPSHOT_CANDIDATE_SELECTOR } from "./snapshot-policy.js";
 
 const elementRefs = new Map<string, Element>();
@@ -129,6 +129,7 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
     const html = element as HTMLElement;
     const input = element as HTMLInputElement;
     const rect = element.getBoundingClientRect();
+    const selectedValues = getSelectedValues(element);
     elements.push({
       ref,
       tagName: element.tagName.toLowerCase(),
@@ -137,6 +138,10 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
       text: cleanText(html.innerText || element.textContent || "", 300),
       selector: buildSelector(element),
       value: shouldExposeValue(input) ? cleanText(String(input.value ?? ""), 500) : undefined,
+      ...(selectedValues.length ? {
+        selectedValues,
+        displayValue: cleanText(selectedValues.join(", "), 500),
+      } : {}),
       href: element instanceof HTMLAnchorElement ? element.href : undefined,
       placeholder: input.placeholder || undefined,
       inputType: input.type || undefined,
@@ -292,9 +297,9 @@ async function observeDelayedActionEffect(
 }
 
 async function waitForActionSettled(step: BrowserActionStep, target?: Element): Promise<void> {
-  const comboboxFill = step.action === "fill" && Boolean(target && isComboboxLike(target));
+  const comboboxClick = step.action === "click" && Boolean(target && isComboboxLike(target));
   const { maxWaitMs, minWaitMs = 0, pollMs = 80, quietMs, waitForOption = false } =
-    getActionSettlePolicy(step.action, { comboboxFill });
+    getActionSettlePolicy(step.action, { comboboxClick });
   const start = Date.now();
   let lastVersion = domVersion;
   let quietSince = Date.now();
@@ -346,14 +351,19 @@ function resolveSemanticOwnerId(element: Element): { ownerId?: string } {
 
 function snapshotStateChanged(previous: PageElementSnapshot, element: Element): boolean {
   const input = element as HTMLInputElement;
+  const selectedValues = getSelectedValues(element);
   return JSON.stringify([
     previous.value,
+    previous.displayValue,
+    previous.selectedValues,
     previous.checked,
     previous.selected,
     previous.expanded,
     previous.busy,
   ]) !== JSON.stringify([
     shouldExposeValue(input) ? cleanText(String(input.value ?? ""), 500) : undefined,
+    selectedValues.length ? cleanText(selectedValues.join(", "), 500) : undefined,
+    selectedValues.length ? selectedValues : undefined,
     element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type) ? element.checked : undefined,
     element.hasAttribute("aria-selected") ? element.getAttribute("aria-selected") === "true" : undefined,
     element.hasAttribute("aria-expanded") ? element.getAttribute("aria-expanded") === "true" : undefined,
@@ -369,7 +379,7 @@ export function diffSnapshots(before: PageSnapshot, after: PageSnapshot): PageSn
   const changedFingerprints = [...afterById.keys()].filter((key) => {
     const previous = beforeById.get(key);
     const next = afterById.get(key);
-    return previous && next && JSON.stringify([previous.value, previous.disabled, previous.checked, previous.selected, previous.expanded, previous.busy, previous.occluded]) !== JSON.stringify([next.value, next.disabled, next.checked, next.selected, next.expanded, next.busy, next.occluded]);
+    return previous && next && JSON.stringify([previous.value, previous.displayValue, previous.selectedValues, previous.disabled, previous.checked, previous.selected, previous.expanded, previous.busy, previous.occluded]) !== JSON.stringify([next.value, next.displayValue, next.selectedValues, next.disabled, next.checked, next.selected, next.expanded, next.busy, next.occluded]);
   });
   const summary = [
     before.url !== after.url ? `URL changed to ${after.url}` : "",
@@ -426,6 +436,9 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   if (isSensitiveElement(element) && (step.action === "fill" || step.action === "select")) throw new Error("Sensitive fields cannot be filled by the agent.");
   if (isDisabledElement(element)) throw new Error("Target is disabled.");
   if (isReadonlyElement(element) && (step.action === "fill" || step.action === "select")) throw new Error("Target is readonly.");
+  if (step.action === "fill" && isComboboxLike(element)) {
+    throw new Error("Custom comboboxes must be clicked and selected from a fresh option snapshot.");
+  }
   element.scrollIntoView({ block: "center", behavior: "smooth" });
   await delay(220);
   if (!isTopLayerElement(element)) throw new Error("Target is covered by another page element.");

@@ -62,7 +62,7 @@ Run all three validation commands before committing. `typecheck` builds `@auto-p
 - The model may act only through `BrowserActionKind` and refs from the latest `PageSnapshot`.
 - Snapshot refs are ephemeral. After every action, navigation, or meaningful DOM change, capture a new snapshot and do not reuse old refs.
 - Keep approval and bounded-loop controls intact. The current loop stops after 8 actions, 90 seconds, or 2 consecutive verification failures.
-- Reject hidden, occluded, disabled, readonly, stale, and sensitive targets as appropriate. Never persist password, token, OTP, payment, credential, or file-input values.
+- Reject hidden, occluded, disabled, stale, and sensitive targets as appropriate. Keep readonly controls observable and clickable when safe, but reject `fill` and `select` on them. Never persist password, token, OTP, payment, credential, or file-input values.
 - Keep provider secrets in the bridge process. Never send API keys to extension storage, the content script, or the webpage.
 - Keep the bridge bound to loopback and retain extension-origin checks.
 - Run repository searches with direct argument arrays, fixed-string matching, bounds, and timeouts. Never interpolate page/model text into a shell command.

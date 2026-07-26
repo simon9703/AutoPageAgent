@@ -16,9 +16,9 @@ export interface DelayedActionObservationPolicy {
 
 export function getActionSettlePolicy(
   action: BrowserActionStep["action"],
-  options: { comboboxFill?: boolean } = {},
+  options: { comboboxClick?: boolean } = {},
 ): ActionSettlePolicy {
-  if (action === "fill" && options.comboboxFill) {
+  if (action === "click" && options.comboboxClick) {
     return { minWaitMs: 250, maxWaitMs: 1_200, quietMs: 150, pollMs: 90, waitForOption: true };
   }
   if (action === "fill" || action === "focus") return { maxWaitMs: 160, quietMs: 80 };

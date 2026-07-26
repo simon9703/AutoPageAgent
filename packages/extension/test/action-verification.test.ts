@@ -89,7 +89,7 @@ test("scroll verification requires the viewport to move", () => {
 
 test("settle policy keeps direct state updates short and async actions bounded", () => {
   assert.deepEqual(getActionSettlePolicy("fill"), { maxWaitMs: 160, quietMs: 80 });
-  assert.deepEqual(getActionSettlePolicy("fill", { comboboxFill: true }), {
+  assert.deepEqual(getActionSettlePolicy("click", { comboboxClick: true }), {
     minWaitMs: 250,
     maxWaitMs: 1_200,
     quietMs: 150,
@@ -171,6 +171,14 @@ test("option click verifies selected state, associated final value, or active de
     ...snapshot,
     elements: [{ ...combobox(true), activeDescendant: option.domId }],
   }, option.fingerprint), true);
+  assert.equal(hasVerifiedOptionSelection(before, {
+    ...snapshot,
+    elements: [{
+      ...combobox(false),
+      displayValue: "kucoin-cloud-mining-rn",
+      selectedValues: ["kucoin-cloud-mining-rn"],
+    }],
+  }, option.fingerprint), true);
 });
 
 test("option click rejects collapse without the selected value", () => {
@@ -195,4 +203,26 @@ test("search text alone does not verify option selection", () => {
   const before = { ...snapshot, elements: [combobox(true, "cloud"), option] };
   const after = { ...snapshot, elements: [combobox(true, "cloud"), option] };
   assert.equal(hasVerifiedOptionSelection(before, after, option.fingerprint), false);
+});
+
+test("multi-select verification matches either selected display value", () => {
+  const secondOption = {
+    ...option,
+    ref: "web-option",
+    label: "kucoin-cloud-mining-web",
+    text: "kucoin-cloud-mining-web",
+    fingerprint: "web-option-1",
+    domId: "web-option",
+  };
+  const before = { ...snapshot, elements: [combobox(true), option, secondOption] };
+  const after = {
+    ...snapshot,
+    elements: [{
+      ...combobox(false),
+      displayValue: "kucoin-cloud-mining-rn, kucoin-cloud-mining-web",
+      selectedValues: ["kucoin-cloud-mining-rn", "kucoin-cloud-mining-web"],
+    }],
+  };
+  assert.equal(hasVerifiedOptionSelection(before, after, option.fingerprint), true);
+  assert.equal(hasVerifiedOptionSelection(before, after, secondOption.fingerprint), true);
 });

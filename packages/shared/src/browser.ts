@@ -15,6 +15,8 @@ export interface PageElementSnapshot {
   text: string;
   selector: string;
   value?: string;
+  displayValue?: string;
+  selectedValues?: string[];
   href?: string;
   placeholder?: string;
   inputType?: string;

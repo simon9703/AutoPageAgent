@@ -78,7 +78,10 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
     const step = value && typeof value === "object" ? value as Record<string, unknown> : {};
     if (!ACTIONS.has(String(step.action))) return [];
     if (step.action !== "scroll" && !validRefs.has(String(step.targetRef))) return [];
+    const target = validElements.get(String(step.targetRef));
     if ((step.action === "fill" || step.action === "select") && !writableRefs.has(String(step.targetRef))) return [];
+    if (step.action === "fill" && target?.role === "combobox") return [];
+    if (step.action === "select" && target?.tagName !== "select") return [];
     const targetRef = String(step.targetRef);
     const action = String(step.action) === "submit" && validElements.get(targetRef)?.tagName !== "form"
       ? "click"
@@ -130,6 +133,8 @@ export function completionEvidenceMatchesSnapshot(evidence: string, snapshot: Pa
         element.label,
         element.text,
         element.value ?? "",
+        element.displayValue ?? "",
+        ...(element.selectedValues ?? []),
         element.href ?? "",
         element.placeholder ?? "",
       ];

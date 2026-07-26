@@ -60,8 +60,7 @@ export function shouldIncludeSnapshotCandidate(state: SnapshotCandidateState): b
     && state.nearViewport
     && !state.hiddenInput
     && state.topLayer
-    && !state.disabled
-    && !state.readonly;
+    && !state.disabled;
 }
 
 export function resolveSnapshotRole(explicitRole: string | null, inferredRole: string, hasAriaSelected: boolean): string {

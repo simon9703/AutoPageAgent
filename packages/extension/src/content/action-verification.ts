@@ -83,7 +83,7 @@ function parseIdRefs(value: string | undefined): string[] {
 
 function snapshotValueMatches(element: PageElementSnapshot, expected: string): boolean {
   if (!expected) return false;
-  return [element.value, element.label, element.text]
+  return [element.value, element.displayValue, ...(element.selectedValues ?? []), element.label, element.text]
     .some((value) => normalizeValue(value ?? "") === expected);
 }
 

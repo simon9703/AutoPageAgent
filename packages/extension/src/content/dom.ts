@@ -133,6 +133,63 @@ export function shouldExposeValue(element: Element): element is HTMLInputElement
   return (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) && !isSensitiveElement(element);
 }
 
+export function getSelectedValues(element: Element): string[] {
+  if (isSensitiveElement(element)) return [];
+  if (element instanceof HTMLSelectElement) {
+    return uniqueText(Array.from(element.selectedOptions)
+      .map((option) => option.label || option.textContent || option.value));
+  }
+  if (!isComboboxLike(element)) return [];
+
+  const semanticValues = resolveControlledRoots(element)
+    .flatMap((root) => Array.from(root.querySelectorAll('[role="option"][aria-selected="true"],[aria-selected="true"]')))
+    .map((option) => getAccessibleLabel(option) || option.textContent || "");
+  const selectedValues = uniqueText(semanticValues);
+  if (selectedValues.length) return selectedValues;
+
+  return findVisibleSelectionLabels(element);
+}
+
+function resolveControlledRoots(element: Element): Element[] {
+  const ids = [
+    element.getAttribute("aria-controls"),
+    element.getAttribute("aria-owns"),
+  ].filter(Boolean).flatMap((value) => value!.split(/\s+/u).filter(Boolean));
+  return ids.flatMap((id) => {
+    const root = document.getElementById(id);
+    return root ? [root] : [];
+  });
+}
+
+function findVisibleSelectionLabels(control: Element): string[] {
+  const excluded = new Set(uniqueText([
+    getAccessibleLabel(control),
+    control.getAttribute("placeholder") || "",
+    control instanceof HTMLInputElement ? control.value : "",
+  ]));
+  let ancestor = control.parentElement;
+  for (let depth = 0; ancestor && depth < 3; depth += 1, ancestor = ancestor.parentElement) {
+    const values = uniqueText(Array.from(ancestor.querySelectorAll("*"))
+      .filter((candidate) =>
+        !candidate.contains(control)
+        && !candidate.matches('label,[role="option"],[role="listbox"],[role="menu"],[aria-hidden="true"]')
+        && isVisible(candidate))
+      .filter((candidate) => !Array.from(candidate.children).some((child) =>
+        isVisible(child) && Boolean(cleanText(child.textContent || "", 300))))
+      .map((candidate) => candidate.textContent || "")
+      .filter((value) => !excluded.has(value)));
+    if (values.length) return values.slice(0, 20);
+  }
+  return [];
+}
+
+function uniqueText(values: Array<string | null | undefined>): string[] {
+  const normalized = values
+    .map((value) => cleanText(value || "", 300))
+    .filter(Boolean);
+  return [...new Set(normalized)];
+}
+
 export function getAccessibleLabel(element: Element): string {
   const labelledBy = element.getAttribute("aria-labelledby");
   const labelledText = labelledBy ? labelledBy.split(/\s+/u).map((id) => document.getElementById(id)?.textContent ?? "").join(" ") : "";
@@ -219,8 +276,10 @@ function simplifyElement(element: PageElementSnapshot, index: number): string {
     element.activeDescendant ? `aria-activedescendant="${escapeDomText(element.activeDescendant)}"` : "",
     element.ownerId ? `data-ai-owner="${escapeDomText(element.ownerId)}"` : "",
     element.sensitive ? 'data-sensitive="true"' : "",
+    element.displayValue ? `data-display-value="${escapeDomText(element.displayValue)}"` : "",
+    element.selectedValues?.length ? `data-selected-values="${escapeDomText(element.selectedValues.join(" | "))}"` : "",
   ].filter(Boolean).join(" ");
-  const text = escapeDomText(cleanText(element.text || element.value || "", 180));
+  const text = escapeDomText(cleanText(element.text || element.displayValue || element.value || "", 180));
   return `[${index}]<${element.tagName}${attributes ? ` ${attributes}` : ""}>${text}</${element.tagName}>`;
 }
 
