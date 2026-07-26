@@ -16,7 +16,8 @@ Read `README.md` for usage, `docs/architecture.md` for component boundaries, `do
 
 - `packages/shared/src/index.ts`: cross-process protocol and domain types.
 - `packages/shared/src/agent-events.ts`: streaming/runtime timeline event protocol.
-- `packages/bridge/src/index.ts`: loopback WebSocket server and request routing.
+- `packages/bridge/src/index.ts`: Native Messaging stdin/stdout host and request routing.
+- `packages/bridge/src/native-messaging.ts`: Chrome native-message framing.
 - `packages/bridge/src/agent.ts`: Codex/Responses providers, prompts, streaming, and decision validation.
 - `packages/bridge/src/codex-app-server.ts`: Codex app-server JSON-RPC adapter.
 - `packages/bridge/src/skills.ts`: Marketplace, local Registry, page matching, selection, migration, and persistence.
@@ -42,7 +43,7 @@ npm install
 npm run typecheck
 npm test
 npm run build
-AUTO_PAGE_AGENT_MOCK=1 npm run dev:bridge
+npm run install:bridge
 ```
 
 Run all three validation commands before committing. `typecheck` builds `@auto-page-agent/shared` first because the other workspaces consume its generated declarations. Load `packages/extension/dist` as an unpacked extension only after `npm run build`.

@@ -9,7 +9,7 @@ import type {
   RecordedBrowserAction, RepositoryAnalysis, ServerMessage, SkillCatalogItem,
 } from "@auto-page-agent/shared";
 import { defaultSkillName, formatRepositoryAnalysis } from "./formatters.js";
-import { ApprovalCard, ComposerToolButton, ContextCard, EmptyState, Message, RecordingModal, ScreenshotCard, SkillsModal, TargetTabHeader, Timeline, type SkillView } from "./components.js";
+import { ApprovalCard, ComposerToolButton, ConnectionGate, ContextCard, EmptyState, Message, RecordingModal, ScreenshotCard, SkillsModal, TargetTabHeader, Timeline, type SkillView } from "./components.js";
 import { Button } from "../components/ui/button.js";
 import {
   completedConversationMessage,
@@ -24,6 +24,10 @@ import {
 
 type Modal = "skills" | "recording" | null;
 type ConversationScope = { conversationId: string; targetTabId: number; windowId: number };
+type ConnectionState =
+  | { phase: "checking"; title: string; message: string }
+  | { phase: "disconnected" | "codex-missing" | "login-required"; title: string; message: string }
+  | { phase: "ready"; title: string; message: string; provider: string };
 
 export function SidePanelController() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -54,6 +58,11 @@ export function SidePanelController() {
   const [targetTab, setTargetTab] = useState<BrowserTabTarget | null>(null);
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
   const [targetPickerOpen, setTargetPickerOpen] = useState(false);
+  const [connection, setConnection] = useState<ConnectionState>({
+    phase: "checking",
+    title: "Connecting to local Codex",
+    message: "Chrome is starting the registered local bridge.",
+  });
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const targetTabRef = useRef<BrowserTabTarget | null>(null);
@@ -67,7 +76,7 @@ export function SidePanelController() {
   useEffect(() => {
     void initialize();
     const listener = (message: unknown) => {
-      const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; tabId?: number; windowId?: number; targetTabId?: number; screenshot?: { dataUrl: string; title: string; url: string }; reason?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent; conversationId?: string };
+      const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; tabId?: number; windowId?: number; targetTabId?: number; screenshot?: { dataUrl: string; title: string; url: string }; reason?: string; error?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent; conversationId?: string };
       if (typeof value.windowId === "number" && value.windowId !== windowIdRef.current) return;
       if (value.type === "ui.element.selected" && value.element && value.tabId === targetTabRef.current?.tabId) {
         setSelected({ element: value.element, pageUrl: value.pageUrl ?? "", screenshot: value.screenshot });
@@ -81,6 +90,14 @@ export function SidePanelController() {
         setNotice(value.reason || "Selection cancelled.");
       }
       if (value.type === "ui.recording.updated") setRecordedActions(value.actions ?? []);
+      if (value.type === "ui.bridge.disconnected") {
+        setConnection({
+          phase: "disconnected",
+          title: "Local bridge disconnected",
+          message: value.error || "Reconnect to let Chrome start the local bridge again.",
+        });
+        setNotice("Local bridge disconnected. Reconnect before sending.");
+      }
       if (value.type === "ui.selection.cleared" && value.tabId === targetTabRef.current?.tabId) {
         setSelected(null);
         setScreenshot(null);
@@ -113,9 +130,10 @@ export function SidePanelController() {
     if (typeof currentWindow.id !== "number") throw new Error("The current browser window is unavailable.");
     windowIdRef.current = currentWindow.id;
     const storageKey = conversationStorageKey(currentWindow.id);
-    const [stored, tabState] = await Promise.all([
+    const [stored, tabState, connected] = await Promise.all([
       chrome.storage.session.get([storageKey, ...LEGACY_CONVERSATION_STORAGE_KEYS]),
       chrome.runtime.sendMessage({ type: "ui.tabs.list", windowId: currentWindow.id }) as Promise<{ tabs?: BrowserTabTarget[]; activeTabId?: number; windowId?: number }>,
+      checkConnection(false),
     ]);
     const availableTabs = tabState.tabs ?? [];
     const session = normalizeConversationSession(stored[storageKey]) ?? legacyConversationSession(stored);
@@ -135,13 +153,53 @@ export function SidePanelController() {
     await Promise.all([
       initialTarget ? restoreSelection(initialTarget.tabId) : Promise.resolve(),
       restoreRecording(),
-      refreshSkills(initialTarget?.tabId),
+      connected ? refreshSkills(initialTarget?.tabId) : Promise.resolve(),
     ]);
     if (!initialTarget) {
       setNotice(session
         ? "The conversation page was closed. Click New to bind the current page."
         : "Open an http(s) page, then click New.");
     }
+  }
+
+  async function checkConnection(reconnect: boolean): Promise<boolean> {
+    setConnection({
+      phase: "checking",
+      title: reconnect ? "Reconnecting to local Codex" : "Connecting to local Codex",
+      message: "Chrome is starting the registered local bridge.",
+    });
+    const response = await chrome.runtime.sendMessage({ type: reconnect ? "ui.bridge.reconnect" : "ui.health" }) as ServerMessage;
+    if (response.type === "agent.error") {
+      setConnection({ phase: "disconnected", title: "Local bridge not connected", message: response.error });
+      setNotice("Register the local bridge once, then reconnect.");
+      return false;
+    }
+    if (response.type !== "health.result") {
+      setConnection({ phase: "disconnected", title: "Local bridge not connected", message: "The bridge returned an unexpected response." });
+      return false;
+    }
+    if (!response.codex.available) {
+      setConnection({
+        phase: "codex-missing",
+        title: "Codex CLI not found",
+        message: response.codex.error || "Install @openai/codex, then reconnect.",
+      });
+      setNotice("Codex CLI must be available before messages can be sent.");
+      return false;
+    }
+    if (!response.codex.authenticated) {
+      setConnection({
+        phase: "login-required",
+        title: "Codex login required",
+        message: response.codex.error || "Run codex login in Terminal, finish ChatGPT login, then reconnect.",
+      });
+      setNotice("Sign in to Codex, then reconnect.");
+      return false;
+    }
+    setConnection({ phase: "ready", title: "Connected", message: "Local Codex is ready.", provider: response.provider });
+    setNotice(`Connected to ${response.provider}.`);
+    if (reconnect) await refreshSkills(targetTabRef.current?.tabId);
+    return true;
   }
 
   async function persistConversation(id: string, next: ChatMessage[], targetTabId = targetTabRef.current?.tabId) {
@@ -311,6 +369,7 @@ export function SidePanelController() {
     event?.preventDefault();
     const text = prompt.trim();
     if (!text || busy) return;
+    if (connection.phase !== "ready") return setNotice("Reconnect and complete Codex login before sending a message.");
     if (!targetTab) return setNotice("Choose a target page first.");
     const scope: ConversationScope = {
       conversationId: conversationIdRef.current,
@@ -534,7 +593,16 @@ export function SidePanelController() {
       </header>
 
       <section ref={threadRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
-        {!messages.length && !busy ? <EmptyState onPick={() => void startSelection("element")} onSkills={() => setModal("skills")} /> : null}
+        {connection.phase !== "ready"
+          ? <ConnectionGate
+              title={connection.title}
+              message={connection.message}
+              checking={connection.phase === "checking"}
+              onReconnect={() => void checkConnection(true)}
+            />
+          : !messages.length && !busy
+            ? <EmptyState onPick={() => void startSelection("element")} onSkills={() => setModal("skills")} />
+            : null}
         <div className="space-y-5">
           {messages.map((message) => <Message key={message.id} message={message} />)}
           {busy ? <div className="flex items-center gap-2 text-xs text-slate-400"><LoaderCircle className="animate-spin" size={15} />Agent is working on the page…</div> : null}
@@ -549,7 +617,7 @@ export function SidePanelController() {
         {pendingPlan ? <ApprovalCard plan={pendingPlan} onCancel={() => setPendingPlan(null)} onConfirm={() => void executePlan()} /> : null}
         <form onSubmit={(event) => void submitTask(event)} className="composer rounded-[22px] border border-slate-200 bg-white p-2.5 shadow-[0_10px_32px_rgba(15,23,42,.09)] transition focus-within:border-slate-300 focus-within:shadow-[0_12px_36px_rgba(15,23,42,.12)]">
           {contextLabel ? <div className="mb-2 flex"><span className="flex max-w-full items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600"><MousePointer2 size={12} /><span className="truncate">{contextLabel}</span><button type="button" onClick={() => void clearContext()} aria-label="Remove context"><X size={12} /></button></span></div> : null}
-          <textarea ref={inputRef} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitTask(); } }} rows={2} placeholder="Ask about this page or tell the agent what to do…" className="composer-input max-h-32 min-h-10 w-full resize-none border-0 bg-transparent px-1 text-[14px] leading-5 outline-none placeholder:text-slate-400" />
+          <textarea ref={inputRef} value={prompt} disabled={connection.phase !== "ready"} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitTask(); } }} rows={2} placeholder={connection.phase === "ready" ? "Ask about this page or tell the agent what to do…" : "Connect and sign in to Codex to start…"} className="composer-input max-h-32 min-h-10 w-full resize-none border-0 bg-transparent px-1 text-[14px] leading-5 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400" />
           <div className="mt-1 flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-0.5" aria-label="Page tools">
               <ComposerToolButton active={selectionMode === "element"} label="Select element" onClick={() => void startSelection("element")}><MousePointer2 size={15} /></ComposerToolButton>
@@ -560,7 +628,7 @@ export function SidePanelController() {
             </div>
             {busy
               ? <button type="button" onClick={() => void stopAgent()} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-700" aria-label="Stop agent" title="Stop agent"><CircleStop size={15} /></button>
-              : <button type="submit" disabled={!prompt.trim()} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-200" aria-label="Send"><Send size={14} /></button>}
+              : <button type="submit" disabled={!prompt.trim() || connection.phase !== "ready"} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-200" aria-label="Send"><Send size={14} /></button>}
           </div>
         </form>
         <p className="mt-1.5 truncate px-2 text-center text-[10px] text-slate-400">{notice}</p>

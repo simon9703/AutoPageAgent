@@ -10,9 +10,9 @@ Both projects use the same fundamental boundary:
 Chrome extension -> local bridge -> codex app-server -> thread/start + turn/start
 ```
 
-Chromex uses Chrome Native Messaging between the extension and its local bridge. Auto Page Agent currently uses a loopback WebSocket for easier development; Native Messaging remains the production target.
+Both projects use Chrome Native Messaging between the extension and local bridge. Auto Page Agent registers `com.auto_page_agent.bridge` with `npm run install:bridge`; Chrome then starts the bridge on demand, so no dev server remains running.
 
-| Capability | Chromex | Auto Page Agent v0.7 |
+| Capability | Chromex | Auto Page Agent v0.8 |
 | --- | --- | --- |
 | Start `codex app-server` | Yes | Yes |
 | JSON-RPC over stdio | Yes | Yes |
@@ -20,6 +20,8 @@ Chromex uses Chrome Native Messaging between the extension and its local bridge.
 | `thread/start` / `turn/start` | Yes | Yes |
 | Account status with `account/read` | Yes | Yes |
 | Executable discovery / override | Yes | Yes |
+| One-time native-host registration | Yes | Yes |
+| Reconnect and login readiness gate | Yes | Yes |
 | App-server overload retry | Yes | Yes |
 | Delta streaming | Yes | Not yet |
 | Thread continuity | Yes | Yes, in-process conversation map |

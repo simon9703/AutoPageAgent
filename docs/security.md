@@ -2,8 +2,8 @@
 
 ## MVP guarantees
 
-- The bridge binds to loopback only.
-- WebSocket connections with a non-extension origin are rejected.
+- The bridge exposes no TCP listener.
+- Chrome Native Messaging launches the installed bridge only for the extension id in `allowed_origins`.
 - API keys are not stored in extension storage.
 - Responses API keys are read only from the local bridge process environment and sent only to `api.openai.com`.
 - API-key environment variables are stripped before Codex is spawned.
@@ -16,14 +16,9 @@
 - Password, file, token-like, OTP, and payment-like fields are marked sensitive; their values are excluded and agent filling is rejected.
 - Repository queries run through direct `rg` process arguments with fixed strings, limits, timeouts, and no shell interpolation.
 
-## Known development limitation
+## Local installation boundary
 
-Origin validation alone is not a complete authentication mechanism for a distributable localhost service. Before packaging, add one of:
-
-1. Chrome Native Messaging with an extension-ID allowlist; or
-2. a randomly generated install-time bridge secret stored using OS-appropriate permissions and sent during the WebSocket handshake.
-
-Native Messaging is preferred for a public production release.
+The one-time installer writes a user-scoped native-host manifest and copies built runtime assets into the user's application-support directory. Re-running the installer replaces that installed runtime. The fixed manifest key gives unpacked builds a stable extension id, and the native-host manifest allowlists only that id. A store release must replace or extend the allowlist with its final store id.
 
 ## Remote company deployment
 

@@ -1,5 +1,5 @@
 import type { ActionExecutionResult, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ElementSelectionGeometry, InspectedElement, PageSnapshot, PerformanceSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
-import { requestBridge } from "./background/bridge-client.js";
+import { reconnectBridge, requestBridge } from "./background/bridge-client.js";
 import { PendingAgentRunStore } from "./background/pending-agent-run.js";
 import {
   appendRecordedAction,
@@ -88,6 +88,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
   if (message?.type === "ui.health") {
+    void requestBridge({ id: crypto.randomUUID(), type: "health.check" }).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.bridge.reconnect") {
+    reconnectBridge();
     void requestBridge({ id: crypto.randomUUID(), type: "health.check" }).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }

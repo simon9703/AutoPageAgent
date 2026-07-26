@@ -65,6 +65,24 @@ test("header keeps New primary and switches visible tabs without rebinding the c
   assert.doesNotMatch(sidePanel, /refreshHealth/u);
 });
 
+test("message sending waits for native bridge connection and Codex login", async () => {
+  const sidePanel = [
+    await readFile(new URL("../src/sidepanel/controller.tsx", import.meta.url), "utf8"),
+    await readFile(new URL("../src/sidepanel/components.tsx", import.meta.url), "utf8"),
+  ].join("\n");
+  const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
+  const transport = await readFile(new URL("../src/background/bridge-client.ts", import.meta.url), "utf8");
+  const manifest = await readFile(new URL("../manifest.json", import.meta.url), "utf8");
+
+  assert.match(transport, /chrome\.runtime\.connectNative\(NATIVE_HOST_NAME\)/u);
+  assert.doesNotMatch(transport, /new WebSocket/u);
+  assert.match(background, /type === "ui\.bridge\.reconnect"/u);
+  assert.match(sidePanel, /"Reconnect"/u);
+  assert.match(sidePanel, /connection\.phase !== "ready"[\s\S]+complete Codex login before sending/u);
+  assert.match(sidePanel, /disabled=\{!prompt\.trim\(\) \|\| connection\.phase !== "ready"\}/u);
+  assert.match(manifest, /"nativeMessaging"/u);
+});
+
 test("side panel entry stays separate from controller and presentation components", async () => {
   const entry = await readFile(new URL("../src/sidepanel/App.tsx", import.meta.url), "utf8");
 

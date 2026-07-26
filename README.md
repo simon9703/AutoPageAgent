@@ -44,7 +44,8 @@ A lightweight Chrome side-panel agent that understands a conversation-bound targ
 Chrome Side Panel
   -> MV3 background service worker
   -> content script (snapshot + safe actions)
-  -> localhost WebSocket bridge
+  -> Chrome Native Messaging
+  -> on-demand local bridge
   -> provider router
       -> codex app-server over JSON-RPC/stdin
       -> OpenAI Responses API
@@ -54,12 +55,13 @@ The model never receives arbitrary JavaScript execution. It produces a constrain
 
 ## Quick start
 
-Requirements: Node.js 20+, Chrome, and either a working Codex CLI login or an OpenAI API key available to the local bridge.
+Requirements: Node.js 20+, Chrome, and a working Codex CLI ChatGPT login.
 
 ```bash
 npm install
-npm run build
-npm run dev:bridge
+npm install -g @openai/codex
+codex login
+npm run install:bridge
 ```
 
 Then:
@@ -70,13 +72,11 @@ Then:
 4. Select `packages/extension/dist`.
 5. Open an HTTP(S) page and click the extension icon.
 
+`install:bridge` builds the project and registers `com.auto_page_agent.bridge` for Chrome once. Chrome starts the bridge automatically when the extension connects, so `npm run dev:bridge` and a permanently running localhost service are no longer needed. After reinstalling or moving the source package, run the command again and reload the extension.
+
+If the bridge is missing or Codex is not signed in, the side panel shows a **Reconnect** action and keeps message sending disabled. Run `codex login` when prompted, complete the ChatGPT login, then click **Reconnect**.
+
 A new conversation binds to the HTTP(S) tab that is active in that browser window when it is created. Switching browser tabs does not move or stop the agent, and navigation inside the bound tab remains part of the same conversation. The target cannot be rebound in place: click **New** to start over on the currently viewed tab. If the bound tab closes, the agent stops and asks you to click **New**.
-
-To exercise the complete extension/bridge flow without starting Codex:
-
-```bash
-AUTO_PAGE_AGENT_MOCK=1 npm run dev:bridge
-```
 
 Optional environment variables:
 
@@ -86,20 +86,11 @@ Optional environment variables:
 | `AUTO_PAGE_AGENT_PROVIDER` | `auto` (default), `codex`, or `openai`. |
 | `OPENAI_API_KEY` | Enables the Responses API provider in the local bridge. Never stored by the extension. |
 | `OPENAI_MODEL` | Responses model override (default `gpt-5.6-sol`). |
-| `AUTO_PAGE_AGENT_PORT` | Change the localhost bridge port (default `3210`). |
 | `AUTO_PAGE_AGENT_MOCK=1` | Return deterministic page analysis without Codex. |
 | `AUTO_PAGE_AGENT_DATA_DIR` | Override durable user data storage (default `~/.auto-page-agent`). |
 | `AUTO_PAGE_AGENT_BUNDLED_SKILLS` | Override the bundled Marketplace template directory. |
 
-Examples:
-
-```bash
-# Prefer local Codex and its ChatGPT-managed login
-AUTO_PAGE_AGENT_PROVIDER=codex npm run dev:bridge
-
-# Use the Responses API; export the key in your shell or secret manager
-AUTO_PAGE_AGENT_PROVIDER=openai OPENAI_API_KEY=... npm run dev:bridge
-```
+Environment overrides must be available to Chrome's native-host process. For normal use, keep the default local Codex provider and its ChatGPT-managed login.
 
 To enable local repository analysis, copy the example configuration and use absolute paths:
 
@@ -115,7 +106,7 @@ cp auto-page-agent.config.example.json auto-page-agent.config.json
 }
 ```
 
-Restart the bridge, click the **Select** pointer, select an element on the page, then click **Find in repositories**. Repository search uses `rg` with fixed-string arguments; model output is never executed as a shell command.
+Run `npm run install:bridge` again after changing this configuration, click **Reconnect**, select an element on the page, then click **Find in repositories**. Repository search uses `rg` with fixed-string arguments; model output is never executed as a shell command.
 
 ## Record an automation Skill
 
@@ -144,7 +135,7 @@ npm run build
 - A selected public image URL is sent as `input_image` in Responses API mode. Local Codex currently receives its URL, alt text, dimensions, and surrounding DOM context rather than binary image data.
 - Recorded replay targets the conversation's selected page. Navigation-aware and multi-target workflows remain planned.
 - Resource Timing cannot expose all cross-origin sizes unless the resource sends `Timing-Allow-Origin`.
-- The localhost bridge is intended for local development. Packaged releases should use an install-time secret or Chrome Native Messaging.
+- The native-host installer currently targets Chrome-family browsers on macOS, Windows, and Linux; browser-store packaging is still deferred.
 - Repository evidence search is implemented; deeper TypeScript reference tracing, API response-field tracing, source maps, and React component correlation remain planned.
 - The translation Marketplace Skill preserves placeholders and supports visible translation-page workflows; repository-level i18n tracing remains deferred.
 

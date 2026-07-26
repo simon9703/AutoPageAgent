@@ -15,7 +15,7 @@ The MVP implements the browser-page domain, lightweight performance evidence, lo
 ### Chrome extension
 
 - **Side Panel** is a React + Tailwind interface with a conversation-bound page summary, icon-first page tools, modal Skill/recording management, a fixed composer, and an adjacent action-approval card.
-- **Background service worker** owns the localhost connection and routes messages to explicit target tab ids.
+- **Background service worker** owns the Chrome Native Messaging connection and routes messages to explicit target tab ids.
 - **Content script** creates a bounded snapshot and executes approved actions.
 - **Element picker** captures source metadata and stable textual/attribute clues for repository analysis.
 - **Screenshot capture** uses `captureVisibleTab`, keeps the JPEG data URL inside the extension, and attaches it only when the user sends a message while the preview is selected.
@@ -27,7 +27,7 @@ The extension source follows entrypoint-first boundaries:
 packages/extension/src/
 ├── background.ts          # Chrome listeners, message routing, agent-loop orchestration
 ├── background/
-│   ├── bridge-client.ts   # localhost WebSocket request/event transport
+│   ├── bridge-client.ts   # Native Messaging request/event transport
 │   ├── tabs.ts            # explicit target-tab lookup, activation, content messaging
 │   ├── screenshot.ts      # viewport and selected-element capture
 │   ├── recording.ts       # session-backed recorder lifecycle
@@ -74,7 +74,7 @@ Every planned run persists its `windowId`, `conversationId`, `tabId`, initial pa
 
 ### Local bridge
 
-The bridge listens only on `127.0.0.1`. It:
+The bridge is registered once as `com.auto_page_agent.bridge`. Chrome launches it on demand over stdin/stdout Native Messaging and stops it when the browser connection ends. It:
 
 1. accepts a page snapshot and user task;
 2. selects applicable `SKILL.md` workflows;
@@ -82,6 +82,8 @@ The bridge listens only on `127.0.0.1`. It:
 4. reuses provider conversation state until the user starts a new conversation, which clears both Codex thread and Responses chaining state;
 5. parses and validates the JSON decision;
 6. returns an answer, confirmation-required action plan, evidence-backed completion, blocked state, or request for user input.
+
+The native-host manifest allowlists the stable extension id derived from `manifest.json`. The installer copies built bridge/shared assets and bundled Skills into the user's application-support directory; no TCP port or separately started dev process is involved. The side panel checks both bridge reachability and `account/read` during initialization. It exposes **Reconnect** and disables sending until local Codex is available and authenticated.
 
 After the initial plan is confirmed, the extension owns the V2 runtime loop. It executes one constrained action, waits for the page effect with an action-specific settle budget, captures a fresh structural snapshot, computes a fingerprint-based diff, verifies the expected state, and sends the observation back to the provider. Each continuation request carries that fresh snapshot once; loop metadata contains only the action, verification, and remaining budget instead of duplicating the page payload. Direct state actions such as fill and focus use a short wait; select, scroll, click, and submit retain progressively longer bounds for asynchronous page effects. The loop stops only on evidence-backed completion, a blocked/needs-user decision, two consecutive execution failures, eight actions, or 90 seconds. A navigation dispatch triggers re-observation and is not itself success.
 

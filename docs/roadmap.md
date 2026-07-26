@@ -4,7 +4,7 @@ This document is the single checklist for shipped capabilities and future scope.
 Checked items are implemented in the current repository. Unchecked items are
 planned only and must not be described as available.
 
-## Current release — 0.7.17
+## Current release — 0.8.0
 
 ### Agent Runtime
 
@@ -63,6 +63,8 @@ planned only and must not be described as available.
 - [x] Keep plan summaries out of chat and internal step counts out of assistant replies
 - [x] AI pointer, target ring, and action-status label
 - [x] Restore messages, attachment summaries, and pending follow-up state after side-panel reload
+- [x] Show Reconnect when the native bridge is unavailable
+- [x] Disable message sending until the bridge is connected and local Codex is authenticated
 - [ ] Step-by-step execution replay
 
 ### Skill Marketplace and Local Registry
@@ -89,6 +91,7 @@ planned only and must not be described as available.
 - [x] Classify source, symbol, text, and API evidence with confidence levels
 - [x] Discover the Codex executable and read cached account status
 - [x] Retry app-server overloads and return structured provider errors
+- [x] Register a Chrome Native Messaging host once and start the bridge on demand
 - [ ] Add bounded `repo.read_file` and TypeScript-aware `repo.find_references`
 - [ ] Read Git revision and current branch context
 - [ ] Resolve TypeScript symbols through the language service

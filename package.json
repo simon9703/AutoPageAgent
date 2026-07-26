@@ -1,6 +1,6 @@
 {
   "name": "auto-page-agent",
-  "version": "0.7.19",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -10,7 +10,7 @@
     "build": "npm run build -w @auto-page-agent/shared && npm run build -w @auto-page-agent/bridge && npm run build -w @auto-page-agent/extension",
     "typecheck": "npm run build -w @auto-page-agent/shared && npm run typecheck -w @auto-page-agent/bridge && npm run typecheck -w @auto-page-agent/extension",
     "test": "npm run test -w @auto-page-agent/bridge && npm run test -w @auto-page-agent/extension",
-    "dev:bridge": "npm run dev -w @auto-page-agent/bridge"
+    "install:bridge": "npm run build && node scripts/install-native-host.mjs --browser=chrome"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.327",

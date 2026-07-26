@@ -1,10 +1,36 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { Bot, Camera, Check, ChevronDown, CircleStop, Code2, Copy, Globe2, Image, MousePointer2, Play, RefreshCw, Send, Sparkles, WandSparkles, X } from "lucide-react";
+import { Bot, Camera, Check, ChevronDown, CircleStop, Code2, Copy, Globe2, Image, MousePointer2, Play, RefreshCw, Send, Sparkles, WandSparkles, WifiOff, X } from "lucide-react";
 import type { AgentEvent, BrowserActionPlan, BrowserTabTarget, ChatMessage, InspectedElement, PageSkillSummary, RecordedBrowserAction, SkillCatalogItem } from "@auto-page-agent/shared";
 import { eventLabel, hostname } from "./formatters.js";
 
 export type SkillView = "page" | "installed" | "marketplace";
+
+export function ConnectionGate({ title, message, checking, onReconnect }: {
+  title: string;
+  message: string;
+  checking: boolean;
+  onReconnect: () => void;
+}) {
+  return (
+    <div className="mx-auto flex max-w-[320px] flex-col items-center py-12 text-center">
+      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-600">
+        {checking ? <RefreshCw size={22} className="animate-spin" /> : <WifiOff size={22} />}
+      </span>
+      <h2 className="mt-4 text-sm font-semibold">{title}</h2>
+      <p className="mt-2 text-xs leading-5 text-slate-500">{message}</p>
+      <button
+        type="button"
+        disabled={checking}
+        onClick={onReconnect}
+        className="mt-4 flex items-center gap-1.5 rounded-xl bg-slate-950 px-3.5 py-2 text-xs font-medium text-white disabled:bg-slate-300"
+      >
+        <RefreshCw size={13} className={checking ? "animate-spin" : ""} />
+        {checking ? "Connecting…" : "Reconnect"}
+      </button>
+    </div>
+  );
+}
 
 export function TargetTabHeader(props: {
   target: BrowserTabTarget | null;
