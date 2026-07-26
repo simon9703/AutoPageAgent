@@ -26,15 +26,27 @@ test("normalizeDecision rejects invented element refs", () => {
 });
 
 test("normalizeDecision requires evidence before completing a browser task", () => {
-  assert.equal(normalizeDecision({ kind: "complete", summary: "Done" }, snapshot).kind, "blocked");
+  assert.deepEqual(normalizeDecision({ kind: "complete", summary: "Done" }, snapshot), {
+    kind: "blocked",
+    reason: "The agent claimed completion without current page evidence.",
+    recoverable: true,
+    code: "completion_evidence_missing",
+    unmatchedEvidence: [],
+  });
   assert.deepEqual(
     normalizeDecision({ kind: "complete", summary: "The save control is visible", evidence: ["Save"] }, snapshot),
     { kind: "complete", summary: "The save control is visible", evidence: ["Save"] },
   );
-  assert.equal(
-    normalizeDecision({ kind: "complete", summary: "BTC details opened", evidence: ["BTC details"] }, snapshot).kind,
-    "blocked",
-  );
+  assert.deepEqual(normalizeDecision(
+    { kind: "complete", summary: "BTC details opened", evidence: ["BTC details", "Save"] },
+    snapshot,
+  ), {
+    kind: "blocked",
+    reason: "The agent claimed completion with evidence that is not present in the current page snapshot.",
+    recoverable: true,
+    code: "completion_evidence_missing",
+    unmatchedEvidence: ["BTC details"],
+  });
 });
 
 test("completion evidence must be copied from the latest snapshot", () => {
@@ -132,7 +144,27 @@ test("agent prompt authorizes the requested test flow while preserving runtime b
   assert.match(prompt, /Use click for buttons and button-like controls/u);
   assert.match(prompt, /Use submit only when targetRef is the native form element itself/u);
   assert.match(prompt, /final combobox value or selected label\/tag/u);
+  assert.match(prompt, /completionEvidenceFailure/u);
+  assert.match(prompt, /never repeat unsupported completion evidence/u);
   assert.match(prompt, /"options":\["\.\.\."\]/u);
+});
+
+test("completion evidence recovery tells the agent to verify instead of repeating completion", () => {
+  const prompt = createAgentPrompt("Top up the test account", snapshot, [], [], {
+    runId: "run-1",
+    iteration: 3,
+    maxSteps: 8,
+    timeoutMs: 90_000,
+    startedAt: Date.now(),
+    completionEvidenceFailure: {
+      reason: "Completion evidence was not found.",
+      unmatchedEvidence: ["Top up succeeded"],
+    },
+  });
+
+  assert.match(prompt, /"completionEvidenceFailure":\{"reason":"Completion evidence was not found\."/u);
+  assert.match(prompt, /"unmatchedEvidence":\["Top up succeeded"\]/u);
+  assert.match(prompt, /take one safe action to find or reveal a verifiable result/u);
 });
 
 test("Responses SSE collects internal JSON without exposing protocol fragments as timeline events", async () => {

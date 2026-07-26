@@ -82,6 +82,7 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 - Treat selected-element and screenshot attachments as one-message model context after a successful initial agent response. Retain only a compact, read-only attachment summary on the user message; never resend that summary or screenshot binary in later agent history.
 - Preserve `needs_user` continuation: a typed reply or confirmed preselected choice must resume the pending original task, including after the side panel reloads.
 - Keep `answer`, `complete`, `blocked`, and `needs_user` semantically separate. After the first browser action, only evidence-backed `complete` may end the run successfully.
+- When a completion claim lacks current-snapshot evidence, allow one bounded recovery turn to find or reveal exact evidence. If it still cannot be verified, report that the action may have been submitted but completion is unconfirmed.
 - Navigation requires a fresh observation and never proves task completion by itself.
 - Normalize and validate every provider response in the bridge even when structured output is enabled upstream.
 - Keep Codex and Responses behavior aligned behind the provider abstraction. Provider-specific transport code must not leak into extension logic.
@@ -96,6 +97,7 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 - New action kinds require coordinated changes in shared types, bridge validation/prompting, content execution, verification, UI labels, security docs, and tests.
 - Use `click` for buttons and button-like controls, including controls labeled Submit, Pay, Confirm, or Top Up. Reserve `submit` for a native form target.
 - Every mutating action needs an explicit verification rule. A successful DOM method call alone is not proof of task success, and completion evidence must match exact text or a URL in the latest snapshot.
+- Treat a target that disappeared or became unavailable before dispatch as a stale snapshot signal: reobserve and replan without counting a verification failure.
 - Use action-specific settle budgets. Direct state updates should not inherit the longest click/submit wait.
 
 ## Skill rules

@@ -12,10 +12,23 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
       ? raw.evidence.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.slice(0, 500)).slice(0, 8)
       : [];
     if (!evidence.length) {
-      return { kind: "blocked", reason: "The agent claimed completion without current page evidence.", recoverable: true };
+      return {
+        kind: "blocked",
+        reason: "The agent claimed completion without current page evidence.",
+        recoverable: true,
+        code: "completion_evidence_missing",
+        unmatchedEvidence: [],
+      };
     }
-    if (!evidence.every((item) => completionEvidenceMatchesSnapshot(item, snapshot))) {
-      return { kind: "blocked", reason: "The agent claimed completion with evidence that is not present in the current page snapshot.", recoverable: true };
+    const unmatchedEvidence = evidence.filter((item) => !completionEvidenceMatchesSnapshot(item, snapshot));
+    if (unmatchedEvidence.length) {
+      return {
+        kind: "blocked",
+        reason: "The agent claimed completion with evidence that is not present in the current page snapshot.",
+        recoverable: true,
+        code: "completion_evidence_missing",
+        unmatchedEvidence,
+      };
     }
     return { kind: "complete", summary: String(raw.summary || "Task completed.").slice(0, 2_000), evidence };
   }

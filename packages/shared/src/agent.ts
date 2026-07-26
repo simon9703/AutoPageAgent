@@ -41,6 +41,8 @@ export interface AgentBlocked {
   kind: "blocked";
   reason: string;
   recoverable: boolean;
+  code?: "completion_evidence_missing";
+  unmatchedEvidence?: string[];
 }
 
 export interface AgentNeedsUser {
@@ -69,5 +71,9 @@ export interface AgentLoopContext {
     reason: "page_url_changed" | "snapshot_expired" | "page_context_invalidated";
     summary: string;
     actionMayHaveExecuted: boolean;
+  };
+  completionEvidenceFailure?: {
+    reason: string;
+    unmatchedEvidence: string[];
   };
 }

@@ -4,7 +4,7 @@ This document is the single checklist for shipped capabilities and future scope.
 Checked items are implemented in the current repository. Unchecked items are
 planned only and must not be described as available.
 
-## Current release — 0.10.1
+## Current release — 0.10.3
 
 ### Internal architecture
 
@@ -75,6 +75,7 @@ planned only and must not be described as available.
 - [x] Restore messages, attachment summaries, and pending follow-up state after side-panel reload
 - [x] Follow the active tab until the first message, then lock the conversation target
 - [x] Normalize `submit` on button-like controls to `click` while preserving native form submission
+- [x] Reobserve unavailable stale targets and retry unsupported completion evidence once
 - [x] Persist compact conversation and operation history under `~/.auto-page-agent/logs`
 - [x] Switch or delete saved history from the side-panel header
 - [x] Preserve original page binding when restoring history and never silently rebind it

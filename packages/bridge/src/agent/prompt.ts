@@ -15,6 +15,7 @@ export function createAgentPrompt(
     lastAction: loop.lastAction,
     lastVerification: loop.lastVerification,
     reobserve: loop.reobserve,
+    completionEvidenceFailure: loop.completionEvidenceFailure,
   } : undefined;
   const promptSnapshot = {
     ...snapshot,
@@ -37,6 +38,7 @@ export function createAgentPrompt(
     "For a searchable combobox, filling search text does not select an option. Fill the query, reobserve the page, and click the exact visible role=option from the fresh snapshot. Use select only for a native select element.",
     "After choosing a combobox option, complete only with evidence from the final combobox value or selected label/tag. Text that appears only in the candidate option list is not completion evidence.",
     "If loopState.reobserve is present, the previous snapshot and refs are invalid. Replan only from the current Page snapshot and never retry an old ref.",
+    "If loopState.completionEvidenceFailure is present, the previous completion claim was rejected. Copy exact success evidence from the current snapshot, take one safe action to find or reveal a verifiable result, or return blocked; never repeat unsupported completion evidence.",
     "Use only data-ai-ref values present in simplifiedDom as targetRef. Prefer visible, unoccluded, enabled elements. Never output JavaScript, CSS selectors, XPath, credentials, secrets, OTPs, file uploads, destructive actions, or actions outside the requested test flow.",
     "A successful action is not task completion. Once an action has been executed, never use answer to report completion; use complete with exact evidence copied from the current snapshot. Navigation alone is not completion.",
     selectedSkills.length ? `Selected Skill context:\n${selectedSkills.map((skill) => `${skill.name} (${skill.scope}): ${skill.reason}`).join("\n")}` : "",

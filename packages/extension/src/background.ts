@@ -488,6 +488,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
     const timeoutMs = 90_000;
     let iteration = 0;
     let failures = 0;
+    const completionRecovery = { attempts: 0 };
     let plan = initialPlan;
     if (initialTab.url !== pendingRun.pageUrl) {
       const signal: ReobserveSignal = {
@@ -498,7 +499,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       const snapshot = await reobservePage(pendingRun.tabId);
       const decision = await requestContinuation(snapshot, {
         runId, iteration, maxSteps, timeoutMs, startedAt, reobserve: signal,
-      }, pendingRun, run);
+      }, pendingRun, run, completionRecovery);
       const terminal = terminalAgentResult(decision, iteration);
       if (terminal) return terminal;
       if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
@@ -528,7 +529,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
           lastAction: step,
           reobserve: outcome.signal,
         };
-        const decision = await requestContinuation(outcome.snapshot, loop, pendingRun, run);
+        const decision = await requestContinuation(outcome.snapshot, loop, pendingRun, run, completionRecovery);
         const terminal = terminalAgentResult(decision, iteration);
         if (terminal) return terminal;
         if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
@@ -553,7 +554,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
         lastAction: step,
         ...(verification ? { lastVerification: verification } : {}),
       };
-      const decision = await requestContinuation(observedSnapshot, loop, pendingRun, run);
+      const decision = await requestContinuation(observedSnapshot, loop, pendingRun, run, completionRecovery);
       const terminal = terminalAgentResult(decision, iteration);
       if (terminal) return terminal;
       if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
@@ -573,6 +574,7 @@ async function requestContinuation(
   loop: AgentLoopContext,
   pendingRun: PendingAgentRun,
   run: ActiveAgentRun,
+  completionRecovery: { attempts: number },
 ): Promise<AgentDecision> {
   const requestId = crypto.randomUUID();
   run.bridgeRequestId = requestId;
@@ -589,6 +591,22 @@ async function requestContinuation(
   assertAgentRunActive(run);
   if (response.type === "agent.error") throw new Error(response.error);
   if (response.type !== "agent.result") throw new Error("Unexpected agent loop response.");
+  if (response.decision.kind === "blocked" && response.decision.code === "completion_evidence_missing") {
+    if (completionRecovery.attempts < 1) {
+      completionRecovery.attempts += 1;
+      return requestContinuation(snapshot, {
+        ...loop,
+        completionEvidenceFailure: {
+          reason: response.decision.reason,
+          unmatchedEvidence: response.decision.unmatchedEvidence ?? [],
+        },
+      }, pendingRun, run, completionRecovery);
+    }
+    return {
+      ...response.decision,
+      reason: "操作已提交，但当前页面没有可验证的成功结果，暂不能确认完成。",
+    };
+  }
   return response.decision;
 }
 

@@ -25,6 +25,13 @@ export function classifyReobserveError(error: unknown): ReobserveSignal | undefi
       actionMayHaveExecuted: false,
     };
   }
+  if (/target is unavailable:/iu.test(message)) {
+    return {
+      reason: "snapshot_expired",
+      summary: "The target changed or disappeared after the snapshot, so the page must be observed again.",
+      actionMayHaveExecuted: false,
+    };
+  }
   if (
     /message port closed|receiving end does not exist|context invalidated|frame (?:was )?removed|no frame with id/iu
       .test(message)

@@ -10,6 +10,7 @@ test("classifies stale page validation as reobserve without consuming an action"
   for (const message of [
     "Page URL changed after the snapshot. Read the page again.",
     "Page snapshot expired. Read the page again.",
+    "Target is unavailable: element-7",
   ]) {
     const signal = classifyReobserveError(new Error(message));
     assert.ok(signal);
@@ -46,4 +47,14 @@ test("agent loop replans with a fresh snapshot before continuing", async () => {
   assert.match(background, /requestContinuation\(outcome\.snapshot, loop/u);
   assert.match(background, /plan = decision;\s*continue;/u);
   assert.doesNotMatch(background, /The page navigated; the new page must be checked[\s\S]+failures \+= 1/u);
+});
+
+test("completion evidence rejection gets one bounded recovery turn", async () => {
+  const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
+
+  assert.match(background, /const completionRecovery = \{ attempts: 0 \};/u);
+  assert.match(background, /response\.decision\.code === "completion_evidence_missing"/u);
+  assert.match(background, /completionRecovery\.attempts < 1/u);
+  assert.match(background, /completionEvidenceFailure:/u);
+  assert.match(background, /操作已提交，但当前页面没有可验证的成功结果，暂不能确认完成。/u);
 });
