@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Bot, Camera, Check, ChevronDown, CircleStop, Code2, Copy, Globe2, Image, MousePointer2, Play, RefreshCw, Send, Sparkles, WandSparkles, WifiOff, X } from "lucide-react";
-import type { AgentEvent, BrowserActionPlan, BrowserTabTarget, ChatMessage, InspectedElement, PageSkillSummary, RecordedBrowserAction, SkillCatalogItem } from "@auto-page-agent/shared";
+import type { AgentEvent, AgentNeedsUser, BrowserActionPlan, BrowserTabTarget, ChatMessage, InspectedElement, PageSkillSummary, RecordedBrowserAction, SkillCatalogItem } from "@auto-page-agent/shared";
+import { defaultChoice } from "./conversation.js";
 import { eventLabel, hostname } from "./formatters.js";
 import { orderTabsForPicker } from "./tab-picker.js";
 
@@ -136,6 +137,40 @@ export function Timeline({ events }: { events: AgentEvent[] }) {
 export function ApprovalCard({ plan, onCancel, onConfirm }: { plan: BrowserActionPlan; onCancel: () => void; onConfirm: () => void }) {
   const { t } = useTranslation();
   return <aside className="mb-2 rounded-2xl border border-violet-200 bg-white p-3 shadow-lg"><div className="flex items-start gap-2"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-600"><MousePointer2 size={16} /></span><div className="min-w-0 flex-1"><strong className="text-xs">{t("agent.readyToAct")}</strong><p className="mt-1 text-[11px] leading-4 text-slate-500">{plan.summary}</p>{plan.steps.map((step, index) => <p key={index} className="mt-1.5 rounded-lg bg-slate-50 px-2 py-1.5 text-[10px] text-slate-600">{t(`browserAction.${step.action}`)} · {step.reason}</p>)}</div></div><div className="mt-3 flex justify-end gap-2"><button onClick={onCancel} className="rounded-xl px-3 py-2 text-xs text-slate-500 hover:bg-slate-100">{t("action.cancel")}</button><button onClick={onConfirm} className="flex items-center gap-1.5 rounded-xl bg-slate-950 px-3 py-2 text-xs font-medium text-white hover:bg-violet-600"><Play size={13} />{t("action.runAndVerify")}</button></div></aside>;
+}
+
+export function ChoiceCard({ choice, onCancel, onConfirm }: {
+  choice: AgentNeedsUser;
+  onCancel: () => void;
+  onConfirm: (option: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [selected, setSelected] = useState(() => defaultChoice(choice));
+  return <aside className="mb-2 rounded-2xl border border-violet-200 bg-white p-3 shadow-lg">
+    <div className="flex items-start gap-2">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-600"><WandSparkles size={16} /></span>
+      <div className="min-w-0 flex-1">
+        <strong className="text-xs">{t("agent.choiceRequired")}</strong>
+        <p className="mt-1 text-[11px] leading-4 text-slate-600">{choice.question}</p>
+        <div className="mt-2 space-y-1.5">
+          {choice.options?.map((option) => {
+            const checked = selected === option;
+            return <label key={option} className={`flex cursor-pointer items-center gap-2 rounded-xl border px-2.5 py-2 text-[11px] transition ${checked ? "border-violet-300 bg-violet-50 text-slate-900" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+              <input type="radio" name="agent-choice" value={option} checked={checked} onChange={() => setSelected(option)} className="accent-violet-600" />
+              <span className="min-w-0 flex-1">{option}</span>
+              {choice.recommendedOption === option ? <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-medium text-violet-700">{t("agent.recommended")}</span> : null}
+            </label>;
+          })}
+        </div>
+      </div>
+    </div>
+    <div className="mt-3 flex justify-end gap-2">
+      <button type="button" onClick={onCancel} className="rounded-xl px-3 py-2 text-xs text-slate-500 hover:bg-slate-100">{t("action.cancel")}</button>
+      <button type="button" disabled={!selected} onClick={() => onConfirm(selected)} className="flex items-center gap-1.5 rounded-xl bg-slate-950 px-3 py-2 text-xs font-medium text-white hover:bg-violet-600 disabled:bg-slate-200">
+        <Play size={13} />{t("action.start")}
+      </button>
+    </div>
+  </aside>;
 }
 
 export function SkillsModal(props: { view: SkillView; setView: (view: SkillView) => void; scope: string; items: Array<PageSkillSummary | SkillCatalogItem>; onClose: () => void; onRefresh: () => void; onUse: (skill: Pick<SkillCatalogItem, "name" | "description">, debug?: boolean) => void; onInstall: (slug: string, update: boolean) => void; onToggle: (slug: string, enabled: boolean) => void; onEdit: (slug: string) => void }) {

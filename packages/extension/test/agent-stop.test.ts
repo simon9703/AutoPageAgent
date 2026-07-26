@@ -22,12 +22,18 @@ test("busy conversations expose a real agent cancellation path", async () => {
 });
 
 test("conversation output keeps plans and runtime metadata out of assistant messages", async () => {
-  const sidePanel = await readFile(new URL("../src/sidepanel/controller.tsx", import.meta.url), "utf8");
+  const sidePanel = [
+    await readFile(new URL("../src/sidepanel/controller.tsx", import.meta.url), "utf8"),
+    await readFile(new URL("../src/sidepanel/components.tsx", import.meta.url), "utf8"),
+  ].join("\n");
 
   assert.doesNotMatch(sidePanel, /appendMessage\("assistant", response\.decision\.summary\);\s*setNotice\("Action ready/u);
   assert.doesNotMatch(sidePanel, /Completed in \$\{response\.steps/u);
   assert.match(sidePanel, /completedConversationMessage\(response\.answer, t\("notice\.taskCompletedMessage"\)\)/u);
   assert.match(sidePanel, /pendingUserTaskRef\.current = task/u);
+  assert.match(sidePanel, /<ChoiceCard[\s\S]+onConfirm=\{\(option\) => void submitTask\(undefined, option\)\}/u);
+  assert.match(sidePanel, /choice\.recommendedOption === option/u);
+  assert.match(sidePanel, /t\("action\.start"\)/u);
 });
 
 test("page tools and compact run controls share the composer", async () => {

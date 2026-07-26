@@ -5,12 +5,12 @@ import {
   Send, Sparkles, X,
 } from "lucide-react";
 import type {
-  AgentEvent, AutomationSkillDraft, BrowserActionPlan, BrowserTabTarget, ChatMessage,
+  AgentEvent, AgentNeedsUser, AutomationSkillDraft, BrowserActionPlan, BrowserTabTarget, ChatMessage,
   EditableAutomationSkill, InspectedElement, PageSkillSummary,
   RecordedBrowserAction, RepositoryAnalysis, ServerMessage, SkillCatalogItem,
 } from "@auto-page-agent/shared";
 import { defaultSkillName, formatRepositoryAnalysis } from "./formatters.js";
-import { ApprovalCard, ComposerToolButton, ConnectionGate, ContextCard, EmptyState, Message, RecordingModal, ScreenshotCard, SkillsModal, TargetTabHeader, Timeline, type SkillView } from "./components.js";
+import { ApprovalCard, ChoiceCard, ComposerToolButton, ConnectionGate, ContextCard, EmptyState, Message, RecordingModal, ScreenshotCard, SkillsModal, TargetTabHeader, Timeline, type SkillView } from "./components.js";
 import { Button } from "../components/ui/button.js";
 import {
   completedConversationMessage,
@@ -38,6 +38,7 @@ export function SidePanelController() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(() => t("notice.ready"));
   const [pendingPlan, setPendingPlan] = useState<BrowserActionPlan | null>(null);
+  const [pendingChoice, setPendingChoice] = useState<AgentNeedsUser | null>(null);
   const [selected, setSelected] = useState<{
     element: InspectedElement;
     pageUrl: string;
@@ -67,6 +68,7 @@ export function SidePanelController() {
   });
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
   const targetTabRef = useRef<BrowserTabTarget | null>(null);
   const conversationIdRef = useRef<string>(crypto.randomUUID());
   const windowIdRef = useRef<number | null>(null);
@@ -74,6 +76,7 @@ export function SidePanelController() {
   const stopRequestedRef = useRef(false);
   const activeTaskRef = useRef("");
   const pendingUserTaskRef = useRef<string | null>(null);
+  const pendingChoiceRef = useRef<AgentNeedsUser | null>(null);
 
   useEffect(() => {
     void initialize();
@@ -146,7 +149,10 @@ export function SidePanelController() {
     const initialConversationId = session?.conversationId ?? crypto.randomUUID();
     conversationIdRef.current = initialConversationId;
     pendingUserTaskRef.current = session?.pendingTask ?? null;
+    pendingChoiceRef.current = session?.pendingChoice ?? null;
     setMessages(storedMessages);
+    messagesRef.current = storedMessages;
+    setPendingChoice(session?.pendingChoice ?? null);
     setTabs(availableTabs);
     setActiveTabId(tabState.activeTabId ?? null);
     setTargetTabValue(initialTarget);
@@ -213,6 +219,7 @@ export function SidePanelController() {
         messages: next.slice(-40),
         ...(typeof targetTabId === "number" ? { targetTabId } : {}),
         ...(pendingUserTaskRef.current ? { pendingTask: pendingUserTaskRef.current } : {}),
+        ...(pendingChoiceRef.current ? { pendingChoice: pendingChoiceRef.current } : {}),
       },
     });
   }
@@ -220,6 +227,7 @@ export function SidePanelController() {
   function appendMessage(role: ChatMessage["role"], content: string, attachments?: ChatMessage["attachments"]) {
     setMessages((current) => {
       const next = [...current, { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString(), ...(attachments ? { attachments } : {}) }].slice(-40);
+      messagesRef.current = next;
       void persistConversation(conversationIdRef.current, next);
       return next;
     });
@@ -312,9 +320,12 @@ export function SidePanelController() {
     const oldTargetTabId = targetTabRef.current?.tabId;
     const nextId = crypto.randomUUID();
     conversationIdRef.current = nextId;
+    messagesRef.current = [];
     setMessages([]);
     setEvents([]);
     setPendingPlan(null);
+    pendingChoiceRef.current = null;
+    setPendingChoice(null);
     setSelected(null);
     setScreenshot(null);
     setPrompt("");
@@ -367,9 +378,9 @@ export function SidePanelController() {
     }).catch(() => undefined);
   }
 
-  async function submitTask(event?: React.FormEvent) {
+  async function submitTask(event?: React.FormEvent, confirmedChoice?: string) {
     event?.preventDefault();
-    const text = prompt.trim();
+    const text = confirmedChoice?.trim() || prompt.trim();
     if (!text || busy) return;
     if (connection.phase !== "ready") return setNotice(t("notice.reconnectBeforeSend"));
     if (!targetTab) return setNotice(t("notice.chooseTarget"));
@@ -381,6 +392,8 @@ export function SidePanelController() {
     const task = composeAgentTask(text, pendingUserTaskRef.current);
     activeTaskRef.current = task;
     pendingUserTaskRef.current = null;
+    pendingChoiceRef.current = null;
+    setPendingChoice(null);
     const history = toAgentHistory(messages.slice(-20));
     const attachments = summarizeMessageContext(selected, screenshot, {
       noVisibleText: t("attachment.noVisibleText"),
@@ -415,8 +428,15 @@ export function SidePanelController() {
         setNotice(t("notice.alreadyComplete"));
       } else if (response.decision.kind === "needs_user") {
         pendingUserTaskRef.current = task;
-        appendMessage("assistant", response.decision.question);
-        setNotice(t("notice.needsMoreInformation"));
+        if (response.decision.options?.length) {
+          pendingChoiceRef.current = response.decision;
+          setPendingChoice(response.decision);
+          await persistConversation(conversationIdRef.current, messagesRef.current);
+          setNotice(t("notice.choiceReady"));
+        } else {
+          appendMessage("assistant", response.decision.question);
+          setNotice(t("notice.needsMoreInformation"));
+        }
       } else {
         activeTaskRef.current = "";
         appendMessage("assistant", t("notice.unableToContinue", { reason: response.decision.reason }));
@@ -448,6 +468,8 @@ export function SidePanelController() {
         status?: "completed" | "needs_user" | "blocked";
         answer?: string;
         question?: string;
+        options?: string[];
+        recommendedOption?: string;
         evidence?: string[];
         steps?: number;
         recoverable?: boolean;
@@ -456,8 +478,21 @@ export function SidePanelController() {
       if (stopRequestedRef.current || !isCurrentScope(scope)) return;
       if (response.status === "needs_user") {
         pendingUserTaskRef.current = activeTaskRef.current;
-        appendMessage("assistant", response.question ?? t("notice.moreInformationRequired"));
-        setNotice(t("notice.needsMoreInformation"));
+        if (response.options?.length) {
+          const choice: AgentNeedsUser = {
+            kind: "needs_user",
+            question: response.question ?? t("notice.moreInformationRequired"),
+            options: response.options,
+            ...(response.recommendedOption ? { recommendedOption: response.recommendedOption } : {}),
+          };
+          pendingChoiceRef.current = choice;
+          setPendingChoice(choice);
+          await persistConversation(conversationIdRef.current, messagesRef.current);
+          setNotice(t("notice.choiceReady"));
+        } else {
+          appendMessage("assistant", response.question ?? t("notice.moreInformationRequired"));
+          setNotice(t("notice.needsMoreInformation"));
+        }
         return;
       }
       if (response.status === "blocked") {
@@ -477,6 +512,15 @@ export function SidePanelController() {
         setNotice(message);
       }
     } finally { setBusyValue(false); }
+  }
+
+  function cancelChoice() {
+    pendingChoiceRef.current = null;
+    pendingUserTaskRef.current = null;
+    activeTaskRef.current = "";
+    setPendingChoice(null);
+    setNotice(t("notice.choiceCancelled"));
+    void persistConversation(conversationIdRef.current, messagesRef.current);
   }
 
   async function stopAgent() {
@@ -624,6 +668,7 @@ export function SidePanelController() {
 
       <div className="shrink-0 px-3 pb-3">
         {pendingPlan ? <ApprovalCard plan={pendingPlan} onCancel={() => setPendingPlan(null)} onConfirm={() => void executePlan()} /> : null}
+        {pendingChoice ? <ChoiceCard key={`${pendingChoice.question}:${pendingChoice.options?.join("|")}`} choice={pendingChoice} onCancel={cancelChoice} onConfirm={(option) => void submitTask(undefined, option)} /> : null}
         <form onSubmit={(event) => void submitTask(event)} className="composer rounded-[22px] border border-slate-200 bg-white p-2.5 shadow-[0_10px_32px_rgba(15,23,42,.09)] transition focus-within:border-slate-300 focus-within:shadow-[0_12px_36px_rgba(15,23,42,.12)]">
           {contextLabel ? <div className="mb-2 flex"><span className="flex max-w-full items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600"><MousePointer2 size={12} /><span className="truncate">{contextLabel}</span><button type="button" onClick={() => void clearContext()} aria-label={t("action.removeContext")}><X size={12} /></button></span></div> : null}
           <textarea ref={inputRef} value={prompt} disabled={connection.phase !== "ready"} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitTask(); } }} rows={2} placeholder={connection.phase === "ready" ? t("prompt.ready") : t("prompt.unavailable")} className="composer-input max-h-32 min-h-10 w-full resize-none border-0 bg-transparent px-1 text-[14px] leading-5 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400" />

@@ -20,7 +20,24 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
     return { kind: "complete", summary: String(raw.summary || "Task completed.").slice(0, 2_000), evidence };
   }
   if (raw.kind === "needs_user") {
-    return { kind: "needs_user", question: String(raw.question || "More information is required.").slice(0, 2_000) };
+    const options = Array.isArray(raw.options)
+      ? [...new Set(raw.options
+        .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+        .map((item) => item.trim().slice(0, 240)))]
+        .slice(0, 5)
+      : [];
+    const requestedRecommendation = typeof raw.recommendedOption === "string"
+      ? raw.recommendedOption.trim()
+      : "";
+    const recommendedOption = requestedRecommendation
+      ? options.find((option) => option === requestedRecommendation)
+      : undefined;
+    return {
+      kind: "needs_user",
+      question: String(raw.question || "More information is required.").slice(0, 2_000),
+      ...(options.length ? { options } : {}),
+      ...(recommendedOption ? { recommendedOption } : {}),
+    };
   }
   if (raw.kind === "blocked") {
     return {

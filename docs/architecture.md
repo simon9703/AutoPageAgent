@@ -69,7 +69,7 @@ A browser window owns one current conversation. Its session is stored under a wi
 - closing the target stops an active run and requires **New**; it never falls back to another open tab;
 - agent events and returned results are accepted only when `windowId`, `conversationId`, and `targetTabId` all match;
 - **New** remains disabled while a run is active; stopping keeps the UI busy until cancellation has reached the running provider;
-- a `needs_user` decision persists the original task and combines the next user reply with it instead of starting an unrelated task.
+- a `needs_user` decision persists the original task and combines the next user reply with it instead of starting an unrelated task; bounded options are rendered as a confirmation card with the recommended or first option preselected.
 
 Every planned run persists its `windowId`, `conversationId`, `tabId`, initial page URL, and snapshot id. The confirmed observe-act-verify loop reuses that immutable scope for every action, navigation recovery, observation, and verification step. It never falls back to the currently active browser tab. Pending selected-element context is keyed by target tab so another window cannot overwrite it.
 
@@ -82,7 +82,7 @@ The bridge is registered once as `com.auto_page_agent.bridge`. Chrome launches i
 3. routes the request to authenticated local Codex or the configured Responses API;
 4. reuses provider conversation state until the user starts a new conversation, which clears both Codex thread and Responses chaining state;
 5. parses and validates the JSON decision;
-6. returns an answer, confirmation-required action plan, evidence-backed completion, blocked state, or request for user input.
+6. returns an answer, confirmation-required action plan, evidence-backed completion, blocked state, or request for user input with an optional validated choice list and recommendation.
 
 The bridge follows a stable-entrypoint, feature-folder structure:
 
@@ -168,7 +168,7 @@ Other terminal or paused states:
 ```
 
 ```json
-{"kind":"needs_user","question":"Which account should be selected?"}
+{"kind":"needs_user","question":"Which account should be selected?","options":["Personal","Business"],"recommendedOption":"Personal"}
 ```
 
 Invariant rules:

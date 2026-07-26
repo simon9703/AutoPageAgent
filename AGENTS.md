@@ -78,7 +78,7 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 - Keep one current conversation per browser window. **New** binds the active tab in that window; tab focus changes never rebind it, target navigation stays in the conversation, and a closed target requires **New**.
 - Keep initial plans in the approval card, runtime step counts in status/timeline UI, and user-facing answers in chat. Do not duplicate plan or execution metadata as assistant messages.
 - Treat selected-element and screenshot attachments as one-message model context after a successful initial agent response. Retain only a compact, read-only attachment summary on the user message; never resend that summary or screenshot binary in later agent history.
-- Preserve `needs_user` continuation: the next user reply must resume the pending original task, including after the side panel reloads.
+- Preserve `needs_user` continuation: a typed reply or confirmed preselected choice must resume the pending original task, including after the side panel reloads.
 - Keep `answer`, `complete`, `blocked`, and `needs_user` semantically separate. After the first browser action, only evidence-backed `complete` may end the run successfully.
 - Navigation requires a fresh observation and never proves task completion by itself.
 - Normalize and validate every provider response in the bridge even when structured output is enabled upstream.

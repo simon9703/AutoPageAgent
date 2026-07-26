@@ -4,7 +4,7 @@ This document is the single checklist for shipped capabilities and future scope.
 Checked items are implemented in the current repository. Unchecked items are
 planned only and must not be described as available.
 
-## Current release — 0.8.4
+## Current release — 0.8.5
 
 ### Internal architecture
 
@@ -35,6 +35,7 @@ planned only and must not be described as available.
 - [x] Keep **New** unavailable until the active run has stopped
 - [x] Stop safely when the bound tab closes and require **New** to continue
 - [x] Persist `needs_user` and combine the next reply with the original task
+- [x] Render bounded `needs_user` choices with a recommended preselection and one-click **Start**
 - [x] Keep local Codex thread and Responses `previous_response_id` continuity
 
 ### Message Context and Attachments
@@ -66,6 +67,7 @@ planned only and must not be described as available.
 - [x] Bound-page summary returns the user to the target tab without rebinding it
 - [x] Stop control with real cancellation/busy state
 - [x] Approval card for the initial action plan
+- [x] Choice confirmation card that resumes the original task without requiring typed input
 - [x] Timeline containing real Action, Verify, Complete, and Error events only
 - [x] Keep plan summaries out of chat and internal step counts out of assistant replies
 - [x] AI pointer, target ring, and action-status label

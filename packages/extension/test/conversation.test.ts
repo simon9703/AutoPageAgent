@@ -5,6 +5,7 @@ import {
   completedConversationMessage,
   composeAgentTask,
   conversationStorageKey,
+  defaultChoice,
   legacyConversationSession,
   normalizeConversationSession,
   summarizeMessageContext,
@@ -17,19 +18,45 @@ test("conversation storage is isolated by browser window", () => {
   assert.notEqual(conversationStorageKey(4), conversationStorageKey(9));
 });
 
-test("conversation sessions retain one bound tab and pending task", () => {
+test("conversation sessions retain one bound tab, pending task, and confirmable choice", () => {
   assert.deepEqual(normalizeConversationSession({
     conversationId: "conversation-1",
     messages: [],
     targetTabId: 17,
     pendingTask: "Choose an account",
+    pendingChoice: {
+      kind: "needs_user",
+      question: "Which account?",
+      options: ["Personal", "Business"],
+      recommendedOption: "Business",
+    },
   }), {
     conversationId: "conversation-1",
     messages: [],
     targetTabId: 17,
     pendingTask: "Choose an account",
+    pendingChoice: {
+      kind: "needs_user",
+      question: "Which account?",
+      options: ["Personal", "Business"],
+      recommendedOption: "Business",
+    },
   });
   assert.equal(normalizeConversationSession({ messages: [] }), null);
+});
+
+test("choice confirmation defaults to the recommendation or first option", () => {
+  assert.equal(defaultChoice({
+    kind: "needs_user",
+    question: "Which account?",
+    options: ["Personal", "Business"],
+    recommendedOption: "Business",
+  }), "Business");
+  assert.equal(defaultChoice({
+    kind: "needs_user",
+    question: "Which account?",
+    options: ["Personal", "Business"],
+  }), "Personal");
 });
 
 test("legacy global conversation state migrates into a window session", () => {

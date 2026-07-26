@@ -19,7 +19,7 @@ A lightweight Chrome side-panel agent that understands a conversation-bound targ
 - Save a recording as a reusable `SKILL.md` plus declarative `workflow.json` with runtime variables.
 - Discover a page-specific Skill function list in the side panel and refresh it automatically on tab/navigation changes.
 - Continue a conversation in the side panel, with a reusable Codex thread or Responses `previous_response_id`.
-- Resume the original browser task when the agent asks for missing user input.
+- Resume the original browser task when the agent asks for missing user input; when choices are available, show a recommended preselected option that continues on **Start**.
 - Select a page element or image as explicit one-message model context, with a compact attachment summary retained in the conversation.
 - Send a Page Agent-inspired compact, indexed DOM instead of the full page tree.
 - Show an AI pointer, target ring, and action label while approved DOM actions execute.
@@ -51,7 +51,7 @@ Chrome Side Panel
       -> OpenAI Responses API
 ```
 
-The model never receives arbitrary JavaScript execution. It produces a constrained decision: answer, action plan, complete, blocked, or needs user. The bridge validates every decision, and the content script resolves only element references belonging to the latest snapshot. An action result or navigation is never treated as whole-task completion; `complete` requires current-page evidence.
+The model never receives arbitrary JavaScript execution. It produces a constrained decision: answer, action plan, complete, blocked, or needs user. The bridge validates every decision, including bounded choice lists and their recommended option, and the content script resolves only element references belonging to the latest snapshot. An action result or navigation is never treated as whole-task completion; `complete` requires current-page evidence.
 
 ## Quick start
 

@@ -8,6 +8,8 @@ export const responsesDecisionSchema = {
     reason: { type: "string" },
     recoverable: { type: "boolean" },
     question: { type: "string" },
+    options: { type: "array", items: { type: "string" } },
+    recommendedOption: { type: "string" },
     snapshotId: { type: "string" },
     requiresConfirmation: { type: "boolean" },
     confidence: { type: "number" },

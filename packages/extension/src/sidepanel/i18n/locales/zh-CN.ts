@@ -31,6 +31,7 @@ export const zhCN = {
     saveSkill: "保存 Skill",
     stopAgent: "停止 Agent",
     send: "发送",
+    start: "开始操作",
   },
   tab: {
     switch: "切换浏览器标签页",
@@ -60,6 +61,8 @@ export const zhCN = {
   agent: {
     activity: "Agent 操作记录 · {{count}}",
     readyToAct: "已准备在当前页面执行",
+    choiceRequired: "请选择后开始操作",
+    recommended: "推荐",
     working: "Agent 正在处理当前页面…",
     actionRunning: "执行中",
     action: "操作",
@@ -148,6 +151,8 @@ export const zhCN = {
     answeredBy: "由 {{provider}} 回答。",
     alreadyComplete: "当前页面已经满足请求。",
     needsMoreInformation: "Agent 需要更多信息。",
+    choiceReady: "Agent 已推荐一个选项，确认后即可继续。",
+    choiceCancelled: "已取消本次操作。",
     unableToContinue: "无法继续：{{reason}}",
     error: "错误：{{error}}",
     operatingAndVerifying: "Agent 正在操作页面并逐步验证…",

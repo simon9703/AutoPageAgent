@@ -46,6 +46,8 @@ export interface AgentBlocked {
 export interface AgentNeedsUser {
   kind: "needs_user";
   question: string;
+  options?: string[];
+  recommendedOption?: string;
 }
 
 export type AgentDecision =
