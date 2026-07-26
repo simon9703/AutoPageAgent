@@ -43,7 +43,7 @@ npm install
 npm run typecheck
 npm test
 npm run build
-npm run install:bridge
+npm run bridge
 ```
 
 Run all three validation commands before committing. `typecheck` builds `@auto-page-agent/shared` first because the other workspaces consume its generated declarations. Load `packages/extension/dist` as an unpacked extension only after `npm run build`.

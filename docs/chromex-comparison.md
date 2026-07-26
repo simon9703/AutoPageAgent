@@ -10,7 +10,7 @@ Both projects use the same fundamental boundary:
 Chrome extension -> local bridge -> codex app-server -> thread/start + turn/start
 ```
 
-Both projects use Chrome Native Messaging between the extension and local bridge. Auto Page Agent registers `com.auto_page_agent.bridge` with `npm run install:bridge`; Chrome then starts the bridge on demand, so no dev server remains running.
+Both projects use Chrome Native Messaging between the extension and local bridge. Auto Page Agent registers `com.auto_page_agent.bridge` with `npm run bridge`; Chrome then starts the bridge on demand, so no dev server remains running.
 
 | Capability | Chromex | Auto Page Agent v0.8 |
 | --- | --- | --- |

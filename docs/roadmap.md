@@ -4,7 +4,7 @@ This document is the single checklist for shipped capabilities and future scope.
 Checked items are implemented in the current repository. Unchecked items are
 planned only and must not be described as available.
 
-## Current release — 0.8.0
+## Current release — 0.8.2
 
 ### Agent Runtime
 

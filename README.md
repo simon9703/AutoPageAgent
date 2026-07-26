@@ -61,7 +61,7 @@ Requirements: Node.js 20+, Chrome, and a working Codex CLI ChatGPT login.
 npm install
 npm install -g @openai/codex
 codex login
-npm run install:bridge
+npm run bridge
 ```
 
 Then:
@@ -72,7 +72,7 @@ Then:
 4. Select `packages/extension/dist`.
 5. Open an HTTP(S) page and click the extension icon.
 
-`install:bridge` builds the project and registers `com.auto_page_agent.bridge` for Chrome once. Chrome starts the bridge automatically when the extension connects, so `npm run dev:bridge` and a permanently running localhost service are no longer needed. After reinstalling or moving the source package, run the command again and reload the extension.
+`npm run bridge` builds the project and registers `com.auto_page_agent.bridge` for Chrome once. Chrome starts the bridge automatically when the extension connects, so `npm run dev:bridge` and a permanently running localhost service are no longer needed. After reinstalling or moving the source package, run the command again and reload the extension.
 
 If the bridge is missing or Codex is not signed in, the side panel shows a **Reconnect** action and keeps message sending disabled. Run `codex login` when prompted, complete the ChatGPT login, then click **Reconnect**.
 
@@ -106,7 +106,7 @@ cp auto-page-agent.config.example.json auto-page-agent.config.json
 }
 ```
 
-Run `npm run install:bridge` again after changing this configuration, click **Reconnect**, select an element on the page, then click **Find in repositories**. Repository search uses `rg` with fixed-string arguments; model output is never executed as a shell command.
+Run `npm run bridge` again after changing this configuration, click **Reconnect**, select an element on the page, then click **Find in repositories**. Repository search uses `rg` with fixed-string arguments; model output is never executed as a shell command.
 
 ## Record an automation Skill
 

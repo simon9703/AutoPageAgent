@@ -86,10 +86,10 @@ function friendlyConnectionError(message: string): string {
     || normalized.includes("host name is not registered")
     || normalized.includes("specified native messaging host")
   ) {
-    return "Local bridge is not registered. Run npm run install:bridge once, reload the extension, then reconnect.";
+    return "Local bridge is not registered. Run npm run bridge once, reload the extension, then reconnect.";
   }
   if (normalized.includes("access to the specified native messaging host is forbidden")) {
-    return "This extension is not allowed by the registered local bridge. Run npm run install:bridge again, reload the extension, then reconnect.";
+    return "This extension is not allowed by the registered local bridge. Run npm run bridge again, reload the extension, then reconnect.";
   }
   if (normalized.includes("native host has exited") || normalized.includes("disconnected")) {
     return "The local bridge disconnected. Reconnect to let Chrome start it again.";
