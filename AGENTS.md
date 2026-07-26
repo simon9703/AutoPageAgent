@@ -25,6 +25,8 @@ Read `README.md` for usage, `docs/architecture.md` for component boundaries, `do
 - `packages/bridge/src/agent/`: provider router, provider implementations, prompts, Responses streaming, and decision validation.
 - `packages/bridge/src/codex-app-server.ts`: Codex app-server JSON-RPC adapter.
 - `packages/bridge/src/skills.ts`: stable Skill API plus Registry/Marketplace persistence.
+- `packages/bridge/src/logs.ts`: bounded durable conversation and operation-history persistence.
+- `packages/bridge/src/data-paths.ts`: shared durable user-data root for sibling `skills/` and `logs/` directories.
 - `packages/bridge/src/skills/`: Skill models, page matching, selection, workflow generation, and pure validation helpers.
 - `packages/bridge/src/repositories.ts`: bounded local `rg` evidence search.
 - `packages/extension/src/background.ts`: service-worker entry, Chrome event listeners, message dispatch, and agent-loop orchestration.
@@ -106,6 +108,14 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 - Marketplace updates may replace the installed template copy only after explicit user confirmation.
 - A generated workflow remains declarative (`SKILL.md` plus `workflow.json`) and uses the same constrained agent loop as manual tasks.
 - Recorder screenshots are bounded session-only context. Never write screenshot data URLs into `SKILL.md`, `workflow.json`, exports, or Agent conversation history.
+
+## Conversation log rules
+
+- Durable conversation logs live under `${AUTO_PAGE_AGENT_DATA_DIR:-~/.auto-page-agent}/logs`, beside user Skills.
+- Persist compact messages, target-page metadata, continuation state, and Action/Verify/Complete/Error events only.
+- Never persist screenshot data URLs, recorded form values, ephemeral DOM refs, provider protocol fragments, or full snapshots in logs.
+- Keep log writes revisioned so stale asynchronous writes cannot replace newer conversation state.
+- Restoring history may reuse its original bound tab only while that tab still exists. Never silently rebind a saved conversation to the active browser tab.
 
 ## Change workflow
 

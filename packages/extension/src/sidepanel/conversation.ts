@@ -1,4 +1,13 @@
-import type { AgentNeedsUser, ChatMessage, ChatMessageAttachment, InspectedElement } from "@auto-page-agent/shared";
+import type {
+  AgentEvent,
+  AgentNeedsUser,
+  BrowserTabTarget,
+  ChatMessage,
+  ChatMessageAttachment,
+  ConversationLog,
+  ConversationLogTarget,
+  InspectedElement,
+} from "@auto-page-agent/shared";
 
 export const LEGACY_CONVERSATION_STORAGE_KEYS = [
   "conversationId",
@@ -10,6 +19,9 @@ export const LEGACY_CONVERSATION_STORAGE_KEYS = [
 export interface ConversationSession {
   conversationId: string;
   messages: ChatMessage[];
+  events: AgentEvent[];
+  createdAt: string;
+  revision: number;
   targetTabId?: number;
   pendingTask?: string;
   pendingChoice?: AgentNeedsUser;
@@ -39,6 +51,11 @@ export function normalizeConversationSession(value: unknown): ConversationSessio
   return {
     conversationId: candidate.conversationId,
     messages: Array.isArray(candidate.messages) ? candidate.messages.slice(-40) : [],
+    events: Array.isArray(candidate.events) ? candidate.events.slice(-80) : [],
+    createdAt: typeof candidate.createdAt === "string" && Number.isFinite(Date.parse(candidate.createdAt))
+      ? candidate.createdAt
+      : new Date().toISOString(),
+    revision: Math.max(0, Math.floor(Number(candidate.revision) || 0)),
     ...(typeof candidate.targetTabId === "number" ? { targetTabId: candidate.targetTabId } : {}),
     ...(typeof candidate.pendingTask === "string" && candidate.pendingTask.trim()
       ? { pendingTask: candidate.pendingTask }
@@ -83,9 +100,50 @@ export function legacyConversationSession(value: Record<string, unknown>): Conve
   return normalizeConversationSession({
     conversationId: value.conversationId,
     messages: value.chatMessages,
+    events: [],
+    createdAt: new Date().toISOString(),
+    revision: 0,
     targetTabId: value.conversationTargetTabId,
     pendingTask: value.pendingConversationTask,
   });
+}
+
+export function conversationTitle(messages: ChatMessage[], fallback: string): string {
+  return messages.find((message) => message.role === "user")?.content.trim().slice(0, 60) || fallback;
+}
+
+export function createConversationLog(input: {
+  conversationId: string;
+  messages: ChatMessage[];
+  events: AgentEvent[];
+  createdAt: string;
+  revision: number;
+  windowId?: number;
+  target: ConversationLogTarget | BrowserTabTarget | null;
+  pendingTask?: string | null;
+  pendingChoice?: AgentNeedsUser | null;
+  selectedSkill?: { slug: string; name: string } | null;
+  fallbackTitle: string;
+}): ConversationLog {
+  return {
+    schemaVersion: 1,
+    conversationId: input.conversationId,
+    title: conversationTitle(input.messages, input.fallbackTitle),
+    createdAt: input.createdAt,
+    updatedAt: new Date().toISOString(),
+    revision: input.revision,
+    ...(typeof input.windowId === "number" ? { windowId: input.windowId } : {}),
+    target: {
+      ...(typeof input.target?.tabId === "number" ? { tabId: input.target.tabId } : {}),
+      title: input.target?.title ?? "",
+      url: input.target?.url ?? "",
+    },
+    messages: input.messages.slice(-40),
+    events: input.events.slice(-80),
+    ...(input.pendingTask ? { pendingTask: input.pendingTask } : {}),
+    ...(input.pendingChoice ? { pendingChoice: input.pendingChoice } : {}),
+    ...(input.selectedSkill ? { selectedSkill: input.selectedSkill } : {}),
+  };
 }
 
 export function composeAgentTask(userInput: string, pendingTask?: string | null): string {

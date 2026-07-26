@@ -1,4 +1,4 @@
-import type { ActionExecutionResult, AgentDecision, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ElementSelectionGeometry, InspectedElement, PageSnapshot, PerformanceSnapshot, RecordedBrowserAction, ServerMessage, SkillExportBundle, SkillSummaryRequest } from "@auto-page-agent/shared";
+import type { ActionExecutionResult, AgentDecision, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ConversationLog, ElementSelectionGeometry, InspectedElement, PageSnapshot, PerformanceSnapshot, RecordedBrowserAction, ServerMessage, SkillExportBundle, SkillSummaryRequest } from "@auto-page-agent/shared";
 import { reconnectBridge, requestBridge } from "./background/bridge-client.js";
 import { PendingAgentRunStore, type PendingAgentRun } from "./background/pending-agent-run.js";
 import {
@@ -111,6 +111,39 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       conversationId ? pendingAgentRuns.clearForConversation(conversationId) : Promise.resolve(),
       conversationId ? requestBridge({ id: crypto.randomUUID(), type: "agent.reset", conversationId }) : Promise.resolve(undefined),
     ]).then(() => sendResponse({ ok: true })).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.logs.list") {
+    void requestBridge({ id: crypto.randomUUID(), type: "log.list" }).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.logs.get") {
+    void requestBridge({
+      id: crypto.randomUUID(),
+      type: "log.get",
+      conversationId: String(message.conversationId ?? ""),
+    }).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.logs.save") {
+    void requestBridge({
+      id: crypto.randomUUID(),
+      type: "log.save",
+      log: message.log as ConversationLog,
+    }).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.logs.delete") {
+    const conversationId = String(message.conversationId ?? "");
+    void requestBridge({
+      id: crypto.randomUUID(),
+      type: "log.delete",
+      conversationId,
+    }).then(async (response) => {
+      await pendingAgentRuns.clearForConversation(conversationId);
+      await requestBridge({ id: crypto.randomUUID(), type: "agent.reset", conversationId });
+      sendResponse(response);
+    }).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.selection.current") {

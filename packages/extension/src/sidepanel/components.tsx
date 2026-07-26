@@ -1,13 +1,79 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Bot, Camera, Check, ChevronDown, CircleStop, Code2, Copy, Download, Globe2, Image, MousePointer2, Play, Plus, RefreshCw, Send, Sparkles, Trash2, Upload, WandSparkles, WifiOff, X } from "lucide-react";
-import type { AgentEvent, AgentNeedsUser, BrowserActionPlan, BrowserTabTarget, ChatMessage, InspectedElement, PageSkillSummary, RecordedBrowserAction, RecordedPageScreenshot, SkillCatalogItem, SkillExportBundle } from "@auto-page-agent/shared";
+import { Bot, Camera, Check, ChevronDown, CircleStop, Code2, Copy, Download, Globe2, History, Image, MessageSquare, MousePointer2, Play, Plus, RefreshCw, Send, Sparkles, Trash2, Upload, WandSparkles, WifiOff, X } from "lucide-react";
+import type { AgentEvent, AgentNeedsUser, BrowserActionPlan, BrowserTabTarget, ChatMessage, ConversationLogSummary, InspectedElement, PageSkillSummary, RecordedBrowserAction, RecordedPageScreenshot, SkillCatalogItem, SkillExportBundle } from "@auto-page-agent/shared";
 import { defaultChoice } from "./conversation.js";
 import { eventLabel, hostname } from "./formatters.js";
 import { orderTabsForPicker } from "./tab-picker.js";
 
 export type SkillView = "page" | "installed" | "marketplace";
+
+export function HistoryModal(props: {
+  logs: ConversationLogSummary[];
+  currentConversationId: string;
+  onClose: () => void;
+  onChoose: (log: ConversationLogSummary) => void;
+  onDelete: (conversationId: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <ModalShell title={t("history.title")} subtitle={t("history.subtitle")} onClose={props.onClose}>
+      <div className="space-y-2">
+        {props.logs.length ? props.logs.map((log) => {
+          const current = log.conversationId === props.currentConversationId;
+          return (
+            <article key={log.conversationId} className={`group flex items-center gap-2 rounded-2xl border bg-white p-2 ${current ? "border-violet-300 ring-1 ring-violet-100" : "border-slate-200"}`}>
+              <button type="button" onClick={() => props.onChoose(log)} className="flex min-w-0 flex-1 items-start gap-2.5 rounded-xl p-1.5 text-left hover:bg-slate-50">
+                <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl ${current ? "bg-violet-50 text-violet-600" : "bg-slate-100 text-slate-500"}`}>
+                  <MessageSquare size={15} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <strong className="block truncate text-xs">{log.title}</strong>
+                  <span className="mt-1 flex items-center gap-1 truncate text-[9px] text-slate-400">
+                    <Globe2 size={10} className="shrink-0" />
+                    <span className="truncate">{hostname(log.target.url) || t("history.pageUnavailable")}</span>
+                    <span>·</span>
+                    <span className="shrink-0">{formatHistoryTime(log.updatedAt)}</span>
+                  </span>
+                  <span className="mt-1 block text-[9px] text-slate-400">
+                    {t("history.counts", { messages: log.messageCount, events: log.eventCount })}
+                    {current ? ` · ${t("history.current")}` : ""}
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => props.onDelete(log.conversationId)}
+                title={t("action.deleteHistory")}
+                aria-label={t("action.deleteHistory")}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"
+              >
+                <X size={14} />
+              </button>
+            </article>
+          );
+        }) : (
+          <div className="flex flex-col items-center rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center text-slate-400">
+            <History size={20} />
+            <p className="mt-2 text-xs">{t("history.empty")}</p>
+          </div>
+        )}
+      </div>
+    </ModalShell>
+  );
+}
+
+function formatHistoryTime(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export function ConnectionGate({ title, message, checking, onReconnect }: {
   title: string;

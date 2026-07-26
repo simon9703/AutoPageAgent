@@ -1,5 +1,4 @@
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AutomationSkillDraft, ConfiguredAutomationSkill, EditableAutomationSkill, SavedAutomationSkill, SkillCatalogItem, SkillExportBundle } from "@auto-page-agent/shared";
@@ -7,6 +6,7 @@ import type { LoadedSkill, LoadedWorkflow } from "./skills/model.js";
 import { getPagePatterns, normalizePagePatterns, safeParseHttpUrl } from "./skills/page-patterns.js";
 import { isEditableStep, parameterizeWorkflow, renderSkillMarkdown } from "./skills/workflow.js";
 import { bumpPatchVersion, cleanSingleLine, compareVersions, normalizeCategory, normalizeVersion, pathExists, toSkillSlug, validateSkillSlug } from "./skills/utils.js";
+import { getDataSubdirectory } from "./data-paths.js";
 
 export type { LoadedSkill } from "./skills/model.js";
 export { renderSkillMarkdown } from "./skills/workflow.js";
@@ -15,9 +15,7 @@ export { listSkillsForPage, selectSkillContext, selectSkills, skillMatchesPage }
 const REGISTRY_SCHEMA_VERSION = 1;
 
 export function getSkillStoragePath(): string {
-  const testRoot = process.env.NODE_TEST_CONTEXT ? join(tmpdir(), "auto-page-agent-tests", String(process.pid)) : "";
-  const dataRoot = process.env.AUTO_PAGE_AGENT_DATA_DIR || testRoot || join(homedir(), ".auto-page-agent");
-  return resolve(dataRoot, "skills");
+  return getDataSubdirectory("skills");
 }
 
 function getMarketplaceRoot(): string {

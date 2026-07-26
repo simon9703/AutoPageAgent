@@ -1,6 +1,8 @@
 export const zhCN = {
   action: {
     new: "新建",
+    history: "历史记录",
+    deleteHistory: "删除历史记录",
     reconnect: "重新连接",
     connecting: "连接中…",
     selectElement: "选择元素",
@@ -79,6 +81,15 @@ export const zhCN = {
     complete: "完成",
     error: "错误",
   },
+  history: {
+    title: "历史记录",
+    subtitle: "切换或删除本地保存的对话与操作记录",
+    empty: "还没有历史记录。",
+    untitled: "新对话",
+    current: "当前",
+    pageUnavailable: "页面不可用",
+    counts: "{{messages}} 条对话 · {{events}} 条操作",
+  },
   browserAction: {
     click: "点击",
     fill: "填写",
@@ -149,6 +160,10 @@ export const zhCN = {
     codexLoginRequired: "请登录 Codex，然后重新连接。",
     connectedProvider: "已连接到 {{provider}}。",
     newConversation: "已新建对话，并绑定当前查看的页面。",
+    historyLoaded: "已切换到历史对话。",
+    historyPageUnavailable: "历史对话已恢复，但原页面已关闭。请打开原页面，或新建对话绑定当前页面。",
+    historyLoadFailed: "无法读取这条历史记录。",
+    historyDeleteFailed: "无法删除这条历史记录。",
     chooseTarget: "请先选择目标页面。",
     selectForCapture: "点击页面中的任意可见元素进行截图 · 按 Esc 取消",
     selectElement: "点击页面中的任意元素 · 按 Esc 取消",

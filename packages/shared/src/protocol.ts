@@ -2,6 +2,7 @@ import type { AgentDecision, AgentLoopContext, AgentRuntimeStatus, CodexRuntimeS
 import type { AgentEvent } from "./agent-events.js";
 import type { ApiRequestSnapshot, InspectedElement, PageSnapshot } from "./browser.js";
 import type { ChatMessage } from "./chat.js";
+import type { ConversationLog, ConversationLogSummary } from "./logs.js";
 import type { RepositoryAnalysis } from "./repositories.js";
 import type {
   AutomationSkillDraft,
@@ -21,6 +22,10 @@ export type ClientMessage =
   | { id: string; type: "agent.reset"; conversationId: string }
   | { id: string; type: "agent.cancel"; requestId: string; conversationId: string }
   | { id: string; type: "agent.run"; task: string; snapshot: PageSnapshot; conversationId: string; history: ChatMessage[]; loop?: AgentLoopContext; selectedSkillSlug?: string }
+  | { id: string; type: "log.list" }
+  | { id: string; type: "log.get"; conversationId: string }
+  | { id: string; type: "log.save"; log: ConversationLog }
+  | { id: string; type: "log.delete"; conversationId: string }
   | { id: string; type: "repository.analyze"; pageUrl: string; element: InspectedElement; apiRequests: ApiRequestSnapshot[] }
   | { id: string; type: "skill.list"; pageUrl: string; pageTitle: string }
   | { id: string; type: "skill.catalog" }
@@ -39,6 +44,10 @@ export type ServerMessage =
   | { id: string; type: "agent.cancel.result"; requestId: string; cancelled: boolean }
   | { id: string; type: "agent.event"; event: AgentEvent }
   | { id: string; type: "agent.result"; decision: AgentDecision; provider: string; conversationId: string; selectedSkills: Omit<SkillSelection, "body">[] }
+  | { id: string; type: "log.list.result"; logs: ConversationLogSummary[]; storagePath: string }
+  | { id: string; type: "log.detail"; log: ConversationLog }
+  | { id: string; type: "log.saved"; summary: ConversationLogSummary }
+  | { id: string; type: "log.deleted"; conversationId: string }
   | { id: string; type: "repository.result"; analysis: RepositoryAnalysis }
   | { id: string; type: "skill.list.result"; pageUrl: string; skills: PageSkillSummary[] }
   | { id: string; type: "skill.catalog.result"; installed: SkillCatalogItem[]; marketplace: SkillCatalogItem[]; storagePath: string }

@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Camera, CircleStop, Image, LoaderCircle, MousePointer2, Play, Plus,
+  Camera, CircleStop, History, Image, LoaderCircle, MousePointer2, Play, Plus,
   Send, Sparkles, X,
 } from "lucide-react";
 import type {
   AgentEvent, AgentNeedsUser, AutomationSkillDraft, BrowserActionPlan, BrowserTabTarget, ChatMessage,
-  EditableAutomationSkill, InspectedElement, PageSkillSummary,
+  ConversationLog, ConversationLogSummary, ConversationLogTarget, EditableAutomationSkill, InspectedElement, PageSkillSummary,
   RecordedBrowserAction, RecordedPageScreenshot, RepositoryAnalysis, ServerMessage, SkillCatalogItem, SkillExportBundle,
 } from "@auto-page-agent/shared";
 import { defaultSkillName, formatRepositoryAnalysis } from "./formatters.js";
-import { ApprovalCard, ChoiceCard, ComposerToolButton, ConnectionGate, ContextCard, EmptyState, Message, RecordingModal, ScreenshotCard, SkillsModal, TargetTabHeader, Timeline, type SkillView } from "./components.js";
+import { ApprovalCard, ChoiceCard, ComposerToolButton, ConnectionGate, ContextCard, EmptyState, HistoryModal, Message, RecordingModal, ScreenshotCard, SkillsModal, TargetTabHeader, Timeline, type SkillView } from "./components.js";
 import { Button } from "../components/ui/button.js";
 import {
   completedConversationMessage,
   composeAgentTask,
+  createConversationLog,
   conversationStorageKey,
   legacyConversationSession,
   LEGACY_CONVERSATION_STORAGE_KEYS,
@@ -23,7 +24,7 @@ import {
   toAgentHistory,
 } from "./conversation.js";
 
-type Modal = "skills" | "recording" | null;
+type Modal = "history" | "skills" | "recording" | null;
 type ConversationScope = { conversationId: string; targetTabId: number; windowId: number };
 type ConnectionState =
   | { phase: "checking"; title: string; message: string }
@@ -34,6 +35,7 @@ export function SidePanelController() {
   const { t } = useTranslation();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [historyLogs, setHistoryLogs] = useState<ConversationLogSummary[]>([]);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(() => t("notice.ready"));
@@ -72,8 +74,12 @@ export function SidePanelController() {
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
+  const eventsRef = useRef<AgentEvent[]>([]);
   const targetTabRef = useRef<BrowserTabTarget | null>(null);
+  const conversationTargetRef = useRef<ConversationLogTarget>({ title: "", url: "" });
   const conversationIdRef = useRef<string>(crypto.randomUUID());
+  const conversationCreatedAtRef = useRef(new Date().toISOString());
+  const conversationRevisionRef = useRef(0);
   const windowIdRef = useRef<number | null>(null);
   const busyRef = useRef(false);
   const stopRequestedRef = useRef(false);
@@ -150,27 +156,40 @@ export function SidePanelController() {
     const availableTabs = tabState.tabs ?? [];
     const session = normalizeConversationSession(stored[storageKey]) ?? legacyConversationSession(stored);
     const storedMessages = session?.messages ?? [];
+    const storedEvents = session?.events ?? [];
     const initialTarget = session
       ? availableTabs.find((tab) => tab.tabId === session.targetTabId) ?? null
       : availableTabs.find((tab) => tab.tabId === tabState.activeTabId) ?? null;
     const initialConversationId = session?.conversationId ?? crypto.randomUUID();
     conversationIdRef.current = initialConversationId;
+    conversationCreatedAtRef.current = session?.createdAt ?? new Date().toISOString();
+    conversationRevisionRef.current = session?.revision ?? 0;
     pendingUserTaskRef.current = session?.pendingTask ?? null;
     pendingChoiceRef.current = session?.pendingChoice ?? null;
     selectedSkillRef.current = session?.selectedSkill ?? null;
     setMessages(storedMessages);
     messagesRef.current = storedMessages;
+    setEvents(storedEvents);
+    eventsRef.current = storedEvents;
     setPendingChoice(session?.pendingChoice ?? null);
     setSelectedSkill(session?.selectedSkill ?? null);
     setTabs(availableTabs);
     setActiveTabId(tabState.activeTabId ?? null);
+    if (connected && session) {
+      const logResponse = await chrome.runtime.sendMessage({
+        type: "ui.logs.get",
+        conversationId: initialConversationId,
+      }).catch(() => undefined) as ServerMessage | undefined;
+      if (logResponse?.type === "log.detail") conversationTargetRef.current = logResponse.log.target;
+    }
     setTargetTabValue(initialTarget);
-    await persistConversation(initialConversationId, storedMessages, initialTarget?.tabId);
+    await persistConversation(initialConversationId, storedMessages, initialTarget?.tabId, storedEvents);
     if (!stored[storageKey]) await chrome.storage.session.remove([...LEGACY_CONVERSATION_STORAGE_KEYS]);
     await Promise.all([
       initialTarget ? restoreSelection(initialTarget.tabId) : Promise.resolve(),
       restoreRecording(),
       connected ? refreshSkills(initialTarget?.tabId) : Promise.resolve(),
+      connected ? refreshLogs() : Promise.resolve(),
     ]);
     if (!initialTarget) {
       setNotice(session
@@ -215,23 +234,69 @@ export function SidePanelController() {
     }
     setConnection({ phase: "ready", title: t("connection.connectedTitle"), message: t("connection.ready"), provider: response.provider });
     setNotice(t("notice.connectedProvider", { provider: response.provider }));
-    if (reconnect) await refreshSkills(targetTabRef.current?.tabId);
+    if (reconnect) {
+      await Promise.all([
+        refreshSkills(targetTabRef.current?.tabId),
+        persistConversation(conversationIdRef.current, messagesRef.current),
+        refreshLogs(),
+      ]);
+    }
     return true;
   }
 
-  async function persistConversation(id: string, next: ChatMessage[], targetTabId = targetTabRef.current?.tabId) {
+  async function persistConversation(
+    id: string,
+    next: ChatMessage[],
+    targetTabId = targetTabRef.current?.tabId,
+    nextEvents = eventsRef.current,
+  ) {
     const windowId = windowIdRef.current;
     if (typeof windowId !== "number") return;
+    const revision = ++conversationRevisionRef.current;
+    const target = targetTabRef.current?.tabId === targetTabId
+      ? targetTabRef.current
+      : tabs.find((tab) => tab.tabId === targetTabId) ?? null;
+    if (target) {
+      conversationTargetRef.current = {
+        tabId: target.tabId,
+        title: target.title,
+        url: target.url,
+      };
+    }
     await chrome.storage.session.set({
       [conversationStorageKey(windowId)]: {
         conversationId: id,
         messages: next.slice(-40),
+        events: nextEvents.slice(-80),
+        createdAt: conversationCreatedAtRef.current,
+        revision,
         ...(typeof targetTabId === "number" ? { targetTabId } : {}),
         ...(pendingUserTaskRef.current ? { pendingTask: pendingUserTaskRef.current } : {}),
         ...(pendingChoiceRef.current ? { pendingChoice: pendingChoiceRef.current } : {}),
         ...(selectedSkillRef.current ? { selectedSkill: selectedSkillRef.current } : {}),
       },
     });
+    if (!next.length && !nextEvents.length) return;
+    const log = createConversationLog({
+      conversationId: id,
+      messages: next,
+      events: nextEvents,
+      createdAt: conversationCreatedAtRef.current,
+      revision,
+      windowId,
+      target: target ?? conversationTargetRef.current,
+      pendingTask: pendingUserTaskRef.current,
+      pendingChoice: pendingChoiceRef.current,
+      selectedSkill: selectedSkillRef.current,
+      fallbackTitle: t("history.untitled"),
+    });
+    const response = await chrome.runtime.sendMessage({ type: "ui.logs.save", log }).catch(() => undefined) as ServerMessage | undefined;
+    if (response?.type === "log.saved") {
+      setHistoryLogs((current) => [
+        response.summary,
+        ...current.filter((item) => item.conversationId !== response.summary.conversationId),
+      ].slice(0, 100));
+    }
   }
 
   function appendMessage(role: ChatMessage["role"], content: string, attachments?: ChatMessage["attachments"]) {
@@ -245,7 +310,10 @@ export function SidePanelController() {
 
   function appendEvent(event: AgentEvent) {
     setEvents((current) => {
-      return [...current, event].slice(-80);
+      const next = [...current, event].slice(-80);
+      eventsRef.current = next;
+      void persistConversation(conversationIdRef.current, messagesRef.current, targetTabRef.current?.tabId, next);
+      return next;
     });
   }
 
@@ -294,6 +362,11 @@ export function SidePanelController() {
     if (catalogResponse?.type === "skill.catalog.result") setCatalog({ installed: catalogResponse.installed, marketplace: catalogResponse.marketplace });
   }
 
+  async function refreshLogs() {
+    const response = await chrome.runtime.sendMessage({ type: "ui.logs.list" }) as ServerMessage;
+    if (response.type === "log.list.result") setHistoryLogs(response.logs);
+  }
+
   async function refreshTabs() {
     const windowId = windowIdRef.current;
     if (typeof windowId !== "number") return;
@@ -318,6 +391,13 @@ export function SidePanelController() {
 
   function setTargetTabValue(tab: BrowserTabTarget | null) {
     targetTabRef.current = tab;
+    if (tab) {
+      conversationTargetRef.current = {
+        tabId: tab.tabId,
+        title: tab.title,
+        url: tab.url,
+      };
+    }
     setTargetTab(tab);
   }
 
@@ -331,7 +411,13 @@ export function SidePanelController() {
     const oldTargetTabId = targetTabRef.current?.tabId;
     const nextId = crypto.randomUUID();
     conversationIdRef.current = nextId;
+    conversationCreatedAtRef.current = new Date().toISOString();
+    conversationRevisionRef.current = 0;
+    conversationTargetRef.current = activeTarget
+      ? { tabId: activeTarget.tabId, title: activeTarget.title, url: activeTarget.url }
+      : { title: "", url: "" };
     messagesRef.current = [];
+    eventsRef.current = [];
     setMessages([]);
     setEvents([]);
     setPendingPlan(null);
@@ -358,6 +444,75 @@ export function SidePanelController() {
     await persistConversation(nextId, [], activeTarget?.tabId);
     if (activeTarget) await Promise.all([restoreSelection(activeTarget.tabId), refreshSkills(activeTarget.tabId)]);
     inputRef.current?.focus();
+  }
+
+  async function openHistory() {
+    if (connection.phase === "ready") await refreshLogs().catch(() => undefined);
+    setModal("history");
+  }
+
+  async function switchHistory(summary: ConversationLogSummary) {
+    if (busyRef.current || summary.conversationId === conversationIdRef.current) {
+      setModal(null);
+      return;
+    }
+    await persistConversation(conversationIdRef.current, messagesRef.current);
+    const response = await chrome.runtime.sendMessage({
+      type: "ui.logs.get",
+      conversationId: summary.conversationId,
+    }) as ServerMessage;
+    if (response.type !== "log.detail") {
+      setNotice(response.type === "agent.error" ? response.error : t("notice.historyLoadFailed"));
+      return;
+    }
+    restoreConversationLog(response.log);
+    setModal(null);
+  }
+
+  function restoreConversationLog(log: ConversationLog) {
+    const restoredTarget = typeof log.target.tabId === "number"
+      ? tabs.find((tab) => tab.tabId === log.target.tabId) ?? null
+      : null;
+    conversationIdRef.current = log.conversationId;
+    conversationCreatedAtRef.current = log.createdAt;
+    conversationRevisionRef.current = log.revision;
+    messagesRef.current = log.messages;
+    eventsRef.current = log.events;
+    pendingUserTaskRef.current = log.pendingTask ?? null;
+    pendingChoiceRef.current = log.pendingChoice ?? null;
+    selectedSkillRef.current = log.selectedSkill ?? null;
+    conversationTargetRef.current = log.target;
+    setMessages(log.messages);
+    setEvents(log.events);
+    setPendingPlan(null);
+    setPendingChoice(log.pendingChoice ?? null);
+    setSelectedSkill(log.selectedSkill ?? null);
+    setSelected(null);
+    setScreenshot(null);
+    setPrompt("");
+    activeTaskRef.current = "";
+    setTargetTabValue(restoredTarget);
+    setNotice(restoredTarget ? t("notice.historyLoaded") : t("notice.historyPageUnavailable"));
+    void persistConversation(log.conversationId, log.messages, restoredTarget?.tabId, log.events);
+    if (restoredTarget) {
+      void Promise.all([restoreSelection(restoredTarget.tabId), refreshSkills(restoredTarget.tabId)]);
+    }
+  }
+
+  async function deleteHistory(conversationId: string) {
+    const response = await chrome.runtime.sendMessage({
+      type: "ui.logs.delete",
+      conversationId,
+    }) as ServerMessage;
+    if (response.type !== "log.deleted") {
+      setNotice(response.type === "agent.error" ? response.error : t("notice.historyDeleteFailed"));
+      return;
+    }
+    setHistoryLogs((current) => current.filter((item) => item.conversationId !== conversationId));
+    if (conversationId === conversationIdRef.current) {
+      setModal(null);
+      await newConversation();
+    }
   }
 
   async function startSelection(mode: "element" | "image") {
@@ -748,10 +903,12 @@ export function SidePanelController() {
           onToggle={() => setTargetPickerOpen((current) => !current)}
           onChoose={(tab) => void activateTab(tab.tabId)}
         />
-        <div className="flex shrink-0 items-center">
-          <Button type="button" size="sm" className="min-w-[84px] shrink-0 flex-row gap-1.5 whitespace-nowrap px-4" disabled={busy} onClick={() => void newConversation()} aria-label={t("action.new")}>
-            <Plus size={14} className="shrink-0" aria-hidden="true" />
-            <span className="leading-none">{t("action.new")}</span>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button type="button" variant="ghost" size="icon" className="h-9 w-9" disabled={busy} onClick={() => void openHistory()} aria-label={t("action.history")} title={t("action.history")}>
+            <History size={16} aria-hidden="true" />
+          </Button>
+          <Button type="button" size="icon" className="h-9 w-9 shrink-0" disabled={busy} onClick={() => void newConversation()} aria-label={t("action.new")} title={t("action.new")}>
+            <Plus size={16} aria-hidden="true" />
           </Button>
         </div>
       </header>
@@ -801,6 +958,7 @@ export function SidePanelController() {
       </div>
 
       {modal === "skills" ? <SkillsModal view={skillView} setView={setSkillView} scope={skillScope} items={activeSkills} selectedSlug={selectedSkill?.slug ?? ""} onClose={() => setModal(null)} onRefresh={() => void refreshSkills()} onAdd={addSkill} onImport={(bundle) => void importSkill(bundle)} onUse={chooseSkill} onInstall={(slug, update) => void installSkill(slug, update)} onToggle={(slug, enabled) => void configureSkill(slug, enabled)} onEdit={(slug) => void editSkill(slug)} onDelete={(slug, name) => void deleteSkill(slug, name)} onExport={(slug) => void exportSkill(slug)} /> : null}
+      {modal === "history" ? <HistoryModal logs={historyLogs} currentConversationId={conversationIdRef.current} onClose={() => setModal(null)} onChoose={(log) => void switchHistory(log)} onDelete={(conversationId) => void deleteHistory(conversationId)} /> : null}
       {modal === "recording" ? <RecordingModal active={recording} actions={recordedActions} screenshots={recordedScreenshots} name={skillName} description={skillDescription} instructions={skillInstructions} editing={Boolean(editingSkillSlug)} onName={setSkillName} onDescription={setSkillDescription} onInstructions={setSkillInstructions} onClose={() => setModal(null)} onToggle={() => void toggleRecording()} onCapture={() => void captureRecordingScreenshot()} onReplay={() => void replayRecording()} onSave={() => void saveSkill()} /> : null}
     </main>
   );

@@ -39,6 +39,8 @@ A lightweight Chrome side-panel agent that understands a conversation-bound targ
 - Start a genuinely fresh provider conversation with **New**, clearing chat, pending actions, selected page context, Codex thread mapping, and Responses chaining state.
 - Keep **New** unavailable until an active run has stopped, and ignore late results or events from a stopped or different conversation.
 - Keep one current conversation per browser window, with messages and pending follow-up state isolated by window.
+- Persist completed and in-progress conversations with their compact Agent operation timeline under `~/.auto-page-agent/logs`.
+- Open the History list beside **New** to switch conversations or delete one with its `×` action.
 
 ## Architecture
 
@@ -78,7 +80,7 @@ Then:
 
 If the bridge is missing or Codex is not signed in, the side panel shows a **Reconnect** action and keeps message sending disabled. Run `codex login` when prompted, complete the ChatGPT login, then click **Reconnect**.
 
-A new conversation binds to the HTTP(S) tab that is active in that browser window when it is created. Switching browser tabs does not move or stop the agent, and navigation inside the bound tab remains part of the same conversation. The target cannot be rebound in place: click **New** to start over on the currently viewed tab. If the bound tab closes, the agent stops and asks you to click **New**.
+A new conversation binds to the HTTP(S) tab that is active in that browser window when it is created. Switching browser tabs does not move or stop the agent, and navigation inside the bound tab remains part of the same conversation. The target cannot be rebound in place: click **New** to start over on the currently viewed tab. The adjacent History action restores saved messages and operations while keeping the original target binding; it never silently binds a historical conversation to the currently viewed tab. If the original tab has closed, the history remains readable but page actions require a new conversation.
 
 Optional environment variables:
 
@@ -118,6 +120,8 @@ Run `npm run bridge` again after changing this configuration, click **Reconnect*
 4. Name the workflow, edit its reusable instructions, and click **Save Skill**, or load an existing recorded Skill and choose **Update Skill**.
 
 The bridge stores user Skills in `~/.auto-page-agent/skills/<name>/` by default. On the first V3 run it migrates existing repository Skills into that durable directory; later extension and repository upgrades do not replace them. Non-sensitive typed values are retained only in Chrome session storage for the immediate test replay; saved workflows replace them with `{{runtime_variables}}`. Password, token, OTP, payment, credential, and file fields never persist their values and stop automated replay for manual input.
+
+Conversation history is stored beside Skills in `~/.auto-page-agent/logs/<conversation-id>.json`. Each bounded log contains compact messages, page metadata, pending continuation state, and real Action/Verify/Complete/Error events. Screenshot data URLs, ephemeral DOM refs, and recorded form values are not written to logs.
 
 Generated Skills are page-scoped by origin and recorded start-path prefix. The **Skills** modal provides **Current page**, **My Skills**, and **Skills Marketplace** views. Its header creates or imports Skills; each installed Skill can be selected, downloaded, edited, enabled/disabled, or deleted. **Debug** asks the agent to explain and verify each Skill step. Neither selection nor debug bypasses the normal plan and confirmation flow.
 

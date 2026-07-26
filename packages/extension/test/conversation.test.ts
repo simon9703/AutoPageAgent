@@ -4,6 +4,7 @@ import type { ChatMessage, InspectedElement } from "@auto-page-agent/shared";
 import {
   completedConversationMessage,
   composeAgentTask,
+  createConversationLog,
   conversationStorageKey,
   defaultChoice,
   legacyConversationSession,
@@ -22,6 +23,9 @@ test("conversation sessions retain one bound tab, pending task, and confirmable 
   assert.deepEqual(normalizeConversationSession({
     conversationId: "conversation-1",
     messages: [],
+    events: [],
+    createdAt: "2026-07-26T08:00:00.000Z",
+    revision: 7,
     targetTabId: 17,
     pendingTask: "Choose an account",
     pendingChoice: {
@@ -34,6 +38,9 @@ test("conversation sessions retain one bound tab, pending task, and confirmable 
   }), {
     conversationId: "conversation-1",
     messages: [],
+    events: [],
+    createdAt: "2026-07-26T08:00:00.000Z",
+    revision: 7,
     targetTabId: 17,
     pendingTask: "Choose an account",
     pendingChoice: {
@@ -62,17 +69,47 @@ test("choice confirmation defaults to the recommendation or first option", () =>
 });
 
 test("legacy global conversation state migrates into a window session", () => {
-  assert.deepEqual(legacyConversationSession({
+  const session = legacyConversationSession({
     conversationId: "conversation-old",
     chatMessages: [],
     conversationTargetTabId: 8,
     pendingConversationTask: "Continue",
-  }), {
-    conversationId: "conversation-old",
-    messages: [],
-    targetTabId: 8,
-    pendingTask: "Continue",
   });
+  assert.equal(session?.conversationId, "conversation-old");
+  assert.deepEqual(session?.messages, []);
+  assert.deepEqual(session?.events, []);
+  assert.equal(session?.revision, 0);
+  assert.equal(session?.targetTabId, 8);
+  assert.equal(session?.pendingTask, "Continue");
+  assert.ok(Number.isFinite(Date.parse(session?.createdAt ?? "")));
+});
+
+test("durable logs contain compact conversation and operation history", () => {
+  const log = createConversationLog({
+    conversationId: "conversation-old",
+    messages: [{
+      id: "message-1",
+      role: "user",
+      content: "Analyze this page",
+      createdAt: "2026-07-26T08:00:00.000Z",
+    }],
+    events: [{
+      id: "event-1",
+      type: "verify",
+      success: true,
+      summary: "Page changed",
+      timestamp: "2026-07-26T08:01:00.000Z",
+    }],
+    createdAt: "2026-07-26T08:00:00.000Z",
+    revision: 2,
+    windowId: 3,
+    target: { tabId: 8, windowId: 3, title: "Example", url: "https://example.com" },
+    fallbackTitle: "New conversation",
+  });
+  assert.equal(log.title, "Analyze this page");
+  assert.equal(log.target.tabId, 8);
+  assert.equal(log.messages.length, 1);
+  assert.equal(log.events.length, 1);
 });
 
 test("a user reply resumes the task that requested more information", () => {

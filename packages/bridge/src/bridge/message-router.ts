@@ -14,6 +14,13 @@ import {
   saveAutomationSkill,
 } from "../skills.js";
 import { summarizeSkill } from "../skills/summarize.js";
+import {
+  deleteConversationLog,
+  getConversationLog,
+  getLogStoragePath,
+  listConversationLogs,
+  saveConversationLog,
+} from "../logs.js";
 
 export type ServerMessageSink = (message: ServerMessage) => void;
 
@@ -104,6 +111,35 @@ export class BridgeMessageRouter {
       } finally {
         this.#activeRuns.delete(request.id);
       }
+    }
+    if (request.type === "log.list") {
+      return {
+        id: request.id,
+        type: "log.list.result",
+        logs: await listConversationLogs(),
+        storagePath: getLogStoragePath(),
+      };
+    }
+    if (request.type === "log.get") {
+      return {
+        id: request.id,
+        type: "log.detail",
+        log: await getConversationLog(request.conversationId),
+      };
+    }
+    if (request.type === "log.save") {
+      return {
+        id: request.id,
+        type: "log.saved",
+        summary: await saveConversationLog(request.log),
+      };
+    }
+    if (request.type === "log.delete") {
+      return {
+        id: request.id,
+        type: "log.deleted",
+        conversationId: await deleteConversationLog(request.conversationId),
+      };
     }
     if (request.type === "repository.analyze") {
       return { id: request.id, type: "repository.result", analysis: await this.repositoryProvider.analyze(request.element, request.apiRequests) };

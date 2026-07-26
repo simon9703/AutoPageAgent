@@ -64,6 +64,8 @@ A browser window owns one current conversation. Its session is stored under a wi
 - questions, Skills, repository analysis, recording, and DOM actions continue to use the conversation target;
 - the page summary activates the bound tab but never rebinds the conversation;
 - **New** discards the current conversation, creates a new id, and binds the currently viewed tab;
+- the adjacent History list restores saved chat and operation events, or deletes a log with `×`;
+- restored history reuses its original tab only when that tab still exists; it never silently rebinds to the active tab;
 - selection and screenshot commands activate the target because they depend on a visible page;
 - navigation inside the target tab remains in the same conversation;
 - closing the target stops an active run and requires **New**; it never falls back to another open tab;
@@ -97,6 +99,8 @@ packages/bridge/src/
 │   ├── prompt.ts               # model context construction
 │   ├── responses.ts            # Responses schema and SSE parsing
 │   └── decision.ts             # normalized, fail-closed decisions
+├── data-paths.ts               # shared durable user-data root
+├── logs.ts                     # conversation and operation history persistence
 ├── skills.ts                   # Registry/Marketplace persistence API
 └── skills/
     ├── model.ts                # internal loaded models
@@ -107,6 +111,8 @@ packages/bridge/src/
 ```
 
 Shared contracts use the same domain split. `packages/shared/src/index.ts` is only a compatibility barrel; browser snapshots/actions, Agent decisions, chat, repository evidence, Skills, events, and transport messages live in separate files. This keeps protocol dependencies explicit while preserving existing `@auto-page-agent/shared` imports.
+
+The bridge keeps user data outside the extension package. Skills live under `~/.auto-page-agent/skills`; bounded conversation logs live under the sibling `~/.auto-page-agent/logs` directory. Log writes carry a monotonic conversation revision so an older async write cannot replace newer messages or events. Persisted operation events omit ephemeral DOM refs, and screenshot binaries remain session-only.
 
 The native-host manifest allowlists the stable extension id derived from `manifest.json`. The installer copies built bridge/shared assets and bundled Skills into the user's application-support directory; no TCP port or separately started dev process is involved. The side panel checks both bridge reachability and `account/read` during initialization. It exposes **Reconnect** and disables sending until local Codex is available and authenticated.
 
