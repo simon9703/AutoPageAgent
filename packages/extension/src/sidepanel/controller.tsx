@@ -637,10 +637,10 @@ export function SidePanelController() {
           onToggle={() => setTargetPickerOpen((current) => !current)}
           onChoose={(tab) => void activateTab(tab.tabId)}
         />
-        <div className="flex items-center gap-1.5">
-          <Button size="sm" className="min-w-[72px] shrink-0 whitespace-nowrap px-3.5" disabled={busy} onClick={() => void newConversation()} aria-label={t("action.new")}>
-            <Plus size={14} />
-            {t("action.new")}
+        <div className="flex shrink-0 items-center">
+          <Button type="button" size="sm" className="min-w-[84px] shrink-0 flex-row gap-1.5 whitespace-nowrap px-4" disabled={busy} onClick={() => void newConversation()} aria-label={t("action.new")}>
+            <Plus size={14} className="shrink-0" aria-hidden="true" />
+            <span className="leading-none">{t("action.new")}</span>
           </Button>
         </div>
       </header>
