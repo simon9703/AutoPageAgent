@@ -1,6 +1,7 @@
 import type { AgentDecision, BrowserActionPlan, PageSnapshot } from "@auto-page-agent/shared";
 
 const ACTIONS = new Set(["click", "fill", "select", "scroll", "focus", "submit"]);
+const MAX_PLAN_STEPS = 8;
 
 export function normalizeDecision(value: unknown, snapshot: PageSnapshot): AgentDecision {
   const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
@@ -65,7 +66,15 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
   const validElements = new Map(snapshot.elements.filter((element) => !element.occluded).map((element) => [element.ref, element]));
   const validRefs = new Set(validElements.keys());
   const writableRefs = new Set(snapshot.elements.filter((element) => !element.disabled && !element.readonly && !element.sensitive && !element.occluded).map((element) => element.ref));
-  const steps = Array.isArray(raw.steps) ? raw.steps.flatMap((value) => {
+  const rawSteps = Array.isArray(raw.steps) ? raw.steps : [];
+  if (rawSteps.length > MAX_PLAN_STEPS) {
+    return {
+      kind: "blocked",
+      reason: `The action plan exceeds the ${MAX_PLAN_STEPS}-action task budget.`,
+      recoverable: true,
+    };
+  }
+  const steps = rawSteps.flatMap((value) => {
     const step = value && typeof value === "object" ? value as Record<string, unknown> : {};
     if (!ACTIONS.has(String(step.action))) return [];
     if (step.action !== "scroll" && !validRefs.has(String(step.targetRef))) return [];
@@ -76,14 +85,24 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
       : String(step.action) as BrowserActionPlan["steps"][number]["action"];
     return [{
       action,
-      ...(validRefs.has(String(step.targetRef)) ? { targetRef: String(step.targetRef) } : {}),
+      ...(validRefs.has(targetRef) ? {
+        targetRef,
+        targetFingerprint: validElements.get(targetRef)!.fingerprint,
+      } : {}),
       ...(typeof step.value === "string" ? { value: step.value.slice(0, 4_000) } : {}),
       ...(typeof step.amountPx === "number" ? { amountPx: Math.min(Math.max(step.amountPx, 0), 2_000) } : {}),
       reason: String(step.reason || "User-requested action.").slice(0, 240),
     }];
-  }).slice(0, 1) : [];
+  });
   if (!steps.length) {
     return { kind: "blocked", reason: "No safe action could be matched to the current page.", recoverable: true };
+  }
+  if (steps.length !== rawSteps.length) {
+    return {
+      kind: "blocked",
+      reason: "The action plan contained an invalid or stale step and was rejected without partial execution.",
+      recoverable: true,
+    };
   }
   return {
     kind: "action_plan",

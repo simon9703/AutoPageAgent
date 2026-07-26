@@ -45,8 +45,17 @@ test("agent loop replans with a fresh snapshot before continuing", async () => {
   assert.match(background, /outcome\.kind === "reobserve"\) \{\s*failures = 0;/u);
   assert.match(background, /snapshot: await reobservePage\(tabId\)/u);
   assert.match(background, /requestContinuation\(outcome\.snapshot, loop/u);
-  assert.match(background, /plan = decision;\s*continue;/u);
+  assert.match(background, /plan = decision;\s*pendingSteps = \[\.\.\.decision\.steps\];\s*continue;/u);
   assert.doesNotMatch(background, /The page navigated; the new page must be checked[\s\S]+failures \+= 1/u);
+});
+
+test("agent loop executes a verified queue locally and replans only at a branch or queue boundary", async () => {
+  const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
+
+  assert.match(background, /let pendingSteps = \[\.\.\.initialPlan\.steps\];/u);
+  assert.match(background, /const rebound = rebindQueuedStep\(pendingSteps\[0\]!, observedSnapshot\);/u);
+  assert.match(background, /plan = \{ \.\.\.plan, snapshotId: observedSnapshot\.snapshotId, steps: pendingSteps \};\s*continue;/u);
+  assert.match(background, /The next queued target could not be uniquely rebound/u);
 });
 
 test("completion evidence rejection gets one bounded recovery turn", async () => {

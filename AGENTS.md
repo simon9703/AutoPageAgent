@@ -72,7 +72,9 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 
 ## Agent-loop rules
 
-- Preserve the internal flow `Observe -> Plan -> confirm -> Act one step -> settle -> Observe -> Verify -> continue/stop`.
+- Preserve the internal flow `Observe -> multi-step Plan -> confirm once -> Act one step -> settle -> Observe -> Verify -> rebind the next queued target -> continue/replan/stop`.
+- Plan only actions whose targets exist in the current snapshot. The bridge must attach trusted target fingerprints after ref validation; providers never author fingerprints.
+- Execute a verified queue locally. Ask the provider again only when the queue ends, a target cannot be uniquely rebound, verification fails, navigation/context replacement occurs, or the page branches.
 - A continuation turn receives the fresh snapshot, snapshot diff, prior action result, failure count, and remaining budget.
 - Send the fresh snapshot only once per continuation request; do not duplicate it inside loop metadata.
 - Do not expose static Observe/Plan labels or partial provider JSON as progress. Emit only real action/verification updates, completion, and errors through the shared `AgentEvent` protocol.

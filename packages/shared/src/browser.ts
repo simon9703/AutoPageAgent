@@ -145,6 +145,12 @@ export interface PageSnapshotDiff {
 export interface BrowserActionStep {
   action: BrowserActionKind;
   targetRef?: string;
+  /**
+   * Trusted snapshot fingerprint attached by the bridge after validating
+   * targetRef. Providers do not author this field. The extension uses it to
+   * bind a queued step to the target's latest ephemeral ref.
+   */
+  targetFingerprint?: string;
   value?: string;
   direction?: "up" | "down" | "left" | "right" | "top" | "bottom";
   amountPx?: number;

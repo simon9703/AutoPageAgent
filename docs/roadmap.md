@@ -4,7 +4,7 @@ This document is the single checklist for shipped capabilities and future scope.
 Checked items are implemented in the current repository. Unchecked items are
 planned only and must not be described as available.
 
-## Current release — 0.10.3
+## Current release — 0.11.0
 
 ### Internal architecture
 
@@ -68,6 +68,10 @@ planned only and must not be described as available.
 - [x] Bound-page summary returns the user to the target tab without rebinding it
 - [x] Stop control with real cancellation/busy state
 - [x] Approval card for the initial action plan
+- [x] Multi-step planning with one approval and a background-owned pending queue
+- [x] Rebind queued targets to fresh refs through bridge-attached fingerprints
+- [x] Replan only at queue boundaries, verification failures, navigation, or ambiguous targets
+- [x] Use compact continuation prompts without repeating full Skill bodies
 - [x] Choice confirmation card that resumes the original task without requiring typed input
 - [x] Timeline containing real Action, Verify, Complete, and Error events only
 - [x] Keep plan summaries out of chat and internal step counts out of assistant replies

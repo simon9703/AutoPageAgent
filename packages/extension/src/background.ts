@@ -21,6 +21,7 @@ import {
   consumeReobserveStep,
   type ReobserveSignal,
 } from "./background/reobserve.js";
+import { rebindQueuedStep } from "./background/step-queue.js";
 import {
   activateTargetTab,
   getTargetTab,
@@ -490,6 +491,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
     let failures = 0;
     const completionRecovery = { attempts: 0 };
     let plan = initialPlan;
+    let pendingSteps = [...initialPlan.steps];
     if (initialTab.url !== pendingRun.pageUrl) {
       const signal: ReobserveSignal = {
         reason: "page_url_changed",
@@ -498,16 +500,23 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       };
       const snapshot = await reobservePage(pendingRun.tabId);
       const decision = await requestContinuation(snapshot, {
-        runId, iteration, maxSteps, timeoutMs, startedAt, reobserve: signal,
+        runId,
+        iteration,
+        maxSteps,
+        timeoutMs,
+        startedAt,
+        remainingPlan: summarizePendingSteps(pendingSteps),
+        reobserve: signal,
       }, pendingRun, run, completionRecovery);
       const terminal = terminalAgentResult(decision, iteration);
       if (terminal) return terminal;
       if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
       plan = decision;
+      pendingSteps = [...decision.steps];
     }
     while (iteration < maxSteps && Date.now() - startedAt < timeoutMs) {
       assertAgentRunActive(run);
-      const step = plan.steps[0];
+      const step = pendingSteps[0];
       if (!step) throw new Error("The agent returned an empty action plan.");
       emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: "running", step: iteration + 1, detail: step.reason }), pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId);
       const outcome = await executePlanResilient({ ...plan, steps: [step] }, pendingRun.tabId);
@@ -527,6 +536,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
         const loop: AgentLoopContext = {
           runId, iteration, maxSteps, timeoutMs, startedAt,
           lastAction: step,
+          remainingPlan: summarizePendingSteps(pendingSteps),
           reobserve: outcome.signal,
         };
         const decision = await requestContinuation(outcome.snapshot, loop, pendingRun, run, completionRecovery);
@@ -537,6 +547,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
           throw new Error(`The agent stopped at its ${iteration >= maxSteps ? "step" : "time"} budget.`);
         }
         plan = decision;
+        pendingSteps = [...decision.steps];
         continue;
       }
       let execution = outcome.execution;
@@ -549,17 +560,46 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       else failures = 0;
       iteration += 1;
       if (failures >= 2) throw new Error("The agent stopped after two consecutive verification failures.");
-      const loop: AgentLoopContext = {
+      const baseLoop: AgentLoopContext = {
         runId, iteration, maxSteps, timeoutMs, startedAt,
         lastAction: step,
         ...(verification ? { lastVerification: verification } : {}),
       };
-      const decision = await requestContinuation(observedSnapshot, loop, pendingRun, run, completionRecovery);
+      const verified = execution.ok && (verification?.success ?? true);
+      const pageBranched = verification?.diff.urlChanged === true;
+      pendingSteps = pendingSteps.slice(1);
+      baseLoop.remainingPlan = summarizePendingSteps(pendingSteps);
+      if (verified && !pageBranched && pendingSteps.length) {
+        const rebound = rebindQueuedStep(pendingSteps[0]!, observedSnapshot);
+        if (rebound) {
+          pendingSteps = [rebound, ...pendingSteps.slice(1)];
+          plan = { ...plan, snapshotId: observedSnapshot.snapshotId, steps: pendingSteps };
+          continue;
+        }
+      }
+      const reobserve = pageBranched
+        ? {
+            reason: "page_url_changed" as const,
+            summary: "The page navigated after the action, so the remaining queued targets were discarded.",
+            actionMayHaveExecuted: true,
+          }
+        : verified && pendingSteps.length
+          ? {
+              reason: "snapshot_expired" as const,
+              summary: "The next queued target could not be uniquely rebound in the latest snapshot.",
+              actionMayHaveExecuted: false,
+            }
+          : undefined;
+      const decision = await requestContinuation(observedSnapshot, {
+        ...baseLoop,
+        ...(reobserve ? { reobserve } : {}),
+      }, pendingRun, run, completionRecovery);
       const terminal = terminalAgentResult(decision, iteration);
       if (terminal) return terminal;
       if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
       if (iteration >= maxSteps || Date.now() - startedAt >= timeoutMs) throw new Error(`The agent stopped at its ${iteration >= maxSteps ? "step" : "time"} budget.`);
       plan = decision;
+      pendingSteps = [...decision.steps];
     }
     throw new Error("The agent stopped at its time budget.");
   } finally {
@@ -567,6 +607,10 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
     await sendPageMessage(pendingRun.tabId, { type: "page.agent.activity", active: false }).catch(() => undefined);
     await pendingAgentRuns.clearForSnapshot(initialPlan.snapshotId);
   }
+}
+
+function summarizePendingSteps(steps: BrowserActionPlan["steps"]): NonNullable<AgentLoopContext["remainingPlan"]> {
+  return steps.map(({ action, reason }) => ({ action, reason }));
 }
 
 async function requestContinuation(

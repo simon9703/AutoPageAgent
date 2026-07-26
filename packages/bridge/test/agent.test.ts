@@ -6,7 +6,22 @@ import { completionEvidenceMatchesSnapshot, createAgentPrompt, extractJson, extr
 const snapshot = {
   snapshotId: "snapshot-1", url: "https://example.com", title: "Example", language: "en", selectedText: "", headings: [], mainText: "", simplifiedDom: "[1]<button>Save</button>",
   pageInfo: { viewportWidth: 1000, viewportHeight: 800, pageWidth: 1000, pageHeight: 800, scrollX: 0, scrollY: 0, pixelsAbove: 0, pixelsBelow: 0 },
-  elements: [{ ref: "element-1", tagName: "button", role: "button", label: "Save", text: "Save", selector: "button", disabled: false, sensitive: false, contentEditable: false, viewportRect: { x: 0, y: 0, width: 10, height: 10 } }],
+  elements: [{
+    ref: "element-1",
+    tagName: "button",
+    role: "button",
+    label: "Save",
+    text: "Save",
+    selector: "button",
+    disabled: false,
+    sensitive: false,
+    contentEditable: false,
+    fingerprint: "save-button-1",
+    inViewport: true,
+    occluded: false,
+    readonly: false,
+    viewportRect: { x: 0, y: 0, width: 10, height: 10 },
+  }],
   performance: { resources: [], apiRequests: [], summary: { requestCount: 0, totalTransferSize: 0, slowRequestCount: 0 } },
 } satisfies PageSnapshot;
 
@@ -114,13 +129,38 @@ test("normalizeDecision binds the current snapshot and requires confirmation", (
   }
 });
 
-test("V2 planner accepts only one action before re-observation", () => {
+test("planner keeps all safe steps and attaches trusted target fingerprints", () => {
   const result = normalizeDecision({ kind: "action_plan", steps: [
     { action: "focus", targetRef: "element-1" },
     { action: "click", targetRef: "element-1" },
   ] }, snapshot);
   assert.equal(result.kind, "action_plan");
-  if (result.kind === "action_plan") assert.equal(result.steps.length, 1);
+  if (result.kind === "action_plan") {
+    assert.equal(result.steps.length, 2);
+    assert.deepEqual(result.steps.map((step) => step.targetFingerprint), [
+      "save-button-1",
+      "save-button-1",
+    ]);
+  }
+});
+
+test("planner rejects oversized or partially invalid plans instead of truncating them", () => {
+  const oversized = normalizeDecision({
+    kind: "action_plan",
+    steps: Array.from({ length: 9 }, () => ({ action: "click", targetRef: "element-1" })),
+  }, snapshot);
+  assert.equal(oversized.kind, "blocked");
+  if (oversized.kind === "blocked") assert.match(oversized.reason, /8-action task budget/u);
+
+  const partiallyInvalid = normalizeDecision({
+    kind: "action_plan",
+    steps: [
+      { action: "click", targetRef: "element-1" },
+      { action: "click", targetRef: "invented-ref" },
+    ],
+  }, snapshot);
+  assert.equal(partiallyInvalid.kind, "blocked");
+  if (partiallyInvalid.kind === "blocked") assert.match(partiallyInvalid.reason, /without partial execution/u);
 });
 
 test("submit on a button is normalized to a click", () => {
@@ -144,13 +184,15 @@ test("agent prompt authorizes the requested test flow while preserving runtime b
   assert.match(prompt, /Use click for buttons and button-like controls/u);
   assert.match(prompt, /Use submit only when targetRef is the native form element itself/u);
   assert.match(prompt, /final combobox value or selected label\/tag/u);
+  assert.match(prompt, /complete ordered action sequence/u);
+  assert.match(prompt, /one confirmation card/u);
   assert.match(prompt, /completionEvidenceFailure/u);
   assert.match(prompt, /never repeat unsupported completion evidence/u);
   assert.match(prompt, /"options":\["\.\.\."\]/u);
 });
 
 test("completion evidence recovery tells the agent to verify instead of repeating completion", () => {
-  const prompt = createAgentPrompt("Top up the test account", snapshot, [], [], {
+  const prompt = createAgentPrompt("Top up the test account", snapshot, ["FULL SKILL BODY"], [], {
     runId: "run-1",
     iteration: 3,
     maxSteps: 8,
@@ -165,6 +207,8 @@ test("completion evidence recovery tells the agent to verify instead of repeatin
   assert.match(prompt, /"completionEvidenceFailure":\{"reason":"Completion evidence was not found\."/u);
   assert.match(prompt, /"unmatchedEvidence":\["Top up succeeded"\]/u);
   assert.match(prompt, /take one safe action to find or reveal a verifiable result/u);
+  assert.match(prompt, /Continue the existing current-page browser task/u);
+  assert.doesNotMatch(prompt, /FULL SKILL BODY/u);
 });
 
 test("Responses SSE collects internal JSON without exposing protocol fragments as timeline events", async () => {

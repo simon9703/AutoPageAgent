@@ -67,6 +67,10 @@ export interface AgentLoopContext {
   startedAt: number;
   lastAction?: BrowserActionStep;
   lastVerification?: ActionVerification;
+  remainingPlan?: Array<{
+    action: BrowserActionStep["action"];
+    reason: string;
+  }>;
   reobserve?: {
     reason: "page_url_changed" | "snapshot_expired" | "page_context_invalidated";
     summary: string;
