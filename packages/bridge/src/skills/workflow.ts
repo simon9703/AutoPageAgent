@@ -18,6 +18,9 @@ export function renderSkillMarkdown(
     "",
     `# ${cleanSingleLine(draft.name, 80)}`,
     "",
+    ...(draft.instructions?.trim()
+      ? ["## Instructions", "", draft.instructions.trim().slice(0, 20_000), ""]
+      : []),
     "Use this Skill only when the active page matches the configured start URL. Inspect the page again if a selector is missing.",
     "",
     "## Safety",
@@ -64,16 +67,17 @@ export function parameterizeWorkflow(draft: AutomationSkillDraft) {
       pagePatterns: [defaultPagePattern(safeHttpUrl(draft.startUrl))],
       createdAt: draft.createdAt,
       requiresConfirmation: true,
+      ...(draft.instructions?.trim() ? { instructions: draft.instructions.trim().slice(0, 20_000) } : {}),
       steps,
     },
   };
 }
 
 function sanitizeRecordedStep(step: RecordedBrowserAction): RecordedBrowserAction {
-  if (!["click", "fill", "select", "scroll", "submit"].includes(step.action)) throw new Error("Recorded Skill contains an unsupported action.");
+  if (!["click", "fill", "select", "scroll", "submit", "navigate"].includes(step.action)) throw new Error("Recorded Skill contains an unsupported action.");
   const url = safeHttpUrl(step.url);
   const selector = step.selector ? cleanSingleLine(step.selector, 500) : undefined;
-  if (step.action !== "scroll" && !selector) throw new Error(`Recorded ${step.action} step is missing a selector.`);
+  if (!["scroll", "navigate"].includes(step.action) && !selector) throw new Error(`Recorded ${step.action} step is missing a selector.`);
   return {
     id: cleanSingleLine(step.id, 100) || crypto.randomUUID(),
     action: step.action,
@@ -83,9 +87,10 @@ function sanitizeRecordedStep(step: RecordedBrowserAction): RecordedBrowserActio
     sensitive: Boolean(step.sensitive),
     timestamp: Number.isFinite(step.timestamp) ? step.timestamp : Date.now(),
     ...(step.action === "scroll" ? { scrollX: finiteCoordinate(step.scrollX), scrollY: finiteCoordinate(step.scrollY) } : {}),
+    ...(typeof step.checked === "boolean" ? { checked: step.checked } : {}),
   };
 }
 
 export function isEditableStep(step: Partial<RecordedBrowserAction>): step is Partial<RecordedBrowserAction> & { action: RecordedActionKind } {
-  return typeof step.action === "string" && ["click", "fill", "select", "scroll", "submit"].includes(step.action);
+  return typeof step.action === "string" && ["click", "fill", "select", "scroll", "submit", "navigate"].includes(step.action);
 }

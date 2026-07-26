@@ -10,6 +10,7 @@ export interface PendingAgentRun {
   tabId: number;
   windowId: number;
   pageUrl: string;
+  selectedSkillSlug?: string;
 }
 
 export interface SessionStorageArea {
@@ -99,5 +100,6 @@ function parsePendingAgentRun(value: unknown): PendingAgentRun | null {
     windowId: candidate.windowId,
     pageUrl: candidate.pageUrl,
     history: candidate.history,
+    ...(typeof candidate.selectedSkillSlug === "string" ? { selectedSkillSlug: candidate.selectedSkillSlug } : {}),
   };
 }

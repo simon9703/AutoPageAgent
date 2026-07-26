@@ -16,6 +16,33 @@ export async function captureScreenshot(targetTabId: number) {
   return { ok: true, dataUrl, url: tab.url, title: tab.title, capturedAt: new Date().toISOString() };
 }
 
+export async function captureRecordingScreenshot(targetTabId: number) {
+  const tab = await getTargetTab(targetTabId);
+  const [activeTab] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  if (activeTab?.id !== tab.id) return undefined;
+  const viewportDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 52 });
+  const response = await fetch(viewportDataUrl);
+  const bitmap = await createImageBitmap(await response.blob());
+  try {
+    const scale = Math.min(1, 720 / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext("2d");
+    if (!context) return undefined;
+    context.drawImage(bitmap, 0, 0, width, height);
+    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.5 });
+    if (blob.size > 220_000) return undefined;
+    return {
+      dataUrl: await blobToDataUrl(blob),
+      url: tab.url ?? "",
+      title: tab.title ?? "",
+    };
+  } finally {
+    bitmap.close();
+  }
+}
+
 export async function captureSelectedElement(
   tab: chrome.tabs.Tab,
   geometry: ElementSelectionGeometry | undefined,

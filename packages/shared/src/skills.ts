@@ -1,4 +1,16 @@
-export type RecordedActionKind = "click" | "fill" | "select" | "scroll" | "submit";
+import type { ChatMessage } from "./chat.js";
+
+export type RecordedActionKind = "click" | "fill" | "select" | "scroll" | "submit" | "navigate" | "screenshot";
+
+export interface RecordedPageScreenshot {
+  id: string;
+  url: string;
+  title: string;
+  dataUrl: string;
+  timestamp: number;
+  reason: "start" | "action" | "navigation" | "manual";
+  actionId?: string;
+}
 
 export interface RecordedBrowserAction {
   id: string;
@@ -11,6 +23,7 @@ export interface RecordedBrowserAction {
   timestamp: number;
   scrollX?: number;
   scrollY?: number;
+  checked?: boolean;
 }
 
 export interface AutomationSkillDraft {
@@ -20,6 +33,7 @@ export interface AutomationSkillDraft {
   createdAt: string;
   requiresConfirmation: true;
   steps: RecordedBrowserAction[];
+  instructions?: string;
 }
 
 export type SkillCategory = "productivity" | "release" | "translation" | "page" | "custom";
@@ -50,13 +64,14 @@ export interface EditableAutomationSkill {
   enabled: boolean;
   pagePatterns: string[];
   steps: RecordedBrowserAction[];
+  instructions?: string;
 }
 
 export interface SavedAutomationSkill {
   name: string;
   slug: string;
   skillPath: string;
-  workflowPath: string;
+  workflowPath?: string;
   variableNames: string[];
   operation: "created" | "updated";
   version: string;
@@ -90,4 +105,34 @@ export interface SkillSelection {
   score: number;
   scope: "page" | "global";
   body: string;
+}
+
+export interface SkillExportBundle {
+  format: "auto-page-agent-skill";
+  schemaVersion: 1;
+  exportedAt: string;
+  skill: {
+    name: string;
+    description: string;
+    category: SkillCategory;
+    version: string;
+    instructions: string;
+    workflow?: Record<string, unknown>;
+  };
+}
+
+export interface SkillSummaryRequest {
+  pageUrl: string;
+  pageTitle: string;
+  messages: ChatMessage[];
+  actions: RecordedBrowserAction[];
+  operationNotes: string[];
+}
+
+export interface SkillSummaryResult {
+  name: string;
+  description: string;
+  instructions: string;
+  startUrl: string;
+  steps: RecordedBrowserAction[];
 }

@@ -6,6 +6,7 @@ export interface AgentRunContext {
   loop?: AgentLoopContext;
   signal?: AbortSignal;
   selectedSkills?: SkillSelection[];
+  selectedSkillSlug?: string;
 }
 
 export type AgentEventSink = (event: AgentEvent) => void;

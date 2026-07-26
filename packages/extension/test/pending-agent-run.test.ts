@@ -39,6 +39,7 @@ test("restores a planned task after the background worker restarts", async () =>
     tabId: 17,
     windowId: 3,
     pageUrl: "https://example.com/form",
+    selectedSkillSlug: "submit-form",
   });
 
   const restartedWorker = new PendingAgentRunStore(storage);
@@ -49,6 +50,7 @@ test("restores a planned task after the background worker restarts", async () =>
   assert.equal(restored.tabId, 17);
   assert.equal(restored.windowId, 3);
   assert.equal(restored.pageUrl, "https://example.com/form");
+  assert.equal(restored.selectedSkillSlug, "submit-form");
   assert.deepEqual(restored.history, history);
 });
 

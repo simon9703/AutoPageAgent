@@ -13,6 +13,7 @@ export interface ConversationSession {
   targetTabId?: number;
   pendingTask?: string;
   pendingChoice?: AgentNeedsUser;
+  selectedSkill?: { slug: string; name: string };
 }
 
 interface SelectedMessageContext {
@@ -44,6 +45,11 @@ export function normalizeConversationSession(value: unknown): ConversationSessio
       : {}),
     ...(normalizePendingChoice(candidate.pendingChoice)
       ? { pendingChoice: normalizePendingChoice(candidate.pendingChoice)! }
+      : {}),
+    ...(candidate.selectedSkill
+      && typeof candidate.selectedSkill.slug === "string"
+      && typeof candidate.selectedSkill.name === "string"
+      ? { selectedSkill: { slug: candidate.selectedSkill.slug, name: candidate.selectedSkill.name } }
       : {}),
   };
 }
