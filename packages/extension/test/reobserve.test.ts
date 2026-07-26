@@ -41,6 +41,7 @@ test("agent loop replans with a fresh snapshot before continuing", async () => {
   const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
 
   assert.match(background, /outcome\.kind === "reobserve"/u);
+  assert.match(background, /outcome\.kind === "reobserve"\) \{\s*failures = 0;/u);
   assert.match(background, /snapshot: await reobservePage\(tabId\)/u);
   assert.match(background, /requestContinuation\(outcome\.snapshot, loop/u);
   assert.match(background, /plan = decision;\s*continue;/u);

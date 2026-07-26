@@ -30,7 +30,7 @@ A lightweight Chrome side-panel agent that understands a conversation-bound targ
 - Track stable element fingerprints, occlusion, viewport, read-only, checked, expanded, and busy state.
 - Rank page Skills with explicit match reasons and keep their context active across loop iterations.
 - Browse Current page, My Skills, and Marketplace views in one local Skill Registry.
-- Install built-in daily-report, release, translation, and page-assistant templates.
+- Install only the built-in `analyze-page` template by default.
 - Debug a selected Skill through the same observable agent loop, then save a new Skill or explicitly update an existing version.
 - Explicitly select one Skill for a conversation, or add, import, download, and delete local Skills.
 - Summarize the current page conversation and observed operations into an editable Skill draft.
