@@ -79,7 +79,18 @@ export function hasVerifiedDismissal(
   if (targetBefore.role === "combobox") {
     if (targetBefore.expanded !== true) return false;
     const targetAfter = after.elements.find((element) => isSameSemanticControl(targetBefore, element));
-    return targetAfter?.expanded === false;
+    if (targetAfter?.expanded === false) return true;
+    const controlledPopupIds = new Set([
+      ...parseIdRefs(targetBefore.controls),
+      ...parseIdRefs(targetBefore.owns),
+    ]);
+    if (!controlledPopupIds.size) return false;
+    const controlledPopupWasVisible = before.elements.some((element) =>
+      (element.role === "listbox" || element.role === "menu")
+      && Boolean(element.domId && controlledPopupIds.has(element.domId)));
+    return controlledPopupWasVisible && !after.elements.some((element) =>
+      (element.role === "listbox" || element.role === "menu")
+      && Boolean(element.domId && controlledPopupIds.has(element.domId)));
   }
   if (targetBefore.role === "listbox" || targetBefore.role === "menu" || targetBefore.role === "dialog") {
     return !after.elements.some((element) => isSameSemanticControl(targetBefore, element));

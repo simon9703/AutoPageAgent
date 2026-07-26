@@ -243,6 +243,21 @@ test("dismiss verifies a combobox true-to-false transition", () => {
   assert.equal(hasVerifiedDismissal(before, before, "project-1"), false);
 });
 
+test("dismiss verifies disappearance of the combobox-controlled popup", () => {
+  const listbox = {
+    ...option,
+    ref: "listbox",
+    role: "listbox",
+    fingerprint: "project-list-1",
+    domId: "project-list",
+    ownerId: undefined,
+  };
+  const before = { ...snapshot, elements: [combobox(true), listbox] };
+  const after = { ...snapshot, elements: [combobox(true)] };
+  assert.equal(hasVerifiedDismissal(before, after, "project-1"), true);
+  assert.equal(hasVerifiedDismissal(before, before, "project-1"), false);
+});
+
 test("dismiss verifies popup removal while preserving the outer dialog", () => {
   const dialog = { ...option, ref: "dialog", role: "dialog", fingerprint: "dialog-1", domId: undefined, ownerId: undefined };
   const listbox = { ...option, ref: "listbox", role: "listbox", fingerprint: "project-list-1", domId: "project-list", ownerId: undefined };

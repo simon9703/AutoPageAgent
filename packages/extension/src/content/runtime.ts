@@ -12,6 +12,7 @@ import type {
 import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer } from "./agent-activity.js";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "./action-settle.js";
 import { hasObservableActionEffect, hasVerifiedDismissal, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
+import { blurComboboxAfterFailedDismiss, dispatchEscapeKey } from "./dismiss.js";
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
 import { buildSelector, buildSimplifiedDom, cleanText, collectPageInfo, createElementFingerprint, delay, getAccessibleLabel, getSelectedValues, inferRole, isAvailableOption, isComboboxLike, isDisabledElement, isHiddenInput, isNearViewport, isReadonlyElement, isSensitiveElement, isTopLayerElement, isVisible, round, setElementValue, shouldExposeValue, simulateClick } from "./dom.js";
@@ -236,12 +237,24 @@ async function executePlan(plan: BrowserActionPlan): Promise<ActionExecutionResu
   if (!step) throw new Error("The action plan is empty.");
   showAgentFrame();
   const targetFingerprint = step.targetRef ? before.elements.find((element) => element.ref === step.targetRef)?.fingerprint : undefined;
+  const targetElement = step.targetRef ? elementRefs.get(step.targetRef) : undefined;
+  const dismissRecipient = step.action === "dismiss" && targetElement instanceof HTMLElement
+    ? resolveDismissRecipient(targetElement)
+    : undefined;
   try {
     const results = [await executeStep(step)];
-    await waitForActionSettled(step, step.targetRef ? elementRefs.get(step.targetRef) : undefined);
+    await waitForActionSettled(step, targetElement);
     let after = createPageSnapshot();
     let diff = diffSnapshots(before, after);
     let verification = verifyAction(step, before, after, diff, targetFingerprint);
+    if (step.action === "dismiss"
+      && !verification.success
+      && blurComboboxAfterFailedDismiss(dismissRecipient)) {
+      await waitForActionSettled(step, dismissRecipient);
+      after = createPageSnapshot();
+      diff = diffSnapshots(before, after);
+      verification = verifyAction(step, before, after, diff, targetFingerprint);
+    }
     if (!verification.success) {
       const delayedObservation = await observeDelayedActionEffect(step, before, targetFingerprint);
       if (delayedObservation) {
@@ -486,17 +499,14 @@ function dismissElement(element: HTMLElement, allowFilledDialog: boolean): void 
     throw new Error("Dismiss only supports an expanded combobox, visible listbox/menu, or topmost dialog.");
   }
 
-  const recipient = role === "listbox" || role === "menu"
+  dispatchEscapeKey(resolveDismissRecipient(element));
+}
+
+function resolveDismissRecipient(element: HTMLElement): HTMLElement {
+  const role = element.getAttribute("role") || inferRole(element);
+  return role === "listbox" || role === "menu"
     ? findPopupOwner(element) ?? element
     : element;
-  const keyboardInit: KeyboardEventInit = {
-    key: "Escape",
-    code: "Escape",
-    bubbles: true,
-    cancelable: true,
-  };
-  recipient.dispatchEvent(new KeyboardEvent("keydown", keyboardInit));
-  recipient.dispatchEvent(new KeyboardEvent("keyup", keyboardInit));
 }
 
 function findPopupOwner(popup: HTMLElement): HTMLElement | undefined {
