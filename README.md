@@ -80,7 +80,7 @@ Then:
 
 If the bridge is missing or Codex is not signed in, the side panel shows a **Reconnect** action and keeps message sending disabled. Run `codex login` when prompted, complete the ChatGPT login, then click **Reconnect**.
 
-A new conversation binds to the HTTP(S) tab that is active in that browser window when it is created. Switching browser tabs does not move or stop the agent, and navigation inside the bound tab remains part of the same conversation. The target cannot be rebound in place: click **New** to start over on the currently viewed tab. The adjacent History action restores saved messages and operations while keeping the original target binding; it never silently binds a historical conversation to the currently viewed tab. If the original tab has closed, the history remains readable but page actions require a new conversation.
+When the side panel opens, an empty conversation follows the active HTTP(S) tab in that browser window. Sending the first message locks the conversation to that page; later tab switches do not move or stop the agent, while navigation inside the bound tab remains part of the same conversation. Click **New** to create another empty conversation, which follows the currently viewed tab until its first message. The adjacent History action restores saved messages and operations while keeping the original target binding; it never silently binds a historical conversation to the currently viewed tab. If the original tab has closed, the history remains readable but page actions require a new conversation.
 
 Optional environment variables:
 

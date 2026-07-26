@@ -434,8 +434,8 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   if (step.action === "focus") element.focus();
   if (step.action === "submit") {
     const form = element.closest("form");
-    if (!form) throw new Error("No form is associated with the submit target.");
-    form.requestSubmit();
+    if (form) form.requestSubmit();
+    else await simulateClick(element);
   }
   if (step.action === "fill") setElementValue(element, step.value ?? "");
   if (step.action === "select") {

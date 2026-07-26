@@ -49,15 +49,20 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
   if (raw.kind !== "action_plan") {
     return { kind: "blocked", reason: "The agent returned an unsupported decision.", recoverable: true };
   }
-  const validRefs = new Set(snapshot.elements.filter((element) => !element.occluded).map((element) => element.ref));
+  const validElements = new Map(snapshot.elements.filter((element) => !element.occluded).map((element) => [element.ref, element]));
+  const validRefs = new Set(validElements.keys());
   const writableRefs = new Set(snapshot.elements.filter((element) => !element.disabled && !element.readonly && !element.sensitive && !element.occluded).map((element) => element.ref));
   const steps = Array.isArray(raw.steps) ? raw.steps.flatMap((value) => {
     const step = value && typeof value === "object" ? value as Record<string, unknown> : {};
     if (!ACTIONS.has(String(step.action))) return [];
     if (step.action !== "scroll" && !validRefs.has(String(step.targetRef))) return [];
     if ((step.action === "fill" || step.action === "select") && !writableRefs.has(String(step.targetRef))) return [];
+    const targetRef = String(step.targetRef);
+    const action = String(step.action) === "submit" && validElements.get(targetRef)?.tagName !== "form"
+      ? "click"
+      : String(step.action) as BrowserActionPlan["steps"][number]["action"];
     return [{
-      action: String(step.action) as BrowserActionPlan["steps"][number]["action"],
+      action,
       ...(validRefs.has(String(step.targetRef)) ? { targetRef: String(step.targetRef) } : {}),
       ...(typeof step.value === "string" ? { value: step.value.slice(0, 4_000) } : {}),
       ...(typeof step.amountPx === "number" ? { amountPx: Math.min(Math.max(step.amountPx, 0), 2_000) } : {}),

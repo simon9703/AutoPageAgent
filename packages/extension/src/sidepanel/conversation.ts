@@ -44,6 +44,20 @@ export function conversationStorageKey(windowId: number): string {
   return `conversationSession:${windowId}`;
 }
 
+export function hasConversationStarted(
+  value: Pick<ConversationSession, "messages" | "events" | "pendingTask" | "pendingChoice"> | null | undefined,
+): boolean {
+  return Boolean(
+    value
+    && (
+      value.messages.length
+      || value.events.length
+      || value.pendingTask
+      || value.pendingChoice
+    ),
+  );
+}
+
 export function normalizeConversationSession(value: unknown): ConversationSession | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Partial<ConversationSession>;

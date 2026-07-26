@@ -4,7 +4,7 @@ This document is the single checklist for shipped capabilities and future scope.
 Checked items are implemented in the current repository. Unchecked items are
 planned only and must not be described as available.
 
-## Current release — 0.10.0
+## Current release — 0.10.1
 
 ### Internal architecture
 
@@ -73,6 +73,8 @@ planned only and must not be described as available.
 - [x] Keep plan summaries out of chat and internal step counts out of assistant replies
 - [x] AI pointer, target ring, and action-status label
 - [x] Restore messages, attachment summaries, and pending follow-up state after side-panel reload
+- [x] Follow the active tab until the first message, then lock the conversation target
+- [x] Normalize `submit` on button-like controls to `click` while preserving native form submission
 - [x] Persist compact conversation and operation history under `~/.auto-page-agent/logs`
 - [x] Switch or delete saved history from the side-panel header
 - [x] Preserve original page binding when restoring history and never silently rebind it
@@ -158,7 +160,7 @@ These are not part of the current local MVP:
 
 - [ ] Conversation search, rename, and pinning
 - [ ] Multiple concurrent Agent Runs across tabs or windows
-- [ ] Automatic conversation rebinding when browser focus changes
+- [ ] Automatic rebinding of a conversation after its first message
 - [ ] Authenticated remote Agent Server
 - [ ] GitHub, GitLab, or internal remote repository providers
 - [ ] Repository mirrors and revision-aware remote indexes
@@ -174,5 +176,5 @@ These are not part of the current local MVP:
   verification.
 - Performance/API evidence is on demand and is not part of ordinary Agent
   observations.
-- **New** starts one fresh conversation bound to the active tab; restored
-  history keeps its original target and never follows browser focus.
+- **New** starts one fresh conversation that follows the active tab until its
+  first message; started and restored conversations keep their original target.

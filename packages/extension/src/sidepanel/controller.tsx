@@ -17,6 +17,7 @@ import {
   composeAgentTask,
   createConversationLog,
   conversationStorageKey,
+  hasConversationStarted,
   legacyConversationSession,
   LEGACY_CONVERSATION_STORAGE_KEYS,
   normalizeConversationSession,
@@ -80,6 +81,7 @@ export function SidePanelController() {
   const conversationIdRef = useRef<string>(crypto.randomUUID());
   const conversationCreatedAtRef = useRef(new Date().toISOString());
   const conversationRevisionRef = useRef(0);
+  const conversationStartedRef = useRef(false);
   const windowIdRef = useRef<number | null>(null);
   const busyRef = useRef(false);
   const stopRequestedRef = useRef(false);
@@ -157,13 +159,15 @@ export function SidePanelController() {
     const session = normalizeConversationSession(stored[storageKey]) ?? legacyConversationSession(stored);
     const storedMessages = session?.messages ?? [];
     const storedEvents = session?.events ?? [];
-    const initialTarget = session
+    const conversationStarted = hasConversationStarted(session);
+    const initialTarget = session && conversationStarted
       ? availableTabs.find((tab) => tab.tabId === session.targetTabId) ?? null
       : availableTabs.find((tab) => tab.tabId === tabState.activeTabId) ?? null;
     const initialConversationId = session?.conversationId ?? crypto.randomUUID();
     conversationIdRef.current = initialConversationId;
     conversationCreatedAtRef.current = session?.createdAt ?? new Date().toISOString();
     conversationRevisionRef.current = session?.revision ?? 0;
+    conversationStartedRef.current = conversationStarted;
     pendingUserTaskRef.current = session?.pendingTask ?? null;
     pendingChoiceRef.current = session?.pendingChoice ?? null;
     selectedSkillRef.current = session?.selectedSkill ?? null;
@@ -300,6 +304,7 @@ export function SidePanelController() {
   }
 
   function appendMessage(role: ChatMessage["role"], content: string, attachments?: ChatMessage["attachments"]) {
+    conversationStartedRef.current = true;
     setMessages((current) => {
       const next = [...current, { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString(), ...(attachments ? { attachments } : {}) }].slice(-40);
       messagesRef.current = next;
@@ -309,6 +314,7 @@ export function SidePanelController() {
   }
 
   function appendEvent(event: AgentEvent) {
+    conversationStartedRef.current = true;
     setEvents((current) => {
       const next = [...current, event].slice(-80);
       eventsRef.current = next;
@@ -375,6 +381,24 @@ export function SidePanelController() {
     setTabs(availableTabs);
     setActiveTabId(response.activeTabId ?? null);
     const current = targetTabRef.current;
+    if (!conversationStartedRef.current) {
+      const activeTarget = availableTabs.find((tab) => tab.tabId === response.activeTabId) ?? null;
+      const targetChanged = activeTarget?.tabId !== current?.tabId;
+      setTargetTabValue(activeTarget);
+      if (targetChanged) {
+        setPendingPlan(null);
+        setSelected(null);
+        setScreenshot(null);
+        setSelectionMode(null);
+        await persistConversation(conversationIdRef.current, messagesRef.current, activeTarget?.tabId);
+        if (activeTarget) {
+          await Promise.all([restoreSelection(activeTarget.tabId), refreshSkills(activeTarget.tabId)]);
+        } else {
+          setNotice(t("notice.openPageThenNew"));
+        }
+      }
+      return;
+    }
     if (!current) return;
     const refreshed = availableTabs.find((tab) => tab.tabId === current.tabId) ?? null;
     setTargetTabValue(refreshed);
@@ -413,6 +437,7 @@ export function SidePanelController() {
     conversationIdRef.current = nextId;
     conversationCreatedAtRef.current = new Date().toISOString();
     conversationRevisionRef.current = 0;
+    conversationStartedRef.current = false;
     conversationTargetRef.current = activeTarget
       ? { tabId: activeTarget.tabId, title: activeTarget.title, url: activeTarget.url }
       : { title: "", url: "" };
@@ -476,6 +501,7 @@ export function SidePanelController() {
     conversationIdRef.current = log.conversationId;
     conversationCreatedAtRef.current = log.createdAt;
     conversationRevisionRef.current = log.revision;
+    conversationStartedRef.current = true;
     messagesRef.current = log.messages;
     eventsRef.current = log.events;
     pendingUserTaskRef.current = log.pendingTask ?? null;
@@ -552,6 +578,7 @@ export function SidePanelController() {
     if (!text || busy) return;
     if (connection.phase !== "ready") return setNotice(t("notice.reconnectBeforeSend"));
     if (!targetTab) return setNotice(t("notice.chooseTarget"));
+    conversationStartedRef.current = true;
     const scope: ConversationScope = {
       conversationId: conversationIdRef.current,
       targetTabId: targetTab.tabId,

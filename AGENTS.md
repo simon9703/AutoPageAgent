@@ -77,7 +77,7 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 - Send the fresh snapshot only once per continuation request; do not duplicate it inside loop metadata.
 - Do not expose static Observe/Plan labels or partial provider JSON as progress. Emit only real action/verification updates, completion, and errors through the shared `AgentEvent` protocol.
 - Scope every UI agent event and returned result to `windowId + conversationId + targetTabId`. A stopped or different conversation must not mutate the current timeline or append a late assistant result.
-- Keep one current conversation per browser window. **New** binds the active tab in that window; tab focus changes never rebind it, target navigation stays in the conversation, and a closed target requires **New**.
+- Keep one current conversation per browser window. An empty conversation follows the active tab; the first user message locks its target. Later tab focus changes never rebind a started conversation, target navigation stays in the conversation, and a closed target requires **New**.
 - Keep initial plans in the approval card, runtime step counts in status/timeline UI, and user-facing answers in chat. Do not duplicate plan or execution metadata as assistant messages.
 - Treat selected-element and screenshot attachments as one-message model context after a successful initial agent response. Retain only a compact, read-only attachment summary on the user message; never resend that summary or screenshot binary in later agent history.
 - Preserve `needs_user` continuation: a typed reply or confirmed preselected choice must resume the pending original task, including after the side panel reloads.
@@ -94,6 +94,7 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 - Prefer accessibility semantics, visible text, stable fingerprints, viewport geometry, and interaction state over CSS implementation detail.
 - Selectors are content-script/recorder hints only. Do not expose them as trusted model-authored inputs.
 - New action kinds require coordinated changes in shared types, bridge validation/prompting, content execution, verification, UI labels, security docs, and tests.
+- Use `click` for buttons and button-like controls, including controls labeled Submit, Pay, Confirm, or Top Up. Reserve `submit` for a native form target.
 - Every mutating action needs an explicit verification rule. A successful DOM method call alone is not proof of task success, and completion evidence must match exact text or a URL in the latest snapshot.
 - Use action-specific settle budgets. Direct state updates should not inherit the longest click/submit wait.
 

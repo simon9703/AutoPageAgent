@@ -7,6 +7,7 @@ import {
   createConversationLog,
   conversationStorageKey,
   defaultChoice,
+  hasConversationStarted,
   legacyConversationSession,
   normalizeConversationSession,
   summarizeMessageContext,
@@ -52,6 +53,27 @@ test("conversation sessions retain one bound tab, pending task, and confirmable 
     selectedSkill: { slug: "invoice-download", name: "Invoice download" },
   });
   assert.equal(normalizeConversationSession({ messages: [] }), null);
+});
+
+test("only a started conversation locks its target tab", () => {
+  assert.equal(hasConversationStarted({
+    messages: [],
+    events: [],
+  }), false);
+  assert.equal(hasConversationStarted({
+    messages: [{
+      id: "message-1",
+      role: "user",
+      content: "Analyze this page",
+      createdAt: "2026-07-26T08:00:00.000Z",
+    }],
+    events: [],
+  }), true);
+  assert.equal(hasConversationStarted({
+    messages: [],
+    events: [],
+    pendingTask: "Continue the original task",
+  }), true);
 });
 
 test("choice confirmation defaults to the recommendation or first option", () => {

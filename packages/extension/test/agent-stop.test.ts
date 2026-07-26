@@ -36,6 +36,12 @@ test("conversation output keeps plans and runtime metadata out of assistant mess
   assert.match(sidePanel, /t\("action\.start"\)/u);
 });
 
+test("submit falls back to clicking a button-like target without a native form", async () => {
+  const runtime = await readFile(new URL("../src/content/runtime.ts", import.meta.url), "utf8");
+  assert.match(runtime, /if \(form\) form\.requestSubmit\(\);[\s\S]+else await simulateClick\(element\);/u);
+  assert.doesNotMatch(runtime, /No form is associated with the submit target/u);
+});
+
 test("page tools and compact run controls share the composer", async () => {
   const sidePanel = [
     await readFile(new URL("../src/sidepanel/controller.tsx", import.meta.url), "utf8"),
@@ -54,7 +60,7 @@ test("page tools and compact run controls share the composer", async () => {
   assert.match(stylesheet, /\.composer \.composer-input:focus-visible \{ outline: none;/u);
 });
 
-test("header exposes compact New and durable history without rebinding visible tabs", async () => {
+test("header exposes compact New and history while empty conversations follow the active tab", async () => {
   const sidePanel = [
     await readFile(new URL("../src/sidepanel/controller.tsx", import.meta.url), "utf8"),
     await readFile(new URL("../src/sidepanel/components.tsx", import.meta.url), "utf8"),
@@ -69,6 +75,9 @@ test("header exposes compact New and durable history without rebinding visible t
   assert.match(sidePanel, /aria-label=\{t\("tab\.switch"\)\}/u);
   assert.match(sidePanel, /onChoose=\{\(tab\) => void activateTab\(tab\.tabId\)\}/u);
   assert.match(sidePanel, /type: "ui\.tab\.activate", targetTabId/u);
+  assert.match(sidePanel, /if \(!conversationStartedRef\.current\) \{/u);
+  assert.match(sidePanel, /availableTabs\.find\(\(tab\) => tab\.tabId === response\.activeTabId\)/u);
+  assert.match(sidePanel, /conversationStartedRef\.current = true;[\s\S]+const scope: ConversationScope/u);
   assert.match(sidePanel, /t\("tab\.bound"\)/u);
   assert.doesNotMatch(sidePanel, /queuedTarget/u);
   assert.doesNotMatch(sidePanel, /bg-emerald-500/u);

@@ -111,6 +111,15 @@ test("V2 planner accepts only one action before re-observation", () => {
   if (result.kind === "action_plan") assert.equal(result.steps.length, 1);
 });
 
+test("submit on a button is normalized to a click", () => {
+  const result = normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "submit", targetRef: "element-1", reason: "Top Up 100 USDT" }],
+  }, snapshot);
+  assert.equal(result.kind, "action_plan");
+  if (result.kind === "action_plan") assert.equal(result.steps[0]?.action, "click");
+});
+
 test("agent prompt authorizes the requested test flow while preserving runtime boundaries", () => {
   const prompt = createAgentPrompt("Submit the test order", snapshot, []);
   assert.match(prompt, /user-authorized automation test/u);
@@ -120,6 +129,8 @@ test("agent prompt authorizes the requested test flow while preserving runtime b
   assert.match(prompt, /latest-snapshot validation/u);
   assert.match(prompt, /filling search text does not select an option/u);
   assert.match(prompt, /Use select only for a native select element/u);
+  assert.match(prompt, /Use click for buttons and button-like controls/u);
+  assert.match(prompt, /Use submit only when targetRef is the native form element itself/u);
   assert.match(prompt, /final combobox value or selected label\/tag/u);
   assert.match(prompt, /"options":\["\.\.\."\]/u);
 });
