@@ -58,8 +58,8 @@ test("ordinary messages remain standalone tasks", () => {
 });
 
 test("completed chat messages omit internal step metadata", () => {
-  assert.equal(completedConversationMessage("Invoice downloaded."), "Invoice downloaded.");
-  assert.equal(completedConversationMessage("  "), "Task completed.");
+  assert.equal(completedConversationMessage("Invoice downloaded.", "任务已完成。"), "Invoice downloaded.");
+  assert.equal(completedConversationMessage("  ", "任务已完成。"), "任务已完成。");
 });
 
 test("selected elements and screenshots become compact message summaries", () => {
@@ -71,6 +71,7 @@ test("selected elements and screenshots become compact message summaries", () =>
     summarizeMessageContext(
       { element, pageUrl: "https://example.com/reports", screenshot: { dataUrl: "data:image/jpeg;base64,large", title: "Publish report", url: "https://example.com/reports" } },
       { dataUrl: "data:image/jpeg;base64,large", title: "Reports", url: "https://example.com/reports" },
+      { noVisibleText: "没有可见文本", currentPage: "当前页面" },
     ),
     [
       { kind: "element", tagName: "button", label: "Publish report", pageUrl: "https://example.com/reports", captured: true },

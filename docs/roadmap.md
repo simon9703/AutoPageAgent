@@ -4,7 +4,7 @@ This document is the single checklist for shipped capabilities and future scope.
 Checked items are implemented in the current repository. Unchecked items are
 planned only and must not be described as available.
 
-## Current release — 0.8.3
+## Current release — 0.8.4
 
 ### Internal architecture
 
@@ -61,6 +61,7 @@ planned only and must not be described as available.
 ### Side-panel Experience
 
 - [x] Chrome MV3 Side Panel with a fixed conversation composer
+- [x] Simplified Chinese UI through semantic `i18next` resource keys
 - [x] **New** starts a genuinely fresh provider conversation
 - [x] Bound-page summary returns the user to the target tab without rebinding it
 - [x] Stop control with real cancellation/busy state

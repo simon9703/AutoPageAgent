@@ -1,30 +1,31 @@
 import type { AgentEvent, RepositoryAnalysis } from "@auto-page-agent/shared";
+import type { TFunction } from "i18next";
 
-export function eventLabel(event: AgentEvent): string {
+export function eventLabel(event: AgentEvent, t: TFunction): string {
   if (event.type === "action") {
-    return `${event.status === "running" ? "Act" : "Action"} · ${event.action}${event.detail ? ` · ${event.detail}` : ""}`;
+    return `${event.status === "running" ? t("agent.actionRunning") : t("agent.action")} · ${event.action}${event.detail ? ` · ${event.detail}` : ""}`;
   }
-  if (event.type === "verify") return `Verify · ${event.summary}`;
-  if (event.type === "complete") return `Complete · ${event.summary}`;
-  return `Error · ${event.error}`;
+  if (event.type === "verify") return `${t("agent.verify")} · ${event.summary}`;
+  if (event.type === "complete") return `${t("agent.complete")} · ${event.summary}`;
+  return `${t("agent.error")} · ${event.error}`;
 }
 
-export function formatRepositoryAnalysis(analysis: RepositoryAnalysis) {
+export function formatRepositoryAnalysis(analysis: RepositoryAnalysis, t: TFunction) {
   const evidence = analysis.evidence
     .map((item, index) => `${index + 1}. [${item.confidence}/${item.kind}] ${item.repository}/${item.path}:${item.line}\n   ${item.preview}`)
     .join("\n\n");
   return [
-    `Repositories: ${analysis.repositories.join(", ") || "none configured"}`,
-    analysis.warnings.length ? `Warnings: ${analysis.warnings.join(" ")}` : "",
-    evidence || "No repository evidence found.",
+    t("repository.repositories", { value: analysis.repositories.join(", ") || t("repository.noneConfigured") }),
+    analysis.warnings.length ? t("repository.warnings", { value: analysis.warnings.join(" ") }) : "",
+    evidence || t("repository.noEvidence"),
   ].filter(Boolean).join("\n\n");
 }
 
-export function defaultSkillName(url: string) {
+export function defaultSkillName(url: string, t: TFunction) {
   try {
-    return `${new URL(url).hostname} workflow`;
+    return t("recording.defaultName", { hostname: new URL(url).hostname });
   } catch {
-    return "Recorded browser workflow";
+    return t("recording.fallbackName");
   }
 }
 

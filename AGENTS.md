@@ -36,6 +36,7 @@ Read `README.md` for usage, `docs/architecture.md` for component boundaries, `do
 - `packages/extension/src/sidepanel/App.tsx`: stable side-panel component entry.
 - `packages/extension/src/sidepanel/controller.tsx`: Chrome state, persistence, and conversation workflow orchestration.
 - `packages/extension/src/sidepanel/components.tsx`: side-panel presentation components.
+- `packages/extension/src/sidepanel/i18n/`: side-panel locale initialization and translation resources.
 - `skills/*`: bundled Marketplace templates. These are distribution assets, not user data.
 - `packages/bridge/test`: Node test suite for agent, runtime, repository, and Skill behavior.
 

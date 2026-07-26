@@ -61,20 +61,21 @@ export function composeAgentTask(userInput: string, pendingTask?: string | null)
   return `${originalTask}\n\nUser follow-up:\n${input}`;
 }
 
-export function completedConversationMessage(answer?: string): string {
-  return answer?.trim() || "Task completed.";
+export function completedConversationMessage(answer: string | undefined, fallback: string): string {
+  return answer?.trim() || fallback;
 }
 
 export function summarizeMessageContext(
   selected: SelectedMessageContext | null,
   screenshot: ScreenshotMessageContext | null,
+  labels: { noVisibleText: string; currentPage: string },
 ): ChatMessageAttachment[] | undefined {
   const attachments: ChatMessageAttachment[] = [];
   if (selected) {
     attachments.push({
       kind: "element",
       tagName: selected.element.tagName,
-      label: selected.element.label || selected.element.text || selected.element.nearbyText || "No visible text",
+      label: selected.element.label || selected.element.text || selected.element.nearbyText || labels.noVisibleText,
       pageUrl: selected.pageUrl,
       captured: Boolean(selected.screenshot),
     });
@@ -82,7 +83,7 @@ export function summarizeMessageContext(
   if (screenshot) {
     attachments.push({
       kind: "screenshot",
-      title: screenshot.title || "Current page",
+      title: screenshot.title || labels.currentPage,
       pageUrl: screenshot.url,
     });
   }

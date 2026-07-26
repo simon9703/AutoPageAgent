@@ -46,7 +46,8 @@ packages/extension/src/
     ├── controller.tsx     # Chrome state, persistence, workflow orchestration
     ├── conversation.ts    # pure continuation and message formatting rules
     ├── components.tsx     # presentation-only UI components
-    └── formatters.ts      # pure presentation formatting
+    ├── formatters.ts      # pure presentation formatting
+    └── i18n/              # i18next initialization and locale resources
 ```
 
 Entrypoints stay minimal. Runtime/controller modules own browser lifecycle and orchestration, while feature modules own one bounded concern. Cross-process protocol types remain in `packages/shared`.
@@ -234,6 +235,8 @@ The Skill discovery endpoint classifies hand-written Skills without workflow met
 
 Workflow schema v2 adds persistent `enabled` and `pagePatterns` fields. Pattern configuration rejects wildcard origins, credentials, queries, fragments, unsupported characters, and lists over 20 entries. Disabled workflows may be returned for management on a matching page, but the agent selector always filters them out.
 
-## Deferred translation analysis
+## UI localization and deferred translation analysis
 
-i18n is intentionally outside the current implementation. The shared protocol, element metadata collector, and repository query builder contain `TODO(i18n)` markers for a later `data-i18n-key` and translation-catalog provider without coupling that work to the current source/API flow.
+The side-panel interface uses `i18next` and `react-i18next`, with semantic English keys and a Simplified Chinese locale under `sidepanel/i18n/`. Product names such as Skills, Codex, and Auto Page Agent remain unchanged.
+
+Repository-level translation intelligence is still outside the current implementation. The shared protocol, element metadata collector, and repository query builder contain `TODO(i18n)` markers for a later `data-i18n-key` and translation-catalog provider without coupling that work to the current source/API flow.
