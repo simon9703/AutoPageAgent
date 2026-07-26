@@ -4,7 +4,13 @@ This document is the single checklist for shipped capabilities and future scope.
 Checked items are implemented in the current repository. Unchecked items are
 planned only and must not be described as available.
 
-## Current release — 0.8.2
+## Current release — 0.8.3
+
+### Internal architecture
+
+- [x] Split shared contracts by browser, Agent, chat, repository, Skill, event, and transport domains
+- [x] Keep stable package barrels while making cross-domain dependencies explicit
+- [x] Split bridge routing, providers, prompts, Responses streaming, decision validation, Skill selection, page matching, and workflow generation
 
 ### Agent Runtime
 

@@ -14,13 +14,18 @@ Read `README.md` for usage, `docs/architecture.md` for component boundaries, `do
 
 ## Repository map
 
-- `packages/shared/src/index.ts`: cross-process protocol and domain types.
+- `packages/shared/src/index.ts`: compatibility barrel for cross-process domain and protocol types.
+- `packages/shared/src/{agent,browser,chat,repositories,skills}.ts`: bounded shared domain models.
+- `packages/shared/src/protocol.ts`: Native Messaging request/response unions.
 - `packages/shared/src/agent-events.ts`: streaming/runtime timeline event protocol.
-- `packages/bridge/src/index.ts`: Native Messaging stdin/stdout host and request routing.
+- `packages/bridge/src/index.ts`: minimal Native Messaging stdin/stdout host.
+- `packages/bridge/src/bridge/message-router.ts`: validated request dispatch, active-run cancellation, and response routing.
 - `packages/bridge/src/native-messaging.ts`: Chrome native-message framing.
-- `packages/bridge/src/agent.ts`: Codex/Responses providers, prompts, streaming, and decision validation.
+- `packages/bridge/src/agent.ts`: stable Agent API barrel.
+- `packages/bridge/src/agent/`: provider router, provider implementations, prompts, Responses streaming, and decision validation.
 - `packages/bridge/src/codex-app-server.ts`: Codex app-server JSON-RPC adapter.
-- `packages/bridge/src/skills.ts`: Marketplace, local Registry, page matching, selection, migration, and persistence.
+- `packages/bridge/src/skills.ts`: stable Skill API plus Registry/Marketplace persistence.
+- `packages/bridge/src/skills/`: Skill models, page matching, selection, workflow generation, and pure validation helpers.
 - `packages/bridge/src/repositories.ts`: bounded local `rg` evidence search.
 - `packages/extension/src/background.ts`: service-worker entry, Chrome event listeners, message dispatch, and agent-loop orchestration.
 - `packages/extension/src/background/`: bridge transport, target-tab messaging, screenshots, recorder state, and pending-run persistence.

@@ -5,7 +5,7 @@ import test from "node:test";
 test("busy conversations expose a real agent cancellation path", async () => {
   const sidePanel = await readFile(new URL("../src/sidepanel/controller.tsx", import.meta.url), "utf8");
   const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
-  const shared = await readFile(new URL("../../shared/src/index.ts", import.meta.url), "utf8");
+  const sharedProtocol = await readFile(new URL("../../shared/src/protocol.ts", import.meta.url), "utf8");
 
   assert.match(sidePanel, /type: "ui\.agent\.stop"/u);
   assert.match(sidePanel, /aria-label="Stop agent"/u);
@@ -17,8 +17,8 @@ test("busy conversations expose a real agent cancellation path", async () => {
   assert.match(background, /assertAgentRunActive\(run\)/u);
   assert.match(background, /type: "ui\.agent\.event"[\s\S]+conversationId,[\s\S]+targetTabId,[\s\S]+windowId,[\s\S]+event/u);
   assert.match(sidePanel, /value\.conversationId === conversationIdRef\.current/u);
-  assert.match(shared, /type: "agent\.cancel"/u);
-  assert.match(shared, /type: "agent\.cancel\.result"/u);
+  assert.match(sharedProtocol, /type: "agent\.cancel"/u);
+  assert.match(sharedProtocol, /type: "agent\.cancel\.result"/u);
 });
 
 test("conversation output keeps plans and runtime metadata out of assistant messages", async () => {

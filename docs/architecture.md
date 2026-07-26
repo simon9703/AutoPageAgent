@@ -83,6 +83,30 @@ The bridge is registered once as `com.auto_page_agent.bridge`. Chrome launches i
 5. parses and validates the JSON decision;
 6. returns an answer, confirmation-required action plan, evidence-backed completion, blocked state, or request for user input.
 
+The bridge follows a stable-entrypoint, feature-folder structure:
+
+```text
+packages/bridge/src/
+├── index.ts                    # Native Messaging process bootstrap
+├── bridge/message-router.ts    # request dispatch and active-run lifecycle
+├── agent.ts                    # stable public barrel
+├── agent/
+│   ├── router.ts               # provider selection
+│   ├── providers/              # Codex and Responses adapters
+│   ├── prompt.ts               # model context construction
+│   ├── responses.ts            # Responses schema and SSE parsing
+│   └── decision.ts             # normalized, fail-closed decisions
+├── skills.ts                   # Registry/Marketplace persistence API
+└── skills/
+    ├── model.ts                # internal loaded models
+    ├── selection.ts            # task/page ranking
+    ├── page-patterns.ts        # page scope validation and matching
+    ├── workflow.ts             # declarative workflow generation
+    └── utils.ts                # pure normalization helpers
+```
+
+Shared contracts use the same domain split. `packages/shared/src/index.ts` is only a compatibility barrel; browser snapshots/actions, Agent decisions, chat, repository evidence, Skills, events, and transport messages live in separate files. This keeps protocol dependencies explicit while preserving existing `@auto-page-agent/shared` imports.
+
 The native-host manifest allowlists the stable extension id derived from `manifest.json`. The installer copies built bridge/shared assets and bundled Skills into the user's application-support directory; no TCP port or separately started dev process is involved. The side panel checks both bridge reachability and `account/read` during initialization. It exposes **Reconnect** and disables sending until local Codex is available and authenticated.
 
 After the initial plan is confirmed, the extension owns the V2 runtime loop. It executes one constrained action, waits for the page effect with an action-specific settle budget, captures a fresh structural snapshot, computes a fingerprint-based diff, verifies the expected state, and sends the observation back to the provider. Each continuation request carries that fresh snapshot once; loop metadata contains only the action, verification, and remaining budget instead of duplicating the page payload. Direct state actions such as fill and focus use a short wait; select, scroll, click, and submit retain progressively longer bounds for asynchronous page effects. If a delayed SPA transition changes the URL, a full reload replaces the content-script context, or the snapshot expires before the next action, the old snapshot and refs remain invalid: the background waits for the bound tab, reads the new page, and asks the provider to re-plan from the fresh snapshot. This re-observation is not a verification failure and a stale action rejected before dispatch does not consume an action step. The loop stops only on evidence-backed completion, a blocked/needs-user decision, two consecutive execution failures, eight actions, or 90 seconds. Navigation is never itself success.
