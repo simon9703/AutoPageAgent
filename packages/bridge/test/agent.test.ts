@@ -195,3 +195,22 @@ test("Responses output and conversation history parsing is bounded", () => {
   assert.doesNotMatch(prompt, /"elements":/u);
   assert.match(prompt, /simplifiedDom/u);
 });
+
+test("reobserve prompts invalidate old refs and expose only the fresh snapshot", () => {
+  const prompt = createAgentPrompt("continue", snapshot, [], [], {
+    runId: "run-1",
+    iteration: 1,
+    maxSteps: 8,
+    timeoutMs: 90_000,
+    startedAt: Date.now(),
+    reobserve: {
+      reason: "page_url_changed",
+      summary: "The stale action was discarded.",
+      actionMayHaveExecuted: false,
+    },
+  });
+
+  assert.match(prompt, /"reobserve":\{"reason":"page_url_changed"/u);
+  assert.match(prompt, /previous snapshot and refs are invalid/u);
+  assert.match(prompt, new RegExp(`"snapshotId":"${snapshot.snapshotId}"`, "u"));
+});

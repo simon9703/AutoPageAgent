@@ -1,6 +1,6 @@
-import type { ActionExecutionResult, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ElementSelectionGeometry, InspectedElement, PageSnapshot, PerformanceSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
+import type { ActionExecutionResult, AgentDecision, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ElementSelectionGeometry, InspectedElement, PageSnapshot, PerformanceSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
 import { reconnectBridge, requestBridge } from "./background/bridge-client.js";
-import { PendingAgentRunStore } from "./background/pending-agent-run.js";
+import { PendingAgentRunStore, type PendingAgentRun } from "./background/pending-agent-run.js";
 import {
   appendRecordedAction,
   getRecordingState,
@@ -14,6 +14,11 @@ import {
   captureSelectedElement,
   MAX_SCREENSHOT_DATA_URL_LENGTH,
 } from "./background/screenshot.js";
+import {
+  classifyReobserveError,
+  consumeReobserveStep,
+  type ReobserveSignal,
+} from "./background/reobserve.js";
 import {
   activateTargetTab,
   getTargetTab,
@@ -409,9 +414,6 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
   try {
     assertAgentRunActive(run);
     const initialTab = await getTargetTab(pendingRun.tabId);
-    if (initialTab.url !== pendingRun.pageUrl) {
-      throw new Error("The target page navigated after this plan was created. Run the task again.");
-    }
     await sendPageMessage(pendingRun.tabId, { type: "page.agent.activity", active: true }).catch(() => undefined);
     const runId = crypto.randomUUID();
     const startedAt = Date.now();
@@ -420,13 +422,55 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
     let iteration = 0;
     let failures = 0;
     let plan = initialPlan;
+    if (initialTab.url !== pendingRun.pageUrl) {
+      const signal: ReobserveSignal = {
+        reason: "page_url_changed",
+        summary: "The target page navigated after the plan was created, so the stale plan was discarded.",
+        actionMayHaveExecuted: false,
+      };
+      const snapshot = await reobservePage(pendingRun.tabId);
+      const decision = await requestContinuation(snapshot, {
+        runId, iteration, maxSteps, timeoutMs, startedAt, reobserve: signal,
+      }, pendingRun, run);
+      const terminal = terminalAgentResult(decision, iteration);
+      if (terminal) return terminal;
+      if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
+      plan = decision;
+    }
     while (iteration < maxSteps && Date.now() - startedAt < timeoutMs) {
       assertAgentRunActive(run);
       const step = plan.steps[0];
       if (!step) throw new Error("The agent returned an empty action plan.");
       emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: "running", step: iteration + 1, detail: step.reason }), pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId);
-      let execution = await executePlanResilient({ ...plan, steps: [step] }, pendingRun.tabId);
+      const outcome = await executePlanResilient({ ...plan, steps: [step] }, pendingRun.tabId);
       assertAgentRunActive(run);
+      if (outcome.kind === "reobserve") {
+        iteration = consumeReobserveStep(iteration, outcome.signal);
+        const displayStep = outcome.signal.actionMayHaveExecuted ? iteration : iteration + 1;
+        emitUiEvent(createEvent({
+          type: "action",
+          action: step.action,
+          targetRef: step.targetRef,
+          status: "pending",
+          step: displayStep,
+          detail: `${outcome.signal.summary} Replanning from the new page.`,
+        }), pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId);
+        const loop: AgentLoopContext = {
+          runId, iteration, maxSteps, timeoutMs, startedAt,
+          lastAction: step,
+          reobserve: outcome.signal,
+        };
+        const decision = await requestContinuation(outcome.snapshot, loop, pendingRun, run);
+        const terminal = terminalAgentResult(decision, iteration);
+        if (terminal) return terminal;
+        if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
+        if (iteration >= maxSteps || Date.now() - startedAt >= timeoutMs) {
+          throw new Error(`The agent stopped at its ${iteration >= maxSteps ? "step" : "time"} budget.`);
+        }
+        plan = decision;
+        continue;
+      }
+      let execution = outcome.execution;
       if (!execution.snapshot) execution = { ...execution, snapshot: await readSnapshot(pendingRun.tabId) };
       const observedSnapshot = execution.snapshot!;
       emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: execution.ok ? "success" : "failed", step: iteration + 1, detail: execution.error }), pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId);
@@ -441,52 +485,12 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
         lastAction: step,
         ...(verification ? { lastVerification: verification } : {}),
       };
-      const requestId = crypto.randomUUID();
-      run.bridgeRequestId = requestId;
-      const response = await requestBridge({
-        id: requestId, type: "agent.run", task: pendingRun.task, snapshot: observedSnapshot,
-        conversationId: pendingRun.conversationId, history: pendingRun.history, loop,
-      }, (event) => emitUiEvent(event, pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId));
-      assertAgentRunActive(run);
-      if (response.type === "agent.error") throw new Error(response.error);
-      if (response.type !== "agent.result") throw new Error("Unexpected agent loop response.");
-      if (response.decision.kind === "complete") {
-        return {
-          ok: true,
-          status: "completed" as const,
-          answer: response.decision.summary,
-          evidence: response.decision.evidence,
-          steps: iteration,
-        };
-      }
-      if (response.decision.kind === "needs_user") {
-        return {
-          ok: true,
-          status: "needs_user" as const,
-          question: response.decision.question,
-          steps: iteration,
-        };
-      }
-      if (response.decision.kind === "blocked") {
-        return {
-          ok: false,
-          status: "blocked" as const,
-          error: response.decision.reason,
-          recoverable: response.decision.recoverable,
-          steps: iteration,
-        };
-      }
-      if (response.decision.kind === "answer") {
-        return {
-          ok: false,
-          status: "blocked" as const,
-          error: "The agent returned an answer after browser execution instead of verifying the whole task.",
-          recoverable: true,
-          steps: iteration,
-        };
-      }
+      const decision = await requestContinuation(observedSnapshot, loop, pendingRun, run);
+      const terminal = terminalAgentResult(decision, iteration);
+      if (terminal) return terminal;
+      if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
       if (iteration >= maxSteps || Date.now() - startedAt >= timeoutMs) throw new Error(`The agent stopped at its ${iteration >= maxSteps ? "step" : "time"} budget.`);
-      plan = response.decision;
+      plan = decision;
     }
     throw new Error("The agent stopped at its time budget.");
   } finally {
@@ -494,6 +498,56 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
     await sendPageMessage(pendingRun.tabId, { type: "page.agent.activity", active: false }).catch(() => undefined);
     await pendingAgentRuns.clearForSnapshot(initialPlan.snapshotId);
   }
+}
+
+async function requestContinuation(
+  snapshot: PageSnapshot,
+  loop: AgentLoopContext,
+  pendingRun: PendingAgentRun,
+  run: ActiveAgentRun,
+): Promise<AgentDecision> {
+  const requestId = crypto.randomUUID();
+  run.bridgeRequestId = requestId;
+  const response = await requestBridge({
+    id: requestId,
+    type: "agent.run",
+    task: pendingRun.task,
+    snapshot,
+    conversationId: pendingRun.conversationId,
+    history: pendingRun.history,
+    loop,
+  }, (event) => emitUiEvent(event, pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId));
+  assertAgentRunActive(run);
+  if (response.type === "agent.error") throw new Error(response.error);
+  if (response.type !== "agent.result") throw new Error("Unexpected agent loop response.");
+  return response.decision;
+}
+
+type AgentLoopResult =
+  | { ok: true; status: "completed"; answer: string; evidence: string[]; steps: number }
+  | { ok: true; status: "needs_user"; question: string; steps: number }
+  | { ok: false; status: "blocked"; error: string; recoverable: boolean; steps: number };
+
+function terminalAgentResult(decision: AgentDecision, steps: number): AgentLoopResult | null {
+  if (decision.kind === "complete") {
+    return { ok: true, status: "completed", answer: decision.summary, evidence: decision.evidence, steps };
+  }
+  if (decision.kind === "needs_user") {
+    return { ok: true, status: "needs_user", question: decision.question, steps };
+  }
+  if (decision.kind === "blocked") {
+    return { ok: false, status: "blocked", error: decision.reason, recoverable: decision.recoverable, steps };
+  }
+  if (decision.kind === "answer") {
+    return {
+      ok: false,
+      status: "blocked",
+      error: "The agent returned an answer after browser execution instead of verifying the whole task.",
+      recoverable: true,
+      steps,
+    };
+  }
+  return null;
 }
 
 function beginAgentRun(conversationId: string, tabId: number, windowId: number): ActiveAgentRun {
@@ -536,26 +590,24 @@ async function stopActiveAgentRun(conversationId: string, targetTabId?: number, 
   return { ok: true, stopped: true };
 }
 
-async function executePlanResilient(plan: BrowserActionPlan, tabId: number): Promise<ActionExecutionResult> {
-  try { return await executePlan(plan, tabId) as ActionExecutionResult; }
-  catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/message port closed|receiving end does not exist|context invalidated|frame was removed/iu.test(message)) throw error;
-    await waitForTabReady(tabId);
-    const snapshot = await readSnapshot(tabId);
-    const diff = { urlChanged: true, titleChanged: false, addedFingerprints: [], removedFingerprints: [], changedFingerprints: [], summary: ["The page navigated and a new document was observed."] };
-    return {
-      ok: true,
-      results: [{ action: plan.steps[0]?.action ?? "click", ok: true }],
-      snapshot,
-      verification: {
-        success: false,
-        summary: "The page navigated; the new page must be checked before the task can complete.",
-        changes: diff.summary,
-        diff,
-      },
-    };
+type PlanExecutionOutcome =
+  | { kind: "executed"; execution: ActionExecutionResult }
+  | { kind: "reobserve"; snapshot: PageSnapshot; signal: ReobserveSignal };
+
+async function executePlanResilient(plan: BrowserActionPlan, tabId: number): Promise<PlanExecutionOutcome> {
+  try {
+    return { kind: "executed", execution: await executePlan(plan, tabId) as ActionExecutionResult };
   }
+  catch (error) {
+    const signal = classifyReobserveError(error);
+    if (!signal) throw error;
+    return { kind: "reobserve", snapshot: await reobservePage(tabId), signal };
+  }
+}
+
+async function reobservePage(tabId: number): Promise<PageSnapshot> {
+  await waitForTabReady(tabId);
+  return readSnapshot(tabId);
 }
 
 async function readSnapshot(tabId: number): Promise<PageSnapshot> {

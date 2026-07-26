@@ -346,6 +346,11 @@ export interface AgentLoopContext {
   startedAt: number;
   lastAction?: BrowserActionStep;
   lastVerification?: ActionVerification;
+  reobserve?: {
+    reason: "page_url_changed" | "snapshot_expired" | "page_context_invalidated";
+    summary: string;
+    actionMayHaveExecuted: boolean;
+  };
 }
 
 export interface ActionVerification {

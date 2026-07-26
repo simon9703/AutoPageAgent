@@ -348,7 +348,14 @@ function readErrorMessage(value: unknown): string {
 }
 
 export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: string[], history: ChatMessage[] = [], loop?: AgentLoopContext, selectedSkills: SkillSelection[] = []): string {
-  const loopState = loop ? { iteration: loop.iteration, maxSteps: loop.maxSteps, elapsedMs: Date.now() - loop.startedAt, lastAction: loop.lastAction, lastVerification: loop.lastVerification } : undefined;
+  const loopState = loop ? {
+    iteration: loop.iteration,
+    maxSteps: loop.maxSteps,
+    elapsedMs: Date.now() - loop.startedAt,
+    lastAction: loop.lastAction,
+    lastVerification: loop.lastVerification,
+    reobserve: loop.reobserve,
+  } : undefined;
   const promptSnapshot = {
     ...snapshot,
     elements: undefined,
@@ -363,6 +370,7 @@ export function createAgentPrompt(task: string, snapshot: PageSnapshot, skills: 
     "When required user input or confirmation is missing return: {\"kind\":\"needs_user\",\"question\":\"...\"}.",
     "When no safe action or recovery is available return: {\"kind\":\"blocked\",\"reason\":\"...\",\"recoverable\":false}.",
     "Plan exactly one next action. The runtime observes and verifies the page again before asking for another action.",
+    "If loopState.reobserve is present, the previous snapshot and refs are invalid. Replan only from the current Page snapshot and never retry an old ref.",
     "Use only data-ai-ref values present in simplifiedDom as targetRef. Prefer visible, unoccluded, enabled elements. Never output JavaScript, CSS selectors, XPath, payment, purchase, credential, destructive, or final irreversible actions.",
     "A successful action is not task completion. Once an action has been executed, never use answer to report completion; use complete with exact evidence copied from the current snapshot. Navigation alone is not completion.",
     selectedSkills.length ? `Selected Skill context:\n${selectedSkills.map((skill) => `${skill.name} (${skill.scope}): ${skill.reason}`).join("\n")}` : "",
