@@ -60,8 +60,9 @@ test("header keeps New primary and switches visible tabs without rebinding the c
     await readFile(new URL("../src/sidepanel/components.tsx", import.meta.url), "utf8"),
   ].join("\n");
 
-  assert.match(sidePanel, /<Button size="sm"[\s\S]+?aria-label=\{t\("action\.new"\)\}>/u);
-  assert.match(sidePanel, /<Plus size=\{14\} \/>[\s\S]+t\("action\.new"\)[\s\S]+<\/Button>/u);
+  assert.match(sidePanel, /<Button type="button" size="sm" className="[^"]*min-w-\[84px\][^"]*flex-row[^"]*whitespace-nowrap[^"]*"/u);
+  assert.match(sidePanel, /<Button[\s\S]+?aria-label=\{t\("action\.new"\)\}>/u);
+  assert.match(sidePanel, /<Plus size=\{14\} className="shrink-0" aria-hidden="true" \/>[\s\S]+<span className="leading-none">\{t\("action\.new"\)\}<\/span>[\s\S]+<\/Button>/u);
   assert.match(sidePanel, /aria-label=\{t\("tab\.switch"\)\}/u);
   assert.match(sidePanel, /onChoose=\{\(tab\) => void activateTab\(tab\.tabId\)\}/u);
   assert.match(sidePanel, /type: "ui\.tab\.activate", targetTabId/u);
