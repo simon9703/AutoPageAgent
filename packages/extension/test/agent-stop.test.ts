@@ -60,7 +60,7 @@ test("page tools and compact run controls share the composer", async () => {
   assert.match(stylesheet, /\.composer \.composer-input:focus-visible \{ outline: none;/u);
 });
 
-test("header exposes compact New and history while empty conversations follow the active tab", async () => {
+test("header exposes compact New and history with success and warning target states", async () => {
   const sidePanel = [
     await readFile(new URL("../src/sidepanel/controller.tsx", import.meta.url), "utf8"),
     await readFile(new URL("../src/sidepanel/components.tsx", import.meta.url), "utf8"),
@@ -79,6 +79,9 @@ test("header exposes compact New and history while empty conversations follow th
   assert.match(sidePanel, /availableTabs\.find\(\(tab\) => tab\.tabId === response\.activeTabId\)/u);
   assert.match(sidePanel, /conversationStartedRef\.current = true;[\s\S]+const scope: ConversationScope/u);
   assert.match(sidePanel, /t\("tab\.bound"\)/u);
+  assert.match(sidePanel, /const targetVisible = props\.target\?\.tabId === props\.activeTabId/u);
+  assert.match(sidePanel, /targetVisible \? "text-emerald-600" : "text-orange-500"/u);
+  assert.match(sidePanel, /<Check size=\{14\} className="shrink-0 text-emerald-600"/u);
   assert.doesNotMatch(sidePanel, /queuedTarget/u);
   assert.doesNotMatch(sidePanel, /bg-emerald-500/u);
   assert.doesNotMatch(sidePanel, /refreshHealth/u);

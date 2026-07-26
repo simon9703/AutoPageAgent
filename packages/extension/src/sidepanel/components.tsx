@@ -130,7 +130,7 @@ export function TargetTabHeader(props: {
       <button type="button" onClick={props.onToggle} className="flex min-w-0 max-w-[calc(100%-46px)] items-center gap-1.5 rounded-xl px-1.5 py-1 text-left transition hover:bg-slate-50" aria-expanded={props.open} aria-label={t("tab.switch")}>
         <span className="min-w-0">
           <strong className="block truncate text-[14px] font-semibold">{props.target?.title ?? t("tab.unavailable")}</strong>
-          <span className={`flex items-center gap-1 truncate text-[10px] ${targetVisible ? "text-slate-400" : "text-violet-600"}`}>
+          <span className={`flex items-center gap-1 truncate text-[10px] ${targetVisible ? "text-emerald-600" : "text-orange-500"}`}>
             {props.target?.favIconUrl ? <img src={props.target.favIconUrl} className="h-3 w-3 shrink-0 rounded-[2px]" alt="" /> : <Globe2 size={12} className="shrink-0" />}
             <span className="truncate">
               {props.target
@@ -150,7 +150,7 @@ export function TargetTabHeader(props: {
                 <strong className="block truncate text-[11px] font-medium">{tab.title}</strong>
                 <span className="block truncate text-[9px] text-slate-400">{hostname(tab.url)}{tab.tabId === props.activeTabId ? ` · ${t("tab.current")}` : ""}</span>
               </span>
-              {tab.tabId === props.target?.tabId ? <Check size={14} className="shrink-0 text-violet-600" aria-label={t("tab.conversation")} /> : null}
+              {tab.tabId === props.target?.tabId ? <Check size={14} className="shrink-0 text-emerald-600" aria-label={t("tab.conversation")} /> : null}
             </button>
           )) : <p className="px-3 py-5 text-center text-[11px] text-slate-400">{t("tab.noOpenPages")}</p>}
         </div>
