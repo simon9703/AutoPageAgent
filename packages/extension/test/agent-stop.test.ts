@@ -48,7 +48,7 @@ test("page tools and compact run controls share the composer", async () => {
   assert.match(stylesheet, /\.composer \.composer-input:focus-visible \{ outline: none;/u);
 });
 
-test("header keeps New primary and only returns to the fixed conversation page", async () => {
+test("header keeps New primary and switches visible tabs without rebinding the conversation", async () => {
   const sidePanel = [
     await readFile(new URL("../src/sidepanel/controller.tsx", import.meta.url), "utf8"),
     await readFile(new URL("../src/sidepanel/components.tsx", import.meta.url), "utf8"),
@@ -56,10 +56,13 @@ test("header keeps New primary and only returns to the fixed conversation page",
 
   assert.match(sidePanel, /<Button size="sm"[\s\S]+?aria-label="New conversation">/u);
   assert.match(sidePanel, /<Plus size=\{14\} \/>[\s\S]+New[\s\S]+<\/Button>/u);
-  assert.match(sidePanel, /onActivate=\{\(\) => void showConversationPage\(\)\}/u);
+  assert.match(sidePanel, /aria-label="Switch browser tab"/u);
+  assert.match(sidePanel, /onChoose=\{\(tab\) => void activateTab\(tab\.tabId\)\}/u);
+  assert.match(sidePanel, /type: "ui\.tab\.activate", targetTabId/u);
   assert.match(sidePanel, /bound page/u);
-  assert.doesNotMatch(sidePanel, /onChoose/u);
   assert.doesNotMatch(sidePanel, /queuedTarget/u);
+  assert.doesNotMatch(sidePanel, /bg-emerald-500/u);
+  assert.doesNotMatch(sidePanel, /refreshHealth/u);
 });
 
 test("side panel entry stays separate from controller and presentation components", async () => {

@@ -8,14 +8,17 @@ export type SkillView = "page" | "installed" | "marketplace";
 
 export function TargetTabHeader(props: {
   target: BrowserTabTarget | null;
+  tabs: BrowserTabTarget[];
   activeTabId: number | null;
-  onActivate: () => void;
+  open: boolean;
+  onToggle: () => void;
+  onChoose: (tab: BrowserTabTarget) => void;
 }) {
   const targetVisible = props.target?.tabId === props.activeTabId;
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2.5">
       <img src="assets/icon-48.png" className="h-9 w-9 shrink-0 rounded-[11px]" alt="" />
-      <button type="button" disabled={!props.target} onClick={props.onActivate} className="flex min-w-0 max-w-[calc(100%-46px)] items-center gap-1.5 rounded-xl px-1.5 py-1 text-left transition hover:bg-slate-50 disabled:cursor-default disabled:hover:bg-transparent" title={targetVisible ? "Current conversation page" : "Show the conversation page"}>
+      <button type="button" onClick={props.onToggle} className="flex min-w-0 max-w-[calc(100%-46px)] items-center gap-1.5 rounded-xl px-1.5 py-1 text-left transition hover:bg-slate-50" aria-expanded={props.open} aria-label="Switch browser tab">
         <span className="min-w-0">
           <strong className="block truncate text-[14px] font-semibold">{props.target?.title ?? "Page unavailable"}</strong>
           <span className={`flex items-center gap-1 truncate text-[10px] ${targetVisible ? "text-slate-400" : "text-violet-600"}`}>
@@ -23,11 +26,26 @@ export function TargetTabHeader(props: {
             <span className="truncate">
               {props.target
                 ? `${hostname(props.target.url)}${targetVisible ? " · current page" : " · bound page"}`
-                : "Click New to bind the current page"}
+                : "Choose an open page"}
             </span>
           </span>
         </span>
+        <ChevronDown size={14} className={`shrink-0 text-slate-400 transition ${props.open ? "rotate-180" : ""}`} />
       </button>
+      {props.open ? (
+        <div className="absolute left-3 right-3 top-[calc(100%-4px)] z-40 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl">
+          {props.tabs.length ? props.tabs.map((tab) => (
+            <button key={tab.tabId} type="button" onClick={() => props.onChoose(tab)} className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left hover:bg-slate-50">
+              {tab.favIconUrl ? <img src={tab.favIconUrl} className="h-4 w-4 shrink-0 rounded-sm" alt="" /> : <Globe2 size={15} className="shrink-0 text-slate-400" />}
+              <span className="min-w-0 flex-1">
+                <strong className="block truncate text-[11px] font-medium">{tab.title}</strong>
+                <span className="block truncate text-[9px] text-slate-400">{hostname(tab.url)}{tab.tabId === props.activeTabId ? " · current page" : ""}</span>
+              </span>
+              {tab.tabId === props.target?.tabId ? <Check size={14} className="shrink-0 text-violet-600" aria-label="Conversation page" /> : null}
+            </button>
+          )) : <p className="px-3 py-5 text-center text-[11px] text-slate-400">No open http(s) pages.</p>}
+        </div>
+      ) : null}
     </div>
   );
 }

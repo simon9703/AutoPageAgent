@@ -22,12 +22,10 @@ import {
   toAgentHistory,
 } from "./conversation.js";
 
-type Health = Extract<ServerMessage, { type: "health.result" }>;
 type Modal = "skills" | "recording" | null;
 type ConversationScope = { conversationId: string; targetTabId: number; windowId: number };
 
 export function SidePanelController() {
-  const [health, setHealth] = useState<Health | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -52,8 +50,10 @@ export function SidePanelController() {
   const [skillName, setSkillName] = useState("");
   const [skillDescription, setSkillDescription] = useState("");
   const [editingSkillSlug, setEditingSkillSlug] = useState("");
+  const [tabs, setTabs] = useState<BrowserTabTarget[]>([]);
   const [targetTab, setTargetTab] = useState<BrowserTabTarget | null>(null);
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
+  const [targetPickerOpen, setTargetPickerOpen] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const targetTabRef = useRef<BrowserTabTarget | null>(null);
@@ -127,12 +127,12 @@ export function SidePanelController() {
     conversationIdRef.current = initialConversationId;
     pendingUserTaskRef.current = session?.pendingTask ?? null;
     setMessages(storedMessages);
+    setTabs(availableTabs);
     setActiveTabId(tabState.activeTabId ?? null);
     setTargetTabValue(initialTarget);
     await persistConversation(initialConversationId, storedMessages, initialTarget?.tabId);
     if (!stored[storageKey]) await chrome.storage.session.remove([...LEGACY_CONVERSATION_STORAGE_KEYS]);
     await Promise.all([
-      refreshHealth(),
       initialTarget ? restoreSelection(initialTarget.tabId) : Promise.resolve(),
       restoreRecording(),
       refreshSkills(initialTarget?.tabId),
@@ -182,13 +182,6 @@ export function SidePanelController() {
     setBusy(value);
   }
 
-  async function refreshHealth() {
-    try {
-      const response = await chrome.runtime.sendMessage({ type: "ui.health" }) as ServerMessage;
-      setHealth(response.type === "health.result" ? response : null);
-    } catch { setHealth(null); }
-  }
-
   async function restoreSelection(targetTabId: number) {
     const stored = await chrome.runtime.sendMessage({ type: "ui.selection.current", targetTabId }) as { selectedElement?: InspectedElement; selectedElementPageUrl?: string; selectedElementScreenshot?: { dataUrl: string; title: string; url: string } };
     if (stored.selectedElement) {
@@ -227,6 +220,7 @@ export function SidePanelController() {
     if (typeof windowId !== "number") return;
     const response = await chrome.runtime.sendMessage({ type: "ui.tabs.list", windowId }) as { tabs?: BrowserTabTarget[]; activeTabId?: number; windowId?: number };
     const availableTabs = response.tabs ?? [];
+    setTabs(availableTabs);
     setActiveTabId(response.activeTabId ?? null);
     const current = targetTabRef.current;
     if (!current) return;
@@ -435,9 +429,8 @@ export function SidePanelController() {
     setNotice(response.ok ? "Agent stopped." : `Stop failed: ${response.error ?? "Unknown error"}`);
   }
 
-  async function showConversationPage() {
-    const targetTabId = targetTabRef.current?.tabId;
-    if (typeof targetTabId !== "number") return;
+  async function activateTab(targetTabId: number) {
+    setTargetPickerOpen(false);
     await chrome.runtime.sendMessage({ type: "ui.tab.activate", targetTabId }).catch(() => undefined);
   }
 
@@ -526,11 +519,13 @@ export function SidePanelController() {
       <header className="relative flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200/80 bg-white px-4">
         <TargetTabHeader
           target={targetTab}
+          tabs={tabs}
           activeTabId={activeTabId}
-          onActivate={() => void showConversationPage()}
+          open={targetPickerOpen}
+          onToggle={() => setTargetPickerOpen((current) => !current)}
+          onChoose={(tab) => void activateTab(tab.tabId)}
         />
         <div className="flex items-center gap-1.5">
-          <span className={`h-2 w-2 rounded-full ${health?.ok ? "bg-emerald-500" : "bg-amber-400"}`} title={health?.agent.error ?? health?.agent.name ?? "Bridge unavailable"} />
           <Button size="sm" disabled={busy} onClick={() => void newConversation()} aria-label="New conversation">
             <Plus size={14} />
             New
