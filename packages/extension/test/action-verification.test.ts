@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { BrowserActionStep, PageElementSnapshot, PageSnapshot, PageSnapshotDiff } from "@auto-page-agent/shared";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "../src/content/action-settle.js";
-import { hasObservableActionEffect, hasVerifiedOptionSelection } from "../src/content/action-verification.js";
+import { hasObservableActionEffect, hasVerifiedDismissal, hasVerifiedOptionSelection } from "../src/content/action-verification.js";
 
 const snapshot: PageSnapshot = {
   snapshotId: "snapshot-1",
@@ -98,15 +98,17 @@ test("settle policy keeps direct state updates short and async actions bounded",
   });
   assert.deepEqual(getActionSettlePolicy("focus"), { maxWaitMs: 160, quietMs: 80 });
   assert.deepEqual(getActionSettlePolicy("select"), { maxWaitMs: 900, quietMs: 180 });
+  assert.deepEqual(getActionSettlePolicy("dismiss"), { maxWaitMs: 900, quietMs: 180 });
   assert.deepEqual(getActionSettlePolicy("scroll"), { maxWaitMs: 700, quietMs: 160 });
   assert.deepEqual(getActionSettlePolicy("click"), { maxWaitMs: 1_800, quietMs: 250 });
   assert.deepEqual(getActionSettlePolicy("submit"), { maxWaitMs: 1_800, quietMs: 250 });
 });
 
-test("only click and submit receive a bounded delayed observation", () => {
+test("click, submit, and dismiss receive a bounded delayed observation", () => {
   const expected = { maxWaitMs: 2_500, quietMs: 250, pollMs: 100 };
   assert.deepEqual(getDelayedActionObservationPolicy("click"), expected);
   assert.deepEqual(getDelayedActionObservationPolicy("submit"), expected);
+  assert.deepEqual(getDelayedActionObservationPolicy("dismiss"), expected);
   assert.equal(getDelayedActionObservationPolicy("fill"), undefined);
   assert.equal(getDelayedActionObservationPolicy("select"), undefined);
   assert.equal(getDelayedActionObservationPolicy("focus"), undefined);
@@ -225,4 +227,37 @@ test("multi-select verification matches either selected display value", () => {
   };
   assert.equal(hasVerifiedOptionSelection(before, after, option.fingerprint), true);
   assert.equal(hasVerifiedOptionSelection(before, after, secondOption.fingerprint), true);
+});
+
+test("clicking an already selected option cannot verify as selection or dismissal", () => {
+  const selectedOption = { ...option, selected: true };
+  const before = { ...snapshot, elements: [combobox(true), selectedOption] };
+  const collapsed = { ...snapshot, elements: [combobox(false), selectedOption] };
+  assert.equal(hasVerifiedOptionSelection(before, collapsed, selectedOption.fingerprint), false);
+});
+
+test("dismiss verifies a combobox true-to-false transition", () => {
+  const before = { ...snapshot, elements: [combobox(true)] };
+  const after = { ...snapshot, elements: [combobox(false)] };
+  assert.equal(hasVerifiedDismissal(before, after, "project-1"), true);
+  assert.equal(hasVerifiedDismissal(before, before, "project-1"), false);
+});
+
+test("dismiss verifies popup removal while preserving the outer dialog", () => {
+  const dialog = { ...option, ref: "dialog", role: "dialog", fingerprint: "dialog-1", domId: undefined, ownerId: undefined };
+  const listbox = { ...option, ref: "listbox", role: "listbox", fingerprint: "project-list-1", domId: "project-list", ownerId: undefined };
+  const before = { ...snapshot, elements: [dialog, listbox] };
+  assert.equal(hasVerifiedDismissal(before, {
+    ...snapshot,
+    elements: [dialog],
+  }, listbox.fingerprint), true);
+  assert.equal(hasVerifiedDismissal(before, {
+    ...snapshot,
+    elements: [],
+  }, listbox.fingerprint), false);
+});
+
+test("Escape dispatch without a collapsed or hidden state is not dismissal success", () => {
+  const before = { ...snapshot, elements: [combobox(true)] };
+  assert.equal(hasVerifiedDismissal(before, { ...before, snapshotId: "snapshot-2" }, "project-1"), false);
 });

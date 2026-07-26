@@ -11,7 +11,7 @@ import type {
 } from "@auto-page-agent/shared";
 import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer } from "./agent-activity.js";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "./action-settle.js";
-import { hasObservableActionEffect, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
+import { hasObservableActionEffect, hasVerifiedDismissal, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
 import { buildSelector, buildSimplifiedDom, cleanText, collectPageInfo, createElementFingerprint, delay, getAccessibleLabel, getSelectedValues, inferRole, isAvailableOption, isComboboxLike, isDisabledElement, isHiddenInput, isNearViewport, isReadonlyElement, isSensitiveElement, isTopLayerElement, isVisible, round, setElementValue, shouldExposeValue, simulateClick } from "./dom.js";
@@ -401,6 +401,9 @@ function verifyAction(step: BrowserActionStep, before: PageSnapshot, snapshot: P
   } else if (step.action === "click" && isOptionSnapshot(before.elements.find((element) => element.fingerprint === targetFingerprint))) {
     success = Boolean(targetFingerprint && hasVerifiedOptionSelection(before, snapshot, targetFingerprint));
     summary = success ? "The option selection changed the combobox state." : "The option click did not produce a verified selection state.";
+  } else if (step.action === "dismiss") {
+    success = Boolean(targetFingerprint && hasVerifiedDismissal(before, snapshot, targetFingerprint));
+    summary = success ? "The inner popup was verified as dismissed." : "The dismiss key did not produce a verified collapsed or hidden state.";
   } else if (step.action === "focus") {
     const active = document.activeElement;
     success = Boolean(active && createElementFingerprint(active) === targetFingerprint?.split("-")[0]);
@@ -416,7 +419,7 @@ function verifyAction(step: BrowserActionStep, before: PageSnapshot, snapshot: P
 }
 
 async function executeStep(step: BrowserActionStep): Promise<{ action: string; ok: true }> {
-  if (!["click", "fill", "select", "scroll", "focus", "submit"].includes(step.action)) throw new Error("Unsupported browser action.");
+  if (!["click", "fill", "select", "scroll", "focus", "submit", "dismiss"].includes(step.action)) throw new Error("Unsupported browser action.");
   if (step.action === "scroll") {
     const amount = Math.min(Math.max(step.amountPx ?? 600, 0), 2_000);
     if (step.direction === "top") {
@@ -444,6 +447,7 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   if (!isTopLayerElement(element)) throw new Error("Target is covered by another page element.");
   await showAiPointer(element, `AI · ${step.action}`);
   if (step.action === "click") await simulateClick(element);
+  if (step.action === "dismiss") dismissElement(element, step.allowDialogDismiss === true);
   if (step.action === "focus") element.focus();
   if (step.action === "submit") {
     const form = element.closest("form");
@@ -458,4 +462,89 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
     setElementValue(element, step.value ?? "");
   }
   return { action: step.action, ok: true };
+}
+
+function dismissElement(element: HTMLElement, allowFilledDialog: boolean): void {
+  const role = element.getAttribute("role") || inferRole(element);
+  if (role === "combobox") {
+    if (element.getAttribute("aria-expanded") !== "true") {
+      throw new Error("Only an expanded combobox can be dismissed.");
+    }
+  } else if (role === "listbox" || role === "menu") {
+    // Visible popup roots are allowed, but Escape is sent through their owning
+    // expanded control when one exists so framework key handlers receive it.
+  } else if (role === "dialog") {
+    const innerPopupOpen = Array.from(document.querySelectorAll(
+      '[role="combobox"][aria-expanded="true"],[role="listbox"],[role="menu"]',
+    )).some((candidate) => candidate !== element && isVisible(candidate) && isTopLayerElement(candidate));
+    if (innerPopupOpen) throw new Error("Dismiss the innermost popup before the outer dialog.");
+    if (getTopmostVisibleDialog() !== element) throw new Error("Only the topmost dialog can be dismissed.");
+    if (dialogContainsFilledContent(element) && !allowFilledDialog) {
+      throw new Error("A dialog with filled content cannot be automatically dismissed. Use its explicit close control.");
+    }
+  } else {
+    throw new Error("Dismiss only supports an expanded combobox, visible listbox/menu, or topmost dialog.");
+  }
+
+  const recipient = role === "listbox" || role === "menu"
+    ? findPopupOwner(element) ?? element
+    : element;
+  const keyboardInit: KeyboardEventInit = {
+    key: "Escape",
+    code: "Escape",
+    bubbles: true,
+    cancelable: true,
+  };
+  recipient.dispatchEvent(new KeyboardEvent("keydown", keyboardInit));
+  recipient.dispatchEvent(new KeyboardEvent("keyup", keyboardInit));
+}
+
+function findPopupOwner(popup: HTMLElement): HTMLElement | undefined {
+  if (!popup.id) return undefined;
+  return Array.from(document.querySelectorAll('[role="combobox"][aria-expanded="true"]'))
+    .find((candidate): candidate is HTMLElement =>
+      candidate instanceof HTMLElement
+      && [
+        ...parseAriaIdRefs(candidate.getAttribute("aria-controls")),
+        ...parseAriaIdRefs(candidate.getAttribute("aria-owns")),
+      ].includes(popup.id));
+}
+
+function getTopmostVisibleDialog(): HTMLElement | undefined {
+  return Array.from(document.querySelectorAll('[role="dialog"]'))
+    .filter((element): element is HTMLElement =>
+      element instanceof HTMLElement && isVisible(element) && isTopLayerElement(element))
+    .sort((left, right) => {
+      const depthDifference = elementDepth(left) - elementDepth(right);
+      if (depthDifference) return depthDifference;
+      const zDifference = numericZIndex(left) - numericZIndex(right);
+      if (zDifference) return zDifference;
+      return left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+    })
+    .at(-1);
+}
+
+function elementDepth(element: Element): number {
+  let depth = 0;
+  for (let current = element.parentElement; current; current = current.parentElement) depth += 1;
+  return depth;
+}
+
+function numericZIndex(element: Element): number {
+  const value = Number.parseInt(getComputedStyle(element).zIndex, 10);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function dialogContainsFilledContent(dialog: HTMLElement): boolean {
+  return Array.from(dialog.querySelectorAll('input,textarea,select,[contenteditable="true"]'))
+    .some((candidate) => {
+      if (candidate instanceof HTMLInputElement) {
+        if (["checkbox", "radio"].includes(candidate.type)) return candidate.checked;
+        return Boolean(candidate.value.trim());
+      }
+      if (candidate instanceof HTMLTextAreaElement || candidate instanceof HTMLSelectElement) {
+        return Boolean(candidate.value.trim());
+      }
+      return Boolean(candidate.textContent?.trim());
+    });
 }

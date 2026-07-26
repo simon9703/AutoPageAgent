@@ -15,5 +15,10 @@ function isValidQueuedTarget(step: BrowserActionStep, element: PageElementSnapsh
   if (element.occluded || element.disabled) return false;
   if ((step.action === "fill" || step.action === "select")
     && (element.readonly || element.sensitive)) return false;
+  if (step.action === "dismiss"
+    && !((element.role === "combobox" && element.expanded === true)
+      || element.role === "listbox"
+      || element.role === "menu"
+      || element.role === "dialog")) return false;
   return true;
 }

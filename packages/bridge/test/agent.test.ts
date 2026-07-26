@@ -60,6 +60,90 @@ test("readonly combobox can be clicked but cannot be filled or selected", () => 
   }
 });
 
+test("dismiss accepts only an expanded combobox or visible popup target", () => {
+  const comboboxSnapshot = {
+    ...snapshot,
+    elements: [{
+      ...snapshot.elements[0],
+      tagName: "input",
+      role: "combobox",
+      expanded: true,
+    }],
+  };
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "dismiss", targetRef: "element-1" }],
+  }, comboboxSnapshot).kind, "action_plan");
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "dismiss", targetRef: "element-1" }],
+  }, {
+    ...comboboxSnapshot,
+    elements: [{ ...comboboxSnapshot.elements[0], expanded: false }],
+  }).kind, "blocked");
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "dismiss", targetRef: "element-1" }],
+  }, snapshot).kind, "blocked");
+});
+
+test("dismiss rejects an outer dialog while an inner popup remains open", () => {
+  const dialog = {
+    ...snapshot.elements[0],
+    ref: "dialog",
+    role: "dialog",
+    fingerprint: "dialog-1",
+    viewportRect: { x: 10, y: 10, width: 500, height: 500 },
+  };
+  const popup = {
+    ...snapshot.elements[0],
+    ref: "popup",
+    role: "listbox",
+    fingerprint: "popup-1",
+    viewportRect: { x: 40, y: 80, width: 200, height: 200 },
+  };
+  const popupSnapshot = { ...snapshot, elements: [dialog, popup] };
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "dismiss", targetRef: "dialog" }],
+  }, popupSnapshot).kind, "blocked");
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "dismiss", targetRef: "popup" }],
+  }, popupSnapshot).kind, "action_plan");
+});
+
+test("dismiss rejects a dialog containing filled state", () => {
+  const dialog = {
+    ...snapshot.elements[0],
+    ref: "dialog",
+    role: "dialog",
+    fingerprint: "dialog-1",
+    viewportRect: { x: 10, y: 10, width: 500, height: 500 },
+  };
+  const filledInput = {
+    ...snapshot.elements[0],
+    ref: "name",
+    tagName: "input",
+    role: "textbox",
+    fingerprint: "name-1",
+    value: "Alice",
+    viewportRect: { x: 40, y: 80, width: 200, height: 32 },
+  };
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "dismiss", targetRef: "dialog" }],
+  }, { ...snapshot, elements: [filledInput, dialog] }).kind, "blocked");
+  const explicitlyRequested = normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "dismiss", targetRef: "dialog", allowDialogDismiss: true }],
+  }, { ...snapshot, elements: [filledInput, dialog] }, "关闭这个弹窗");
+  assert.equal(explicitlyRequested.kind, "action_plan");
+  if (explicitlyRequested.kind === "action_plan") {
+    assert.equal(explicitlyRequested.steps[0]?.allowDialogDismiss, true);
+  }
+});
+
 test("readonly ordinary input remains observable but cannot be filled", () => {
   const readonlyInput = {
     ...snapshot,
@@ -273,6 +357,9 @@ test("agent prompt authorizes the requested test flow while preserving runtime b
   assert.match(prompt, /Use click for buttons and button-like controls/u);
   assert.match(prompt, /Use submit only when targetRef is the native form element itself/u);
   assert.match(prompt, /final combobox value or selected label\/tag/u);
+  assert.match(prompt, /aria-selected state is already true/u);
+  assert.match(prompt, /use dismiss on the expanded combobox/u);
+  assert.match(prompt, /never invent a backdrop, blank-area coordinate, selector, or ref/u);
   assert.match(prompt, /complete ordered action sequence/u);
   assert.match(prompt, /one confirmation card/u);
   assert.match(prompt, /completionEvidenceFailure/u);

@@ -63,10 +63,10 @@ export class CodexProvider {
       this.#threads.set(context.conversationId, threadId);
     }
     const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), isNewThread ? context.history : [], context.loop, skills);
-    return this.#runTurn(threadId, prompt, snapshot, context.signal);
+    return this.#runTurn(threadId, prompt, snapshot, task, context.signal);
   }
 
-  async #runTurn(threadId: string, prompt: string, snapshot: PageSnapshot, signal?: AbortSignal): Promise<AgentDecision> {
+  async #runTurn(threadId: string, prompt: string, snapshot: PageSnapshot, task: string, signal?: AbortSignal): Promise<AgentDecision> {
     if (signal?.aborted) throw new Error("Agent run stopped.");
     let turnId = "";
     let text = "";
@@ -114,7 +114,7 @@ export class CodexProvider {
       } finally {
         signal?.removeEventListener("abort", interrupt);
       }
-      return normalizeDecision(extractJson(text), snapshot);
+      return normalizeDecision(extractJson(text), snapshot, task);
     } finally {
       unsubscribe();
     }

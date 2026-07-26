@@ -12,6 +12,8 @@
 - The model receives a compact indexed DOM without CSS selectors; selectors and live DOM references remain in the content script.
 - Refs are scoped to one snapshot version.
 - Every single-plan MVP action requires confirmation. V2 requires explicit consent before starting the clearly labeled bounded loop; subsequent safe steps are visible in real time, individually validated, and stop at the configured step/time/failure budgets.
+- `dismiss` is not an arbitrary click escape hatch. It accepts only a latest-snapshot ref for an expanded combobox, visible listbox/menu, or the topmost dialog, sends Escape through that semantic target, and succeeds only when a fresh snapshot proves collapse or disappearance. An inner popup must be closed before an outer dialog, and dialogs containing filled state are dismissed only when the original user task explicitly asks to cancel or close that dialog.
+- Explicit close buttons and snapshot-visible backdrops remain ordinary `click` targets. The model cannot supply coordinates, selectors, XPath, or an invented blank area for dismissal.
 - Payment, credential, destructive, and hidden-element operations are outside the tool set.
 - Password, file, token-like, OTP, and payment-like fields are marked sensitive; their values are excluded and agent filling is rejected.
 - User-authorized test flows are not rejected from page keywords alone. Labels such as amount, order, checkout, payment, or exam may be handled through ordinary constrained actions when the environment has no real-world effect; sensitive-field rejection, the initial confirmation, fresh-snapshot refs, budgets, and verification remain unchanged.

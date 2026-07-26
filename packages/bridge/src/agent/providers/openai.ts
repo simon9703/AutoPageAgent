@@ -66,7 +66,7 @@ export class OpenAIResponsesProvider {
       }
       const streamed = await readResponsesStream(response);
       if (streamed.responseId) this.#previousResponses.set(context.conversationId, streamed.responseId);
-      return normalizeDecision(extractJson(streamed.text), snapshot);
+      return normalizeDecision(extractJson(streamed.text), snapshot, task);
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         if (context.signal?.aborted) throw new Error("Agent run stopped.");

@@ -1,9 +1,9 @@
 import type { AgentDecision, BrowserActionPlan, PageSnapshot } from "@auto-page-agent/shared";
 
-const ACTIONS = new Set(["click", "fill", "select", "scroll", "focus", "submit"]);
+const ACTIONS = new Set(["click", "fill", "select", "scroll", "focus", "submit", "dismiss"]);
 const MAX_PLAN_STEPS = 8;
 
-export function normalizeDecision(value: unknown, snapshot: PageSnapshot): AgentDecision {
+export function normalizeDecision(value: unknown, snapshot: PageSnapshot, task = ""): AgentDecision {
   const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
   if (raw.kind === "answer") {
     return { kind: "answer", content: String(raw.content || "The agent returned no answer.").slice(0, 8_000) };
@@ -82,6 +82,10 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
     if ((step.action === "fill" || step.action === "select") && !writableRefs.has(String(step.targetRef))) return [];
     if (step.action === "fill" && target?.role === "combobox") return [];
     if (step.action === "select" && target?.tagName !== "select") return [];
+    const allowDialogDismiss = step.action === "dismiss"
+      && target?.role === "dialog"
+      && explicitlyRequestsDialogDismissal(task);
+    if (step.action === "dismiss" && (!target || !isSafeDismissTarget(snapshot, target, allowDialogDismiss))) return [];
     const targetRef = String(step.targetRef);
     const action = String(step.action) === "submit" && validElements.get(targetRef)?.tagName !== "form"
       ? "click"
@@ -92,6 +96,7 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
         targetRef,
         targetFingerprint: validElements.get(targetRef)!.fingerprint,
       } : {}),
+      ...(allowDialogDismiss ? { allowDialogDismiss: true } : {}),
       ...(typeof step.value === "string" ? { value: step.value.slice(0, 4_000) } : {}),
       ...(typeof step.amountPx === "number" ? { amountPx: Math.min(Math.max(step.amountPx, 0), 2_000) } : {}),
       reason: String(step.reason || "User-requested action.").slice(0, 240),
@@ -115,6 +120,56 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
     confidence: typeof raw.confidence === "number" ? Math.min(Math.max(raw.confidence, 0), 1) : 0,
     steps,
   };
+}
+
+function isSafeDismissTarget(
+  snapshot: PageSnapshot,
+  target: PageSnapshot["elements"][number],
+  allowFilledDialog: boolean,
+): boolean {
+  if (target.occluded || target.disabled) return false;
+  if (target.role === "combobox") return target.expanded === true;
+  if (target.role === "listbox" || target.role === "menu") return true;
+  if (target.role !== "dialog") return false;
+
+  const openInnerLayer = snapshot.elements.some((element) =>
+    !element.occluded
+    && ((element.role === "combobox" && element.expanded === true)
+      || element.role === "listbox"
+      || element.role === "menu"));
+  if (openInnerLayer) return false;
+
+  const dialogs = snapshot.elements.filter((element) => element.role === "dialog" && !element.occluded);
+  if (dialogs.at(-1)?.fingerprint !== target.fingerprint) return false;
+  return allowFilledDialog || !snapshot.elements.some((element) =>
+    element.fingerprint !== target.fingerprint
+    && containsRect(target.viewportRect, element.viewportRect)
+    && hasFilledState(element));
+}
+
+function explicitlyRequestsDialogDismissal(task: string): boolean {
+  return /(?:cancel|close|dismiss|exit).{0,24}(?:dialog|modal|window|form)|(?:dialog|modal|window|form).{0,24}(?:cancel|close|dismiss|exit)/iu.test(task)
+    || /(?:取消|关闭|退出)(?:当前|这个|该)?(?:弹窗|对话框|窗口|表单)|(?:弹窗|对话框|窗口|表单).{0,8}(?:取消|关闭|退出)/u.test(task);
+}
+
+function containsRect(
+  outer: PageSnapshot["elements"][number]["viewportRect"],
+  inner: PageSnapshot["elements"][number]["viewportRect"],
+): boolean {
+  return inner.x >= outer.x
+    && inner.y >= outer.y
+    && inner.x + inner.width <= outer.x + outer.width
+    && inner.y + inner.height <= outer.y + outer.height;
+}
+
+function hasFilledState(element: PageSnapshot["elements"][number]): boolean {
+  return Boolean(
+    element.checked
+    || element.selected
+    || element.value?.trim()
+    || element.displayValue?.trim()
+    || element.selectedValues?.some((value) => value.trim()),
+  );
 }
 
 export function completionEvidenceMatchesSnapshot(evidence: string, snapshot: PageSnapshot): boolean {

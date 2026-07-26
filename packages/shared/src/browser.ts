@@ -1,4 +1,4 @@
-export type BrowserActionKind = "click" | "fill" | "select" | "scroll" | "focus" | "submit";
+export type BrowserActionKind = "click" | "fill" | "select" | "scroll" | "focus" | "submit" | "dismiss";
 
 export interface ViewportRect {
   x: number;
@@ -153,6 +153,11 @@ export interface BrowserActionStep {
    * bind a queued step to the target's latest ephemeral ref.
    */
   targetFingerprint?: string;
+  /**
+   * Trusted bridge authorization attached only when the original user task
+   * explicitly asks to close or cancel a dialog. Providers cannot author it.
+   */
+  allowDialogDismiss?: boolean;
   value?: string;
   direction?: "up" | "down" | "left" | "right" | "top" | "bottom";
   amountPx?: number;

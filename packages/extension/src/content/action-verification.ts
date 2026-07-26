@@ -32,6 +32,7 @@ export function hasVerifiedOptionSelection(
 ): boolean {
   const targetBefore = before.elements.find((element) => element.fingerprint === targetFingerprint);
   if (!isOptionSnapshot(targetBefore)) return false;
+  if (targetBefore.selected === true) return false;
   const targetName = normalizeValue(targetBefore.label || targetBefore.text || targetBefore.value || "");
   const targetAfter = after.elements.find((element) => element.fingerprint === targetFingerprint);
   if (targetAfter?.selected === true) return true;
@@ -48,11 +49,42 @@ export function hasVerifiedOptionSelection(
     && snapshotValueMatches(element, targetName));
   if (selectedMatch) return true;
 
-  const comboboxValueMatch = associatedAfter.some((element) => snapshotValueMatches(element, targetName));
+  const comboboxValueMatch = associatedAfter.some((element) =>
+    snapshotValueMatches(element, targetName)
+    && !associatedBefore.some((previous) =>
+      isSameSemanticControl(previous, element) && snapshotValueMatches(previous, targetName)));
   if (comboboxValueMatch) return true;
 
   return Boolean(targetBefore.domId && associatedAfter.some((element) =>
-    element.activeDescendant === targetBefore.domId));
+    element.activeDescendant === targetBefore.domId
+    && !associatedBefore.some((previous) =>
+      isSameSemanticControl(previous, element) && previous.activeDescendant === targetBefore.domId)));
+}
+
+export function hasVerifiedDismissal(
+  before: PageSnapshot,
+  after: PageSnapshot,
+  targetFingerprint: string,
+): boolean {
+  const targetBefore = before.elements.find((element) => element.fingerprint === targetFingerprint);
+  if (!targetBefore) return false;
+
+  const outerDialogsPreserved = targetBefore.role === "dialog"
+    || before.elements
+      .filter((element) => element.role === "dialog")
+      .every((dialog) => after.elements.some((element) =>
+        element.role === "dialog" && isSameSemanticControl(dialog, element)));
+  if (!outerDialogsPreserved) return false;
+
+  if (targetBefore.role === "combobox") {
+    if (targetBefore.expanded !== true) return false;
+    const targetAfter = after.elements.find((element) => isSameSemanticControl(targetBefore, element));
+    return targetAfter?.expanded === false;
+  }
+  if (targetBefore.role === "listbox" || targetBefore.role === "menu" || targetBefore.role === "dialog") {
+    return !after.elements.some((element) => isSameSemanticControl(targetBefore, element));
+  }
+  return false;
 }
 
 function isSameSemanticControl(before: PageElementSnapshot, after: PageElementSnapshot): boolean {
