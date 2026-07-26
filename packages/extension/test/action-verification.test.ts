@@ -48,10 +48,32 @@ test("click verification rejects a dispatch with no observable page effect", () 
   assert.equal(hasObservableActionEffect(click, snapshot, snapshot, noDiff), false);
 });
 
-test("click verification accepts an observable URL change", () => {
+test("click verification accepts an exact URL change", () => {
   const after = { ...snapshot, snapshotId: "snapshot-2", url: "https://example.com/saved" };
   const diff = { ...noDiff, urlChanged: true, summary: ["URL changed"] };
   assert.equal(hasObservableActionEffect(click, snapshot, after, diff), true);
+});
+
+test("click verification rejects an unrelated DOM mutation", () => {
+  const diff = { ...noDiff, addedFingerprints: ["other-1"], summary: ["1 interactive element added"] };
+  assert.equal(hasObservableActionEffect(click, snapshot, snapshot, diff, "save-1"), false);
+});
+
+test("click verification accepts target state changes and semantic result regions", () => {
+  assert.equal(hasObservableActionEffect(click, snapshot, snapshot, {
+    ...noDiff,
+    changedFingerprints: ["save-1"],
+    summary: ["1 element state changed"],
+  }, "save-1"), true);
+  const after = {
+    ...snapshot,
+    elements: [{ ...option, role: "status", fingerprint: "saved-status-1" }],
+  };
+  assert.equal(hasObservableActionEffect(click, snapshot, after, {
+    ...noDiff,
+    addedFingerprints: ["saved-status-1"],
+    summary: ["1 interactive element added"],
+  }, "save-1"), true);
 });
 
 test("scroll verification requires the viewport to move", () => {
@@ -97,6 +119,7 @@ const combobox = (expanded: boolean, value = ""): PageElementSnapshot => ({
   occluded: false,
   readonly: false,
   expanded,
+  controls: "project-list",
   viewportRect: { x: 0, y: 0, width: 200, height: 32 },
 });
 
@@ -115,10 +138,12 @@ const option: PageElementSnapshot = {
   occluded: false,
   readonly: false,
   selected: false,
+  domId: "cloud-option",
+  ownerId: "project-list",
   viewportRect: { x: 0, y: 40, width: 200, height: 32 },
 };
 
-test("option click verifies selected state, final value, or combobox collapse", () => {
+test("option click verifies selected state, associated final value, or active descendant", () => {
   const before = { ...snapshot, elements: [combobox(true), option] };
   assert.equal(hasVerifiedOptionSelection(before, {
     ...snapshot,
@@ -130,8 +155,30 @@ test("option click verifies selected state, final value, or combobox collapse", 
   }, option.fingerprint), true);
   assert.equal(hasVerifiedOptionSelection(before, {
     ...snapshot,
-    elements: [combobox(false)],
+    elements: [{ ...combobox(false, option.label), fingerprint: "project-with-value-1" }],
   }, option.fingerprint), true);
+  assert.equal(hasVerifiedOptionSelection(before, {
+    ...snapshot,
+    elements: [{ ...combobox(true), activeDescendant: option.domId }],
+  }, option.fingerprint), true);
+});
+
+test("option click rejects collapse without the selected value", () => {
+  const before = { ...snapshot, elements: [combobox(true), option] };
+  assert.equal(hasVerifiedOptionSelection(before, {
+    ...snapshot,
+    elements: [combobox(false)],
+  }, option.fingerprint), false);
+});
+
+test("option click ignores unrelated combobox values and selected options", () => {
+  const before = { ...snapshot, elements: [combobox(true), option] };
+  const unrelatedCombobox = { ...combobox(false, option.label), fingerprint: "other-combobox-1", controls: "other-list" };
+  const unrelatedOption = { ...option, fingerprint: "other-option-1", ownerId: "other-list", selected: true };
+  assert.equal(hasVerifiedOptionSelection(before, {
+    ...snapshot,
+    elements: [combobox(true), unrelatedCombobox, unrelatedOption],
+  }, option.fingerprint), false);
 });
 
 test("search text alone does not verify option selection", () => {

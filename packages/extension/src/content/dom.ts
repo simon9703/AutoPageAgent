@@ -213,8 +213,11 @@ function simplifyElement(element: PageElementSnapshot, index: number): string {
     typeof element.selected === "boolean" ? `aria-selected="${element.selected}"` : "",
     typeof element.expanded === "boolean" ? `aria-expanded="${element.expanded}"` : "",
     element.busy ? 'aria-busy="true"' : "",
+    element.domId ? `id="${escapeDomText(element.domId)}"` : "",
     element.controls ? `aria-controls="${escapeDomText(element.controls)}"` : "",
+    element.owns ? `aria-owns="${escapeDomText(element.owns)}"` : "",
     element.activeDescendant ? `aria-activedescendant="${escapeDomText(element.activeDescendant)}"` : "",
+    element.ownerId ? `data-ai-owner="${escapeDomText(element.ownerId)}"` : "",
     element.sensitive ? 'data-sensitive="true"' : "",
   ].filter(Boolean).join(" ");
   const text = escapeDomText(cleanText(element.text || element.value || "", 180));

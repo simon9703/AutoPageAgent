@@ -80,22 +80,37 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot): Agent
 export function completionEvidenceMatchesSnapshot(evidence: string, snapshot: PageSnapshot): boolean {
   const normalizedEvidence = normalizeEvidence(evidence);
   if (normalizedEvidence.length < 2) return false;
-  const pageEvidence = [
+  const finalStateEvidence = [
     snapshot.url,
     snapshot.title,
     snapshot.selectedText,
-    snapshot.mainText,
-    snapshot.simplifiedDom,
     ...snapshot.headings.map((heading) => heading.text),
-    ...snapshot.elements.flatMap((element) => [
-      element.label,
-      element.text,
-      element.value ?? "",
-      element.href ?? "",
-      element.placeholder ?? "",
-    ]),
+    ...snapshot.elements.flatMap((element) => {
+      if ((element.role === "option" && element.selected !== true)
+        || element.role === "listbox"
+        || element.role === "menu") return [];
+      return [
+        element.label,
+        element.text,
+        element.value ?? "",
+        element.href ?? "",
+        element.placeholder ?? "",
+      ];
+    }),
   ].map(normalizeEvidence);
-  return pageEvidence.some((candidate) => candidate.includes(normalizedEvidence));
+  if (finalStateEvidence.some((candidate) => candidate.includes(normalizedEvidence))) return true;
+
+  const unselectedPopupEvidence = snapshot.elements
+    .filter((element) => (element.role === "option" && element.selected !== true)
+      || element.role === "listbox"
+      || element.role === "menu")
+    .flatMap((element) => [element.label, element.text, element.value ?? ""])
+    .map(normalizeEvidence);
+  if (unselectedPopupEvidence.some((candidate) => candidate.includes(normalizedEvidence))) return false;
+
+  return [snapshot.mainText, snapshot.simplifiedDom]
+    .map(normalizeEvidence)
+    .some((candidate) => candidate.includes(normalizedEvidence));
 }
 
 function normalizeEvidence(value: string): string {

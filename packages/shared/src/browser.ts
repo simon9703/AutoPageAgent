@@ -29,8 +29,11 @@ export interface PageElementSnapshot {
   selected?: boolean;
   expanded?: boolean;
   busy?: boolean;
+  domId?: string;
   controls?: string;
+  owns?: string;
   activeDescendant?: string;
+  ownerId?: string;
   viewportRect: ViewportRect;
 }
 
