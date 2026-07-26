@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Camera, CircleStop, Image, LoaderCircle, MousePointer2, Play, Plus,
   Send, Sparkles, X,
 } from "lucide-react";
 import type {
-  AgentEvent, AutomationSkillDraft, BrowserActionPlan, BrowserTabTarget, ChatMessage,
+  AgentEvent, AgentNeedsUser, AutomationSkillDraft, BrowserActionPlan, BrowserTabTarget, ChatMessage,
   EditableAutomationSkill, InspectedElement, PageSkillSummary,
   RecordedBrowserAction, RepositoryAnalysis, ServerMessage, SkillCatalogItem,
 } from "@auto-page-agent/shared";
 import { defaultSkillName, formatRepositoryAnalysis } from "./formatters.js";
-import { ApprovalCard, ComposerToolButton, ConnectionGate, ContextCard, EmptyState, Message, RecordingModal, ScreenshotCard, SkillsModal, TargetTabHeader, Timeline, type SkillView } from "./components.js";
+import { ApprovalCard, ChoiceCard, ComposerToolButton, ConnectionGate, ContextCard, EmptyState, Message, RecordingModal, ScreenshotCard, SkillsModal, TargetTabHeader, Timeline, type SkillView } from "./components.js";
 import { Button } from "../components/ui/button.js";
 import {
   completedConversationMessage,
@@ -30,12 +31,14 @@ type ConnectionState =
   | { phase: "ready"; title: string; message: string; provider: string };
 
 export function SidePanelController() {
+  const { t } = useTranslation();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("Ready on the current page.");
+  const [notice, setNotice] = useState(() => t("notice.ready"));
   const [pendingPlan, setPendingPlan] = useState<BrowserActionPlan | null>(null);
+  const [pendingChoice, setPendingChoice] = useState<AgentNeedsUser | null>(null);
   const [selected, setSelected] = useState<{
     element: InspectedElement;
     pageUrl: string;
@@ -46,7 +49,7 @@ export function SidePanelController() {
   const [modal, setModal] = useState<Modal>(null);
   const [skillView, setSkillView] = useState<SkillView>("page");
   const [pageSkills, setPageSkills] = useState<PageSkillSummary[]>([]);
-  const [skillScope, setSkillScope] = useState("Current page");
+  const [skillScope, setSkillScope] = useState(() => t("skills.currentPage"));
   const [catalog, setCatalog] = useState<{ installed: SkillCatalogItem[]; marketplace: SkillCatalogItem[] }>({ installed: [], marketplace: [] });
   const [recording, setRecording] = useState(false);
   const [recordedActions, setRecordedActions] = useState<RecordedBrowserAction[]>([]);
@@ -60,11 +63,12 @@ export function SidePanelController() {
   const [targetPickerOpen, setTargetPickerOpen] = useState(false);
   const [connection, setConnection] = useState<ConnectionState>({
     phase: "checking",
-    title: "Connecting to local Codex",
-    message: "Chrome is starting the registered local bridge.",
+    title: t("connection.connectingTitle"),
+    message: t("connection.startingBridge"),
   });
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
   const targetTabRef = useRef<BrowserTabTarget | null>(null);
   const conversationIdRef = useRef<string>(crypto.randomUUID());
   const windowIdRef = useRef<number | null>(null);
@@ -72,6 +76,7 @@ export function SidePanelController() {
   const stopRequestedRef = useRef(false);
   const activeTaskRef = useRef("");
   const pendingUserTaskRef = useRef<string | null>(null);
+  const pendingChoiceRef = useRef<AgentNeedsUser | null>(null);
 
   useEffect(() => {
     void initialize();
@@ -82,21 +87,21 @@ export function SidePanelController() {
         setSelected({ element: value.element, pageUrl: value.pageUrl ?? "", screenshot: value.screenshot });
         setSelectionMode(null);
         setNotice(value.screenshot
-          ? `Captured visible <${value.element.tagName}>. It will be included in the next message.`
-          : `Selected <${value.element.tagName}>. It will be included in the next message.`);
+          ? t("notice.selectedCapture", { tag: value.element.tagName })
+          : t("notice.selectedElement", { tag: value.element.tagName }));
       }
       if (value.type === "ui.selection.cancelled") {
         setSelectionMode(null);
-        setNotice(value.reason || "Selection cancelled.");
+        setNotice(value.reason || t("notice.selectionCancelled"));
       }
       if (value.type === "ui.recording.updated") setRecordedActions(value.actions ?? []);
       if (value.type === "ui.bridge.disconnected") {
         setConnection({
           phase: "disconnected",
-          title: "Local bridge disconnected",
-          message: value.error || "Reconnect to let Chrome start the local bridge again.",
+          title: t("connection.disconnectedTitle"),
+          message: value.error || t("connection.reconnectBridge"),
         });
-        setNotice("Local bridge disconnected. Reconnect before sending.");
+        setNotice(t("notice.bridgeDisconnected"));
       }
       if (value.type === "ui.selection.cleared" && value.tabId === targetTabRef.current?.tabId) {
         setSelected(null);
@@ -127,7 +132,7 @@ export function SidePanelController() {
 
   async function initialize() {
     const currentWindow = await chrome.windows.getCurrent();
-    if (typeof currentWindow.id !== "number") throw new Error("The current browser window is unavailable.");
+    if (typeof currentWindow.id !== "number") throw new Error(t("notice.currentWindowUnavailable"));
     windowIdRef.current = currentWindow.id;
     const storageKey = conversationStorageKey(currentWindow.id);
     const [stored, tabState, connected] = await Promise.all([
@@ -144,7 +149,10 @@ export function SidePanelController() {
     const initialConversationId = session?.conversationId ?? crypto.randomUUID();
     conversationIdRef.current = initialConversationId;
     pendingUserTaskRef.current = session?.pendingTask ?? null;
+    pendingChoiceRef.current = session?.pendingChoice ?? null;
     setMessages(storedMessages);
+    messagesRef.current = storedMessages;
+    setPendingChoice(session?.pendingChoice ?? null);
     setTabs(availableTabs);
     setActiveTabId(tabState.activeTabId ?? null);
     setTargetTabValue(initialTarget);
@@ -157,47 +165,47 @@ export function SidePanelController() {
     ]);
     if (!initialTarget) {
       setNotice(session
-        ? "The conversation page was closed. Click New to bind the current page."
-        : "Open an http(s) page, then click New.");
+        ? t("notice.conversationPageClosed")
+        : t("notice.openPageThenNew"));
     }
   }
 
   async function checkConnection(reconnect: boolean): Promise<boolean> {
     setConnection({
       phase: "checking",
-      title: reconnect ? "Reconnecting to local Codex" : "Connecting to local Codex",
-      message: "Chrome is starting the registered local bridge.",
+      title: reconnect ? t("connection.reconnectingTitle") : t("connection.connectingTitle"),
+      message: t("connection.startingBridge"),
     });
     const response = await chrome.runtime.sendMessage({ type: reconnect ? "ui.bridge.reconnect" : "ui.health" }) as ServerMessage;
     if (response.type === "agent.error") {
-      setConnection({ phase: "disconnected", title: "Local bridge not connected", message: response.error });
-      setNotice("Register the local bridge once, then reconnect.");
+      setConnection({ phase: "disconnected", title: t("connection.notConnectedTitle"), message: response.error });
+      setNotice(t("notice.registerBridge"));
       return false;
     }
     if (response.type !== "health.result") {
-      setConnection({ phase: "disconnected", title: "Local bridge not connected", message: "The bridge returned an unexpected response." });
+      setConnection({ phase: "disconnected", title: t("connection.notConnectedTitle"), message: t("connection.unexpectedBridge") });
       return false;
     }
     if (!response.codex.available) {
       setConnection({
         phase: "codex-missing",
-        title: "Codex CLI not found",
-        message: response.codex.error || "Install @openai/codex, then reconnect.",
+        title: t("connection.codexMissingTitle"),
+        message: response.codex.error || t("connection.installCodex"),
       });
-      setNotice("Codex CLI must be available before messages can be sent.");
+      setNotice(t("notice.codexRequired"));
       return false;
     }
     if (!response.codex.authenticated) {
       setConnection({
         phase: "login-required",
-        title: "Codex login required",
-        message: response.codex.error || "Run codex login in Terminal, finish ChatGPT login, then reconnect.",
+        title: t("connection.loginRequiredTitle"),
+        message: response.codex.error || t("connection.loginInstructions"),
       });
-      setNotice("Sign in to Codex, then reconnect.");
+      setNotice(t("notice.codexLoginRequired"));
       return false;
     }
-    setConnection({ phase: "ready", title: "Connected", message: "Local Codex is ready.", provider: response.provider });
-    setNotice(`Connected to ${response.provider}.`);
+    setConnection({ phase: "ready", title: t("connection.connectedTitle"), message: t("connection.ready"), provider: response.provider });
+    setNotice(t("notice.connectedProvider", { provider: response.provider }));
     if (reconnect) await refreshSkills(targetTabRef.current?.tabId);
     return true;
   }
@@ -211,6 +219,7 @@ export function SidePanelController() {
         messages: next.slice(-40),
         ...(typeof targetTabId === "number" ? { targetTabId } : {}),
         ...(pendingUserTaskRef.current ? { pendingTask: pendingUserTaskRef.current } : {}),
+        ...(pendingChoiceRef.current ? { pendingChoice: pendingChoiceRef.current } : {}),
       },
     });
   }
@@ -218,6 +227,7 @@ export function SidePanelController() {
   function appendMessage(role: ChatMessage["role"], content: string, attachments?: ChatMessage["attachments"]) {
     setMessages((current) => {
       const next = [...current, { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString(), ...(attachments ? { attachments } : {}) }].slice(-40);
+      messagesRef.current = next;
       void persistConversation(conversationIdRef.current, next);
       return next;
     });
@@ -267,8 +277,8 @@ export function SidePanelController() {
     ]).catch(() => [] as unknown as [ServerMessage | undefined, ServerMessage]);
     if (pageResponse?.type === "skill.list.result") {
       setPageSkills(pageResponse.skills);
-      try { setSkillScope(`${new URL(pageResponse.pageUrl).hostname} · ${pageResponse.skills.length} available`); }
-      catch { setSkillScope(`${pageResponse.skills.length} available`); }
+      try { setSkillScope(`${new URL(pageResponse.pageUrl).hostname} · ${t("skills.available", { count: pageResponse.skills.length })}`); }
+      catch { setSkillScope(t("skills.available", { count: pageResponse.skills.length })); }
     }
     if (catalogResponse?.type === "skill.catalog.result") setCatalog({ installed: catalogResponse.installed, marketplace: catalogResponse.marketplace });
   }
@@ -289,7 +299,7 @@ export function SidePanelController() {
       setSelected(null);
       setScreenshot(null);
       setSelectionMode(null);
-      setNotice("The conversation page was closed. Click New to bind the current page.");
+      setNotice(t("notice.conversationPageClosed"));
       return;
     }
     if (refreshed.url !== current.url) void refreshSkills(refreshed.tabId);
@@ -310,9 +320,12 @@ export function SidePanelController() {
     const oldTargetTabId = targetTabRef.current?.tabId;
     const nextId = crypto.randomUUID();
     conversationIdRef.current = nextId;
+    messagesRef.current = [];
     setMessages([]);
     setEvents([]);
     setPendingPlan(null);
+    pendingChoiceRef.current = null;
+    setPendingChoice(null);
     setSelected(null);
     setScreenshot(null);
     setPrompt("");
@@ -321,8 +334,8 @@ export function SidePanelController() {
     setActiveTabId(tabState.activeTabId ?? null);
     setTargetTabValue(activeTarget);
     setNotice(activeTarget
-      ? "New conversation. Bound to the page you are viewing now."
-      : "Open an http(s) page, then click New.");
+      ? t("notice.newConversation")
+      : t("notice.openPageThenNew"));
     await chrome.runtime.sendMessage({
       type: "ui.conversation.reset",
       conversationId: oldId,
@@ -335,23 +348,23 @@ export function SidePanelController() {
   }
 
   async function startSelection(mode: "element" | "image") {
-    if (!targetTab) return setNotice("Choose a target page first.");
+    if (!targetTab) return setNotice(t("notice.chooseTarget"));
     setSelectionMode(mode);
-    setNotice(mode === "image" ? "Click any visible element to capture it · Esc to cancel" : "Click any element on the page · Esc to cancel");
+    setNotice(mode === "image" ? t("notice.selectForCapture") : t("notice.selectElement"));
     const response = await chrome.runtime.sendMessage({ type: "ui.selection.start", mode, targetTabId: targetTab.tabId }) as { ok?: boolean; error?: string };
     if (!response?.ok) {
       setSelectionMode(null);
-      setNotice(`Selection failed: ${response?.error ?? "Open an http(s) page and reload the extension."}`);
+      setNotice(t("notice.selectionFailed", { error: response?.error ?? t("notice.selectionFallback") }));
     }
   }
 
   async function captureScreenshot() {
-    if (!targetTab) return setNotice("Choose a target page first.");
-    setNotice("Capturing the visible page…");
+    if (!targetTab) return setNotice(t("notice.chooseTarget"));
+    setNotice(t("notice.capturing"));
     const response = await chrome.runtime.sendMessage({ type: "ui.screenshot.capture", targetTabId: targetTab.tabId }) as { ok?: boolean; dataUrl?: string; title?: string; url?: string; error?: string };
-    if (!response.ok || !response.dataUrl) return setNotice(`Screenshot failed: ${response.error ?? "Unknown error"}`);
-    setScreenshot({ dataUrl: response.dataUrl, title: response.title || "Current page", url: response.url || "" });
-    setNotice("Screenshot captured locally.");
+    if (!response.ok || !response.dataUrl) return setNotice(t("notice.screenshotFailed", { error: response.error ?? t("notice.unknownError") }));
+    setScreenshot({ dataUrl: response.dataUrl, title: response.title || t("tab.current"), url: response.url || "" });
+    setNotice(t("notice.screenshotCaptured"));
   }
 
   async function clearContext() {
@@ -365,12 +378,12 @@ export function SidePanelController() {
     }).catch(() => undefined);
   }
 
-  async function submitTask(event?: React.FormEvent) {
+  async function submitTask(event?: React.FormEvent, confirmedChoice?: string) {
     event?.preventDefault();
-    const text = prompt.trim();
+    const text = confirmedChoice?.trim() || prompt.trim();
     if (!text || busy) return;
-    if (connection.phase !== "ready") return setNotice("Reconnect and complete Codex login before sending a message.");
-    if (!targetTab) return setNotice("Choose a target page first.");
+    if (connection.phase !== "ready") return setNotice(t("notice.reconnectBeforeSend"));
+    if (!targetTab) return setNotice(t("notice.chooseTarget"));
     const scope: ConversationScope = {
       conversationId: conversationIdRef.current,
       targetTabId: targetTab.tabId,
@@ -379,15 +392,20 @@ export function SidePanelController() {
     const task = composeAgentTask(text, pendingUserTaskRef.current);
     activeTaskRef.current = task;
     pendingUserTaskRef.current = null;
+    pendingChoiceRef.current = null;
+    setPendingChoice(null);
     const history = toAgentHistory(messages.slice(-20));
-    const attachments = summarizeMessageContext(selected, screenshot);
+    const attachments = summarizeMessageContext(selected, screenshot, {
+      noVisibleText: t("attachment.noVisibleText"),
+      currentPage: t("tab.current"),
+    });
     setEvents([]);
     appendMessage("user", text, attachments);
     setPrompt("");
     setBusyValue(true);
     stopRequestedRef.current = false;
     setPendingPlan(null);
-    setNotice("Agent is working…");
+    setNotice(t("notice.agentWorking"));
     try {
       const response = await chrome.runtime.sendMessage({
         type: "ui.run", task, history, ...scope,
@@ -395,32 +413,39 @@ export function SidePanelController() {
       }) as ServerMessage;
       if (stopRequestedRef.current || !isCurrentScope(scope)) return;
       if (response.type === "agent.error") throw new Error(response.error);
-      if (response.type !== "agent.result") throw new Error("Unexpected bridge response.");
+      if (response.type !== "agent.result") throw new Error(t("notice.unexpectedBridgeResponse"));
       await clearContext();
       if (response.decision.kind === "action_plan") {
         setPendingPlan(response.decision);
-        setNotice("Action ready. Confirm once to let the agent act, observe, and continue automatically.");
+        setNotice(t("notice.actionReady"));
       } else if (response.decision.kind === "answer") {
         activeTaskRef.current = "";
         appendMessage("assistant", response.decision.content);
-        setNotice(`Answered by ${response.provider}.`);
+        setNotice(t("notice.answeredBy", { provider: response.provider }));
       } else if (response.decision.kind === "complete") {
         activeTaskRef.current = "";
         appendMessage("assistant", response.decision.summary);
-        setNotice("The requested page state is already complete.");
+        setNotice(t("notice.alreadyComplete"));
       } else if (response.decision.kind === "needs_user") {
         pendingUserTaskRef.current = task;
-        appendMessage("assistant", response.decision.question);
-        setNotice("The agent needs more information.");
+        if (response.decision.options?.length) {
+          pendingChoiceRef.current = response.decision;
+          setPendingChoice(response.decision);
+          await persistConversation(conversationIdRef.current, messagesRef.current);
+          setNotice(t("notice.choiceReady"));
+        } else {
+          appendMessage("assistant", response.decision.question);
+          setNotice(t("notice.needsMoreInformation"));
+        }
       } else {
         activeTaskRef.current = "";
-        appendMessage("assistant", `Unable to continue: ${response.decision.reason}`);
+        appendMessage("assistant", t("notice.unableToContinue", { reason: response.decision.reason }));
         setNotice(response.decision.reason);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!stopRequestedRef.current) {
-        appendMessage("assistant", `Error: ${message}`);
+        appendMessage("assistant", t("notice.error", { error: message }));
         setNotice(message);
       }
     } finally { setBusyValue(false); }
@@ -432,17 +457,19 @@ export function SidePanelController() {
     setPendingPlan(null);
     setBusyValue(true);
     stopRequestedRef.current = false;
-    setNotice("Agent is operating the page and verifying each step…");
+    setNotice(t("notice.operatingAndVerifying"));
     try {
       const target = targetTabRef.current;
       const windowId = windowIdRef.current;
-      if (!target || typeof windowId !== "number") throw new Error("The conversation page is unavailable. Click New to bind the current page.");
+      if (!target || typeof windowId !== "number") throw new Error(t("notice.conversationPageClosed"));
       const scope: ConversationScope = { conversationId: conversationIdRef.current, targetTabId: target.tabId, windowId };
       const response = await chrome.runtime.sendMessage({ type: "ui.execute", plan, ...scope }) as {
         ok?: boolean;
         status?: "completed" | "needs_user" | "blocked";
         answer?: string;
         question?: string;
+        options?: string[];
+        recommendedOption?: string;
         evidence?: string[];
         steps?: number;
         recoverable?: boolean;
@@ -451,41 +478,63 @@ export function SidePanelController() {
       if (stopRequestedRef.current || !isCurrentScope(scope)) return;
       if (response.status === "needs_user") {
         pendingUserTaskRef.current = activeTaskRef.current;
-        appendMessage("assistant", response.question ?? "More information is required.");
-        setNotice("The agent needs more information.");
+        if (response.options?.length) {
+          const choice: AgentNeedsUser = {
+            kind: "needs_user",
+            question: response.question ?? t("notice.moreInformationRequired"),
+            options: response.options,
+            ...(response.recommendedOption ? { recommendedOption: response.recommendedOption } : {}),
+          };
+          pendingChoiceRef.current = choice;
+          setPendingChoice(choice);
+          await persistConversation(conversationIdRef.current, messagesRef.current);
+          setNotice(t("notice.choiceReady"));
+        } else {
+          appendMessage("assistant", response.question ?? t("notice.moreInformationRequired"));
+          setNotice(t("notice.needsMoreInformation"));
+        }
         return;
       }
       if (response.status === "blocked") {
         activeTaskRef.current = "";
-        appendMessage("assistant", `Unable to continue: ${response.error ?? "The page task is blocked."}`);
-        setNotice(response.recoverable ? "The page changed. You can revise the request and try again." : "The agent cannot continue safely.");
+        appendMessage("assistant", t("notice.unableToContinue", { reason: response.error ?? t("notice.pageTaskBlocked") }));
+        setNotice(response.recoverable ? t("notice.pageChangedRetry") : t("notice.cannotContinueSafely"));
         return;
       }
-      if (!response.ok) throw new Error(response.error ?? "Action failed.");
+      if (!response.ok) throw new Error(response.error ?? t("notice.actionFailed"));
       activeTaskRef.current = "";
-      appendMessage("assistant", completedConversationMessage(response.answer));
-      setNotice(`Page task completed in ${response.steps ?? 1} step(s).`);
+      appendMessage("assistant", completedConversationMessage(response.answer, t("notice.taskCompletedMessage")));
+      setNotice(t("notice.taskCompleted", { count: response.steps ?? 1 }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!stopRequestedRef.current) {
-        appendMessage("assistant", `Action stopped: ${message}`);
+        appendMessage("assistant", t("notice.actionStopped", { error: message }));
         setNotice(message);
       }
     } finally { setBusyValue(false); }
+  }
+
+  function cancelChoice() {
+    pendingChoiceRef.current = null;
+    pendingUserTaskRef.current = null;
+    activeTaskRef.current = "";
+    setPendingChoice(null);
+    setNotice(t("notice.choiceCancelled"));
+    void persistConversation(conversationIdRef.current, messagesRef.current);
   }
 
   async function stopAgent() {
     if (!busyRef.current) return;
     stopRequestedRef.current = true;
     setPendingPlan(null);
-    setNotice("Stopping the agent…");
+    setNotice(t("notice.stoppingAgent"));
     const response = await chrome.runtime.sendMessage({
       type: "ui.agent.stop",
       conversationId: conversationIdRef.current,
       targetTabId: targetTabRef.current?.tabId,
       windowId: windowIdRef.current,
     }) as { ok?: boolean; stopped?: boolean; error?: string };
-    setNotice(response.ok ? "Agent stopped." : `Stop failed: ${response.error ?? "Unknown error"}`);
+    setNotice(response.ok ? t("notice.agentStopped") : t("notice.stopFailed", { error: response.error ?? t("notice.unknownError") }));
   }
 
   async function activateTab(targetTabId: number) {
@@ -495,27 +544,31 @@ export function SidePanelController() {
 
   async function analyzeCode() {
     if (!selected || !targetTab) return;
-    setNotice("Searching configured repositories…");
+    setNotice(t("notice.searchingRepositories"));
     const response = await chrome.runtime.sendMessage({ type: "ui.repository.analyze", element: selected.element, pageUrl: selected.pageUrl, targetTabId: targetTab.tabId }) as ServerMessage;
     if (response.type === "agent.error") return setNotice(response.error);
-    if (response.type !== "repository.result") return setNotice("Unexpected repository response.");
-    appendMessage("assistant", formatRepositoryAnalysis(response.analysis));
-    setNotice("Repository evidence added to the conversation.");
+    if (response.type !== "repository.result") return setNotice(t("notice.unexpectedRepositoryResponse"));
+    appendMessage("assistant", formatRepositoryAnalysis(response.analysis, t));
+    setNotice(t("notice.repositoryEvidenceAdded"));
   }
 
   function chooseSkill(skill: Pick<SkillCatalogItem, "name" | "description">, debug = false) {
-    setPrompt(`${debug ? "Debug and run" : "Use"} the “${skill.name}” Skill on the current page. ${skill.description}`.trim());
+    setPrompt(t("skills.selectedPrompt", {
+      action: debug ? t("skills.debugAction") : t("skills.useAction"),
+      name: skill.name,
+      description: skill.description,
+    }).trim());
     setModal(null);
-    setNotice(`${skill.name} selected. Add any inputs, then send.`);
+    setNotice(t("notice.skillSelected", { name: skill.name }));
     queueMicrotask(() => inputRef.current?.focus());
   }
 
   async function installSkill(slug: string, updateAvailable: boolean) {
-    if (updateAvailable && !confirm("Update this Skill template? Your other custom Skills are unaffected.")) return;
+    if (updateAvailable && !confirm(t("notice.confirmSkillUpdate"))) return;
     const response = await chrome.runtime.sendMessage({ type: "ui.skill.install", slug }) as ServerMessage;
     if (response.type === "agent.error") return setNotice(response.error);
     await refreshSkills();
-    setNotice(response.type === "skill.installed" ? `${response.skill.name} installed.` : "Unexpected Skill response.");
+    setNotice(response.type === "skill.installed" ? t("notice.skillInstalled", { name: response.skill.name }) : t("notice.unexpectedSkillResponse"));
   }
 
   async function configureSkill(slug: string, enabled: boolean) {
@@ -526,7 +579,7 @@ export function SidePanelController() {
 
   async function editSkill(slug: string) {
     const response = await chrome.runtime.sendMessage({ type: "ui.skill.get", slug }) as ServerMessage;
-    if (response.type !== "skill.detail") return setNotice(response.type === "agent.error" ? response.error : "Unexpected Skill response.");
+    if (response.type !== "skill.detail") return setNotice(response.type === "agent.error" ? response.error : t("notice.unexpectedSkillResponse"));
     const skill: EditableAutomationSkill = response.skill;
     setEditingSkillSlug(skill.slug);
     setRecording(false);
@@ -538,36 +591,36 @@ export function SidePanelController() {
   }
 
   async function toggleRecording() {
-    if (!recording && !targetTab) return setNotice("Choose a target page first.");
+    if (!recording && !targetTab) return setNotice(t("notice.chooseTarget"));
     const response = await chrome.runtime.sendMessage({ type: recording ? "ui.recording.stop" : "ui.recording.start", targetTabId: targetTab?.tabId }) as { active?: boolean; startUrl?: string; actions?: RecordedBrowserAction[]; error?: string };
     if (response.error) return setNotice(response.error);
     const active = !recording;
     setRecording(active);
     setRecordingStartUrl(response.startUrl ?? recordingStartUrl);
     setRecordedActions(response.actions ?? []);
-    if (active && !skillName) setSkillName(defaultSkillName(response.startUrl ?? ""));
+    if (active && !skillName) setSkillName(defaultSkillName(response.startUrl ?? "", t));
     setModal("recording");
-    setNotice(active ? "Recording page actions. Stop when the workflow is complete." : "Recording stopped. Review and save it as a Skill.");
+    setNotice(active ? t("notice.recordingActive") : t("notice.recordingStopped"));
   }
 
   async function replayRecording() {
-    if (!targetTab) return setNotice("Choose a target page first.");
-    if (!recordedActions.length || !confirm(`Replay ${recordedActions.length} action(s) on the current page?`)) return;
+    if (!targetTab) return setNotice(t("notice.chooseTarget"));
+    if (!recordedActions.length || !confirm(t("notice.confirmReplay", { count: recordedActions.length }))) return;
     const response = await chrome.runtime.sendMessage({ type: "ui.recording.replay", actions: recordedActions, targetTabId: targetTab.tabId }) as { ok?: boolean; error?: string };
-    setNotice(response.ok ? "Workflow replay completed." : response.error ?? "Replay failed.");
+    setNotice(response.ok ? t("notice.replayCompleted") : response.error ?? t("notice.replayFailed"));
   }
 
   async function saveSkill() {
-    if (recording || !recordedActions.length || !skillName.trim()) return setNotice("Stop recording and provide a Skill name first.");
+    if (recording || !recordedActions.length || !skillName.trim()) return setNotice(t("notice.skillDetailsRequired"));
     const draft: AutomationSkillDraft = {
-      name: skillName.trim(), description: skillDescription.trim() || `Replay the recorded ${skillName.trim()} workflow.`,
+      name: skillName.trim(), description: skillDescription.trim() || t("notice.defaultSkillDescription", { name: skillName.trim() }),
       startUrl: recordingStartUrl || recordedActions[0]!.url, createdAt: new Date().toISOString(), requiresConfirmation: true, steps: recordedActions,
     };
     const response = await chrome.runtime.sendMessage({ type: "ui.skill.save", draft, ...(editingSkillSlug ? { existingSlug: editingSkillSlug } : {}) }) as ServerMessage;
-    if (response.type !== "skill.saved") return setNotice(response.type === "agent.error" ? response.error : "Unexpected Skill response.");
+    if (response.type !== "skill.saved") return setNotice(response.type === "agent.error" ? response.error : t("notice.unexpectedSkillResponse"));
     setEditingSkillSlug(response.skill.slug);
     await refreshSkills();
-    setNotice(`${response.skill.name} v${response.skill.version} saved locally.`);
+    setNotice(t("notice.skillSaved", { name: response.skill.name, version: response.skill.version }));
   }
 
   const activeSkills = skillView === "page" ? pageSkills : skillView === "installed" ? catalog.installed : catalog.marketplace;
@@ -585,9 +638,9 @@ export function SidePanelController() {
           onChoose={(tab) => void activateTab(tab.tabId)}
         />
         <div className="flex items-center gap-1.5">
-          <Button size="sm" disabled={busy} onClick={() => void newConversation()} aria-label="New conversation">
+          <Button size="sm" className="min-w-[72px] shrink-0 whitespace-nowrap px-3.5" disabled={busy} onClick={() => void newConversation()} aria-label={t("action.new")}>
             <Plus size={14} />
-            New
+            {t("action.new")}
           </Button>
         </div>
       </header>
@@ -605,7 +658,7 @@ export function SidePanelController() {
             : null}
         <div className="space-y-5">
           {messages.map((message) => <Message key={message.id} message={message} />)}
-          {busy ? <div className="flex items-center gap-2 text-xs text-slate-400"><LoaderCircle className="animate-spin" size={15} />Agent is working on the page…</div> : null}
+          {busy ? <div className="flex items-center gap-2 text-xs text-slate-400"><LoaderCircle className="animate-spin" size={15} />{t("agent.working")}</div> : null}
         </div>
 
         {selected ? <ContextCard selected={selected.element} screenshot={selected.screenshot} onClose={() => void clearContext()} onAnalyze={() => void analyzeCode()} /> : null}
@@ -615,20 +668,21 @@ export function SidePanelController() {
 
       <div className="shrink-0 px-3 pb-3">
         {pendingPlan ? <ApprovalCard plan={pendingPlan} onCancel={() => setPendingPlan(null)} onConfirm={() => void executePlan()} /> : null}
+        {pendingChoice ? <ChoiceCard key={`${pendingChoice.question}:${pendingChoice.options?.join("|")}`} choice={pendingChoice} onCancel={cancelChoice} onConfirm={(option) => void submitTask(undefined, option)} /> : null}
         <form onSubmit={(event) => void submitTask(event)} className="composer rounded-[22px] border border-slate-200 bg-white p-2.5 shadow-[0_10px_32px_rgba(15,23,42,.09)] transition focus-within:border-slate-300 focus-within:shadow-[0_12px_36px_rgba(15,23,42,.12)]">
-          {contextLabel ? <div className="mb-2 flex"><span className="flex max-w-full items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600"><MousePointer2 size={12} /><span className="truncate">{contextLabel}</span><button type="button" onClick={() => void clearContext()} aria-label="Remove context"><X size={12} /></button></span></div> : null}
-          <textarea ref={inputRef} value={prompt} disabled={connection.phase !== "ready"} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitTask(); } }} rows={2} placeholder={connection.phase === "ready" ? "Ask about this page or tell the agent what to do…" : "Connect and sign in to Codex to start…"} className="composer-input max-h-32 min-h-10 w-full resize-none border-0 bg-transparent px-1 text-[14px] leading-5 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400" />
+          {contextLabel ? <div className="mb-2 flex"><span className="flex max-w-full items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600"><MousePointer2 size={12} /><span className="truncate">{contextLabel}</span><button type="button" onClick={() => void clearContext()} aria-label={t("action.removeContext")}><X size={12} /></button></span></div> : null}
+          <textarea ref={inputRef} value={prompt} disabled={connection.phase !== "ready"} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitTask(); } }} rows={2} placeholder={connection.phase === "ready" ? t("prompt.ready") : t("prompt.unavailable")} className="composer-input max-h-32 min-h-10 w-full resize-none border-0 bg-transparent px-1 text-[14px] leading-5 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400" />
           <div className="mt-1 flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-0.5" aria-label="Page tools">
-              <ComposerToolButton active={selectionMode === "element"} label="Select element" onClick={() => void startSelection("element")}><MousePointer2 size={15} /></ComposerToolButton>
-              <ComposerToolButton active={selectionMode === "image"} label="Select image area" onClick={() => void startSelection("image")}><Image size={15} /></ComposerToolButton>
-              <ComposerToolButton active={Boolean(screenshot)} label="Capture viewport" onClick={() => void captureScreenshot()}><Camera size={15} /></ComposerToolButton>
-              <ComposerToolButton label="Open Skills" onClick={() => setModal("skills")}><Sparkles size={15} /></ComposerToolButton>
-              <ComposerToolButton active={recording} label={recording ? "Stop recording" : "Record workflow"} onClick={() => void toggleRecording()}>{recording ? <CircleStop size={15} /> : <Play size={15} />}</ComposerToolButton>
+            <div className="flex min-w-0 items-center gap-0.5" aria-label={t("prompt.tips")}>
+              <ComposerToolButton active={selectionMode === "element"} label={t("action.selectElement")} onClick={() => void startSelection("element")}><MousePointer2 size={15} /></ComposerToolButton>
+              <ComposerToolButton active={selectionMode === "image"} label={t("action.selectImageArea")} onClick={() => void startSelection("image")}><Image size={15} /></ComposerToolButton>
+              <ComposerToolButton active={Boolean(screenshot)} label={t("action.captureViewport")} onClick={() => void captureScreenshot()}><Camera size={15} /></ComposerToolButton>
+              <ComposerToolButton label={t("action.openSkills")} onClick={() => setModal("skills")}><Sparkles size={15} /></ComposerToolButton>
+              <ComposerToolButton active={recording} label={recording ? t("action.stopRecording") : t("action.recordWorkflow")} onClick={() => void toggleRecording()}>{recording ? <CircleStop size={15} /> : <Play size={15} />}</ComposerToolButton>
             </div>
             {busy
-              ? <button type="button" onClick={() => void stopAgent()} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-700" aria-label="Stop agent" title="Stop agent"><CircleStop size={15} /></button>
-              : <button type="submit" disabled={!prompt.trim() || connection.phase !== "ready"} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-200" aria-label="Send"><Send size={14} /></button>}
+              ? <button type="button" onClick={() => void stopAgent()} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-700" aria-label={t("action.stopAgent")} title={t("action.stopAgent")}><CircleStop size={15} /></button>
+              : <button type="submit" disabled={!prompt.trim() || connection.phase !== "ready"} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-200" aria-label={t("action.send")}><Send size={14} /></button>}
           </div>
         </form>
         <p className="mt-1.5 truncate px-2 text-center text-[10px] text-slate-400">{notice}</p>

@@ -525,7 +525,7 @@ async function requestContinuation(
 
 type AgentLoopResult =
   | { ok: true; status: "completed"; answer: string; evidence: string[]; steps: number }
-  | { ok: true; status: "needs_user"; question: string; steps: number }
+  | { ok: true; status: "needs_user"; question: string; options?: string[]; recommendedOption?: string; steps: number }
   | { ok: false; status: "blocked"; error: string; recoverable: boolean; steps: number };
 
 function terminalAgentResult(decision: AgentDecision, steps: number): AgentLoopResult | null {
@@ -533,7 +533,14 @@ function terminalAgentResult(decision: AgentDecision, steps: number): AgentLoopR
     return { ok: true, status: "completed", answer: decision.summary, evidence: decision.evidence, steps };
   }
   if (decision.kind === "needs_user") {
-    return { ok: true, status: "needs_user", question: decision.question, steps };
+    return {
+      ok: true,
+      status: "needs_user",
+      question: decision.question,
+      ...(decision.options?.length ? { options: decision.options } : {}),
+      ...(decision.recommendedOption ? { recommendedOption: decision.recommendedOption } : {}),
+      steps,
+    };
   }
   if (decision.kind === "blocked") {
     return { ok: false, status: "blocked", error: decision.reason, recoverable: decision.recoverable, steps };

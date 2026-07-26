@@ -14,6 +14,7 @@
 - Every single-plan MVP action requires confirmation. V2 requires explicit consent before starting the clearly labeled bounded loop; subsequent safe steps are visible in real time, individually validated, and stop at the configured step/time/failure budgets.
 - Payment, credential, destructive, and hidden-element operations are outside the tool set.
 - Password, file, token-like, OTP, and payment-like fields are marked sensitive; their values are excluded and agent filling is rejected.
+- User-authorized test flows are not rejected from page keywords alone. Labels such as amount, order, checkout, payment, or exam may be handled through ordinary constrained actions when the environment has no real-world effect; sensitive-field rejection, the initial confirmation, fresh-snapshot refs, budgets, and verification remain unchanged.
 - Repository queries run through direct `rg` process arguments with fixed strings, limits, timeouts, and no shell interpolation.
 
 ## Local installation boundary

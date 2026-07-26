@@ -4,7 +4,13 @@ This document is the single checklist for shipped capabilities and future scope.
 Checked items are implemented in the current repository. Unchecked items are
 planned only and must not be described as available.
 
-## Current release — 0.8.2
+## Current release — 0.8.5
+
+### Internal architecture
+
+- [x] Split shared contracts by browser, Agent, chat, repository, Skill, event, and transport domains
+- [x] Keep stable package barrels while making cross-domain dependencies explicit
+- [x] Split bridge routing, providers, prompts, Responses streaming, decision validation, Skill selection, page matching, and workflow generation
 
 ### Agent Runtime
 
@@ -29,6 +35,7 @@ planned only and must not be described as available.
 - [x] Keep **New** unavailable until the active run has stopped
 - [x] Stop safely when the bound tab closes and require **New** to continue
 - [x] Persist `needs_user` and combine the next reply with the original task
+- [x] Render bounded `needs_user` choices with a recommended preselection and one-click **Start**
 - [x] Keep local Codex thread and Responses `previous_response_id` continuity
 
 ### Message Context and Attachments
@@ -55,10 +62,12 @@ planned only and must not be described as available.
 ### Side-panel Experience
 
 - [x] Chrome MV3 Side Panel with a fixed conversation composer
+- [x] Simplified Chinese UI through semantic `i18next` resource keys
 - [x] **New** starts a genuinely fresh provider conversation
 - [x] Bound-page summary returns the user to the target tab without rebinding it
 - [x] Stop control with real cancellation/busy state
 - [x] Approval card for the initial action plan
+- [x] Choice confirmation card that resumes the original task without requiring typed input
 - [x] Timeline containing real Action, Verify, Complete, and Error events only
 - [x] Keep plan summaries out of chat and internal step counts out of assistant replies
 - [x] AI pointer, target ring, and action-status label

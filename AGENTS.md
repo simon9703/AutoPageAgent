@@ -14,13 +14,18 @@ Read `README.md` for usage, `docs/architecture.md` for component boundaries, `do
 
 ## Repository map
 
-- `packages/shared/src/index.ts`: cross-process protocol and domain types.
+- `packages/shared/src/index.ts`: compatibility barrel for cross-process domain and protocol types.
+- `packages/shared/src/{agent,browser,chat,repositories,skills}.ts`: bounded shared domain models.
+- `packages/shared/src/protocol.ts`: Native Messaging request/response unions.
 - `packages/shared/src/agent-events.ts`: streaming/runtime timeline event protocol.
-- `packages/bridge/src/index.ts`: Native Messaging stdin/stdout host and request routing.
+- `packages/bridge/src/index.ts`: minimal Native Messaging stdin/stdout host.
+- `packages/bridge/src/bridge/message-router.ts`: validated request dispatch, active-run cancellation, and response routing.
 - `packages/bridge/src/native-messaging.ts`: Chrome native-message framing.
-- `packages/bridge/src/agent.ts`: Codex/Responses providers, prompts, streaming, and decision validation.
+- `packages/bridge/src/agent.ts`: stable Agent API barrel.
+- `packages/bridge/src/agent/`: provider router, provider implementations, prompts, Responses streaming, and decision validation.
 - `packages/bridge/src/codex-app-server.ts`: Codex app-server JSON-RPC adapter.
-- `packages/bridge/src/skills.ts`: Marketplace, local Registry, page matching, selection, migration, and persistence.
+- `packages/bridge/src/skills.ts`: stable Skill API plus Registry/Marketplace persistence.
+- `packages/bridge/src/skills/`: Skill models, page matching, selection, workflow generation, and pure validation helpers.
 - `packages/bridge/src/repositories.ts`: bounded local `rg` evidence search.
 - `packages/extension/src/background.ts`: service-worker entry, Chrome event listeners, message dispatch, and agent-loop orchestration.
 - `packages/extension/src/background/`: bridge transport, target-tab messaging, screenshots, recorder state, and pending-run persistence.
@@ -31,6 +36,7 @@ Read `README.md` for usage, `docs/architecture.md` for component boundaries, `do
 - `packages/extension/src/sidepanel/App.tsx`: stable side-panel component entry.
 - `packages/extension/src/sidepanel/controller.tsx`: Chrome state, persistence, and conversation workflow orchestration.
 - `packages/extension/src/sidepanel/components.tsx`: side-panel presentation components.
+- `packages/extension/src/sidepanel/i18n/`: side-panel locale initialization and translation resources.
 - `skills/*`: bundled Marketplace templates. These are distribution assets, not user data.
 - `packages/bridge/test`: Node test suite for agent, runtime, repository, and Skill behavior.
 
@@ -72,7 +78,7 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 - Keep one current conversation per browser window. **New** binds the active tab in that window; tab focus changes never rebind it, target navigation stays in the conversation, and a closed target requires **New**.
 - Keep initial plans in the approval card, runtime step counts in status/timeline UI, and user-facing answers in chat. Do not duplicate plan or execution metadata as assistant messages.
 - Treat selected-element and screenshot attachments as one-message model context after a successful initial agent response. Retain only a compact, read-only attachment summary on the user message; never resend that summary or screenshot binary in later agent history.
-- Preserve `needs_user` continuation: the next user reply must resume the pending original task, including after the side panel reloads.
+- Preserve `needs_user` continuation: a typed reply or confirmed preselected choice must resume the pending original task, including after the side panel reloads.
 - Keep `answer`, `complete`, `blocked`, and `needs_user` semantically separate. After the first browser action, only evidence-backed `complete` may end the run successfully.
 - Navigation requires a fresh observation and never proves task completion by itself.
 - Normalize and validate every provider response in the bridge even when structured output is enabled upstream.

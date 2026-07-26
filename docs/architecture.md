@@ -46,7 +46,8 @@ packages/extension/src/
     ├── controller.tsx     # Chrome state, persistence, workflow orchestration
     ├── conversation.ts    # pure continuation and message formatting rules
     ├── components.tsx     # presentation-only UI components
-    └── formatters.ts      # pure presentation formatting
+    ├── formatters.ts      # pure presentation formatting
+    └── i18n/              # i18next initialization and locale resources
 ```
 
 Entrypoints stay minimal. Runtime/controller modules own browser lifecycle and orchestration, while feature modules own one bounded concern. Cross-process protocol types remain in `packages/shared`.
@@ -68,7 +69,7 @@ A browser window owns one current conversation. Its session is stored under a wi
 - closing the target stops an active run and requires **New**; it never falls back to another open tab;
 - agent events and returned results are accepted only when `windowId`, `conversationId`, and `targetTabId` all match;
 - **New** remains disabled while a run is active; stopping keeps the UI busy until cancellation has reached the running provider;
-- a `needs_user` decision persists the original task and combines the next user reply with it instead of starting an unrelated task.
+- a `needs_user` decision persists the original task and combines the next user reply with it instead of starting an unrelated task; bounded options are rendered as a confirmation card with the recommended or first option preselected.
 
 Every planned run persists its `windowId`, `conversationId`, `tabId`, initial page URL, and snapshot id. The confirmed observe-act-verify loop reuses that immutable scope for every action, navigation recovery, observation, and verification step. It never falls back to the currently active browser tab. Pending selected-element context is keyed by target tab so another window cannot overwrite it.
 
@@ -81,7 +82,31 @@ The bridge is registered once as `com.auto_page_agent.bridge`. Chrome launches i
 3. routes the request to authenticated local Codex or the configured Responses API;
 4. reuses provider conversation state until the user starts a new conversation, which clears both Codex thread and Responses chaining state;
 5. parses and validates the JSON decision;
-6. returns an answer, confirmation-required action plan, evidence-backed completion, blocked state, or request for user input.
+6. returns an answer, confirmation-required action plan, evidence-backed completion, blocked state, or request for user input with an optional validated choice list and recommendation.
+
+The bridge follows a stable-entrypoint, feature-folder structure:
+
+```text
+packages/bridge/src/
+├── index.ts                    # Native Messaging process bootstrap
+├── bridge/message-router.ts    # request dispatch and active-run lifecycle
+├── agent.ts                    # stable public barrel
+├── agent/
+│   ├── router.ts               # provider selection
+│   ├── providers/              # Codex and Responses adapters
+│   ├── prompt.ts               # model context construction
+│   ├── responses.ts            # Responses schema and SSE parsing
+│   └── decision.ts             # normalized, fail-closed decisions
+├── skills.ts                   # Registry/Marketplace persistence API
+└── skills/
+    ├── model.ts                # internal loaded models
+    ├── selection.ts            # task/page ranking
+    ├── page-patterns.ts        # page scope validation and matching
+    ├── workflow.ts             # declarative workflow generation
+    └── utils.ts                # pure normalization helpers
+```
+
+Shared contracts use the same domain split. `packages/shared/src/index.ts` is only a compatibility barrel; browser snapshots/actions, Agent decisions, chat, repository evidence, Skills, events, and transport messages live in separate files. This keeps protocol dependencies explicit while preserving existing `@auto-page-agent/shared` imports.
 
 The native-host manifest allowlists the stable extension id derived from `manifest.json`. The installer copies built bridge/shared assets and bundled Skills into the user's application-support directory; no TCP port or separately started dev process is involved. The side panel checks both bridge reachability and `account/read` during initialization. It exposes **Reconnect** and disables sending until local Codex is available and authenticated.
 
@@ -143,7 +168,7 @@ Other terminal or paused states:
 ```
 
 ```json
-{"kind":"needs_user","question":"Which account should be selected?"}
+{"kind":"needs_user","question":"Which account should be selected?","options":["Personal","Business"],"recommendedOption":"Personal"}
 ```
 
 Invariant rules:
@@ -210,6 +235,8 @@ The Skill discovery endpoint classifies hand-written Skills without workflow met
 
 Workflow schema v2 adds persistent `enabled` and `pagePatterns` fields. Pattern configuration rejects wildcard origins, credentials, queries, fragments, unsupported characters, and lists over 20 entries. Disabled workflows may be returned for management on a matching page, but the agent selector always filters them out.
 
-## Deferred translation analysis
+## UI localization and deferred translation analysis
 
-i18n is intentionally outside the current implementation. The shared protocol, element metadata collector, and repository query builder contain `TODO(i18n)` markers for a later `data-i18n-key` and translation-catalog provider without coupling that work to the current source/API flow.
+The side-panel interface uses `i18next` and `react-i18next`, with semantic English keys and a Simplified Chinese locale under `sidepanel/i18n/`. Product names such as Skills, Codex, and Auto Page Agent remain unchanged.
+
+Repository-level translation intelligence is still outside the current implementation. The shared protocol, element metadata collector, and repository query builder contain `TODO(i18n)` markers for a later `data-i18n-key` and translation-catalog provider without coupling that work to the current source/API flow.

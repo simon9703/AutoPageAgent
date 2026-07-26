@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatMessageAttachment, InspectedElement } from "@auto-page-agent/shared";
+import type { AgentNeedsUser, ChatMessage, ChatMessageAttachment, InspectedElement } from "@auto-page-agent/shared";
 
 export const LEGACY_CONVERSATION_STORAGE_KEYS = [
   "conversationId",
@@ -12,6 +12,7 @@ export interface ConversationSession {
   messages: ChatMessage[];
   targetTabId?: number;
   pendingTask?: string;
+  pendingChoice?: AgentNeedsUser;
 }
 
 interface SelectedMessageContext {
@@ -41,7 +42,34 @@ export function normalizeConversationSession(value: unknown): ConversationSessio
     ...(typeof candidate.pendingTask === "string" && candidate.pendingTask.trim()
       ? { pendingTask: candidate.pendingTask }
       : {}),
+    ...(normalizePendingChoice(candidate.pendingChoice)
+      ? { pendingChoice: normalizePendingChoice(candidate.pendingChoice)! }
+      : {}),
   };
+}
+
+export function normalizePendingChoice(value: unknown): AgentNeedsUser | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<AgentNeedsUser>;
+  if (candidate.kind !== "needs_user" || typeof candidate.question !== "string" || !candidate.question.trim()) return null;
+  const options = Array.isArray(candidate.options)
+    ? candidate.options.filter((option): option is string => typeof option === "string" && Boolean(option.trim())).slice(0, 5)
+    : [];
+  const recommendedOption = typeof candidate.recommendedOption === "string" && options.includes(candidate.recommendedOption)
+    ? candidate.recommendedOption
+    : undefined;
+  return {
+    kind: "needs_user",
+    question: candidate.question,
+    ...(options.length ? { options } : {}),
+    ...(recommendedOption ? { recommendedOption } : {}),
+  };
+}
+
+export function defaultChoice(choice: AgentNeedsUser): string {
+  return choice.recommendedOption && choice.options?.includes(choice.recommendedOption)
+    ? choice.recommendedOption
+    : choice.options?.[0] ?? "";
 }
 
 export function legacyConversationSession(value: Record<string, unknown>): ConversationSession | null {
@@ -61,20 +89,21 @@ export function composeAgentTask(userInput: string, pendingTask?: string | null)
   return `${originalTask}\n\nUser follow-up:\n${input}`;
 }
 
-export function completedConversationMessage(answer?: string): string {
-  return answer?.trim() || "Task completed.";
+export function completedConversationMessage(answer: string | undefined, fallback: string): string {
+  return answer?.trim() || fallback;
 }
 
 export function summarizeMessageContext(
   selected: SelectedMessageContext | null,
   screenshot: ScreenshotMessageContext | null,
+  labels: { noVisibleText: string; currentPage: string },
 ): ChatMessageAttachment[] | undefined {
   const attachments: ChatMessageAttachment[] = [];
   if (selected) {
     attachments.push({
       kind: "element",
       tagName: selected.element.tagName,
-      label: selected.element.label || selected.element.text || selected.element.nearbyText || "No visible text",
+      label: selected.element.label || selected.element.text || selected.element.nearbyText || labels.noVisibleText,
       pageUrl: selected.pageUrl,
       captured: Boolean(selected.screenshot),
     });
@@ -82,7 +111,7 @@ export function summarizeMessageContext(
   if (screenshot) {
     attachments.push({
       kind: "screenshot",
-      title: screenshot.title || "Current page",
+      title: screenshot.title || labels.currentPage,
       pageUrl: screenshot.url,
     });
   }

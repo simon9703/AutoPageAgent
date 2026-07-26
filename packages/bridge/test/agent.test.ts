@@ -49,8 +49,22 @@ test("normalizeDecision keeps blocked and needs-user states distinct from answer
     { kind: "blocked", reason: "Login required", recoverable: false },
   );
   assert.deepEqual(
-    normalizeDecision({ kind: "needs_user", question: "Which account?" }, snapshot),
-    { kind: "needs_user", question: "Which account?" },
+    normalizeDecision({
+      kind: "needs_user",
+      question: "Which account?",
+      options: ["Personal", "Business", "Personal", ""],
+      recommendedOption: "Business",
+    }, snapshot),
+    {
+      kind: "needs_user",
+      question: "Which account?",
+      options: ["Personal", "Business"],
+      recommendedOption: "Business",
+    },
+  );
+  assert.deepEqual(
+    normalizeDecision({ kind: "needs_user", question: "Which account?", options: ["Personal"], recommendedOption: "Unknown" }, snapshot),
+    { kind: "needs_user", question: "Which account?", options: ["Personal"] },
   );
 });
 
@@ -70,6 +84,16 @@ test("V2 planner accepts only one action before re-observation", () => {
   ] }, snapshot);
   assert.equal(result.kind, "action_plan");
   if (result.kind === "action_plan") assert.equal(result.steps.length, 1);
+});
+
+test("agent prompt authorizes the requested test flow while preserving runtime boundaries", () => {
+  const prompt = createAgentPrompt("Submit the test order", snapshot, []);
+  assert.match(prompt, /user-authorized automation test/u);
+  assert.match(prompt, /fill amounts, submit test orders/u);
+  assert.match(prompt, /Do not refuse merely because/u);
+  assert.match(prompt, /runtime confirmation card is the user's confirmation/u);
+  assert.match(prompt, /latest-snapshot validation/u);
+  assert.match(prompt, /"options":\["\.\.\."\]/u);
 });
 
 test("Responses SSE collects internal JSON without exposing protocol fragments as timeline events", async () => {

@@ -5,6 +5,7 @@ import {
   completedConversationMessage,
   composeAgentTask,
   conversationStorageKey,
+  defaultChoice,
   legacyConversationSession,
   normalizeConversationSession,
   summarizeMessageContext,
@@ -17,19 +18,45 @@ test("conversation storage is isolated by browser window", () => {
   assert.notEqual(conversationStorageKey(4), conversationStorageKey(9));
 });
 
-test("conversation sessions retain one bound tab and pending task", () => {
+test("conversation sessions retain one bound tab, pending task, and confirmable choice", () => {
   assert.deepEqual(normalizeConversationSession({
     conversationId: "conversation-1",
     messages: [],
     targetTabId: 17,
     pendingTask: "Choose an account",
+    pendingChoice: {
+      kind: "needs_user",
+      question: "Which account?",
+      options: ["Personal", "Business"],
+      recommendedOption: "Business",
+    },
   }), {
     conversationId: "conversation-1",
     messages: [],
     targetTabId: 17,
     pendingTask: "Choose an account",
+    pendingChoice: {
+      kind: "needs_user",
+      question: "Which account?",
+      options: ["Personal", "Business"],
+      recommendedOption: "Business",
+    },
   });
   assert.equal(normalizeConversationSession({ messages: [] }), null);
+});
+
+test("choice confirmation defaults to the recommendation or first option", () => {
+  assert.equal(defaultChoice({
+    kind: "needs_user",
+    question: "Which account?",
+    options: ["Personal", "Business"],
+    recommendedOption: "Business",
+  }), "Business");
+  assert.equal(defaultChoice({
+    kind: "needs_user",
+    question: "Which account?",
+    options: ["Personal", "Business"],
+  }), "Personal");
 });
 
 test("legacy global conversation state migrates into a window session", () => {
@@ -58,8 +85,8 @@ test("ordinary messages remain standalone tasks", () => {
 });
 
 test("completed chat messages omit internal step metadata", () => {
-  assert.equal(completedConversationMessage("Invoice downloaded."), "Invoice downloaded.");
-  assert.equal(completedConversationMessage("  "), "Task completed.");
+  assert.equal(completedConversationMessage("Invoice downloaded.", "任务已完成。"), "Invoice downloaded.");
+  assert.equal(completedConversationMessage("  ", "任务已完成。"), "任务已完成。");
 });
 
 test("selected elements and screenshots become compact message summaries", () => {
@@ -71,6 +98,7 @@ test("selected elements and screenshots become compact message summaries", () =>
     summarizeMessageContext(
       { element, pageUrl: "https://example.com/reports", screenshot: { dataUrl: "data:image/jpeg;base64,large", title: "Publish report", url: "https://example.com/reports" } },
       { dataUrl: "data:image/jpeg;base64,large", title: "Reports", url: "https://example.com/reports" },
+      { noVisibleText: "没有可见文本", currentPage: "当前页面" },
     ),
     [
       { kind: "element", tagName: "button", label: "Publish report", pageUrl: "https://example.com/reports", captured: true },
