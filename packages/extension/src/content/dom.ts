@@ -75,6 +75,31 @@ export function isHiddenInput(element: Element): boolean {
   return element instanceof HTMLInputElement && element.type === "hidden";
 }
 
+export function isDisabledElement(element: Element): boolean {
+  return element.getAttribute("aria-disabled") === "true"
+    || ("disabled" in element && Boolean((element as HTMLInputElement).disabled));
+}
+
+export function isReadonlyElement(element: Element): boolean {
+  return "readOnly" in element && Boolean((element as HTMLInputElement).readOnly);
+}
+
+export function isComboboxLike(element: Element): boolean {
+  return element.getAttribute("role") === "combobox"
+    || element.getAttribute("aria-autocomplete") === "list"
+    || element.hasAttribute("aria-controls")
+    || element.hasAttribute("aria-expanded");
+}
+
+export function isAvailableOption(element: Element): boolean {
+  const isOption = element.getAttribute("role") === "option" || element.hasAttribute("aria-selected");
+  return isOption
+    && isVisible(element)
+    && isNearViewport(element, 700)
+    && isTopLayerElement(element)
+    && !isDisabledElement(element);
+}
+
 export function isSensitiveElement(element: Element): boolean {
   const inputType = element instanceof HTMLInputElement ? element.type : "";
   const metadata = [
@@ -120,6 +145,7 @@ export function inferRole(element: Element): string {
   if (element instanceof HTMLAnchorElement) return "link";
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return "textbox";
   if (element instanceof HTMLSelectElement) return "combobox";
+  if (element.hasAttribute("aria-selected")) return "option";
   return "";
 }
 
@@ -184,8 +210,11 @@ function simplifyElement(element: PageElementSnapshot, index: number): string {
     element.occluded ? 'data-occluded="true"' : "",
     !element.inViewport ? 'data-offscreen="true"' : "",
     typeof element.checked === "boolean" ? `aria-checked="${element.checked}"` : "",
+    typeof element.selected === "boolean" ? `aria-selected="${element.selected}"` : "",
     typeof element.expanded === "boolean" ? `aria-expanded="${element.expanded}"` : "",
     element.busy ? 'aria-busy="true"' : "",
+    element.controls ? `aria-controls="${escapeDomText(element.controls)}"` : "",
+    element.activeDescendant ? `aria-activedescendant="${escapeDomText(element.activeDescendant)}"` : "",
     element.sensitive ? 'data-sensitive="true"' : "",
   ].filter(Boolean).join(" ");
   const text = escapeDomText(cleanText(element.text || element.value || "", 180));

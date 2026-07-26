@@ -55,6 +55,7 @@ planned only and must not be described as available.
 - [x] Capture page text, selected text, headings, geometry, and interaction state
 - [x] Track stable fingerprints, occlusion, loading, disabled, read-only, checked, and expanded state
 - [x] Compute snapshot diffs and element-state changes between actions
+- [x] Support dynamic searchable combobox options with lightweight ARIA refs and fresh observation
 - [x] Collect Navigation and Resource Timing only for explicit performance/network/API tasks
 - [x] Avoid duplicate Snapshot payloads in continuation requests
 - [x] Correlate fetch/XHR Resource Timing URLs with bounded repository search

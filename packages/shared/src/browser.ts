@@ -26,8 +26,11 @@ export interface PageElementSnapshot {
   occluded: boolean;
   readonly: boolean;
   checked?: boolean;
+  selected?: boolean;
   expanded?: boolean;
   busy?: boolean;
+  controls?: string;
+  activeDescendant?: string;
   viewportRect: ViewportRect;
 }
 

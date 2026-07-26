@@ -93,6 +93,9 @@ test("agent prompt authorizes the requested test flow while preserving runtime b
   assert.match(prompt, /Do not refuse merely because/u);
   assert.match(prompt, /runtime confirmation card is the user's confirmation/u);
   assert.match(prompt, /latest-snapshot validation/u);
+  assert.match(prompt, /filling search text does not select an option/u);
+  assert.match(prompt, /Use select only for a native select element/u);
+  assert.match(prompt, /final combobox value or selected label\/tag/u);
   assert.match(prompt, /"options":\["\.\.\."\]/u);
 });
 

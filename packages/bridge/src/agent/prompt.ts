@@ -33,6 +33,8 @@ export function createAgentPrompt(
     "Do not ask the user whether to take an obvious next step. If the page already provides a clear best match, first item, default option, or confirmation control consistent with the task, choose it and return an action_plan; the runtime confirmation card is the user's confirmation.",
     "When no safe action or recovery is available return: {\"kind\":\"blocked\",\"reason\":\"...\",\"recoverable\":false}.",
     "Plan exactly one next action. The runtime observes and verifies the page again before asking for another action.",
+    "For a searchable combobox, filling search text does not select an option. Fill the query, reobserve the page, and click the exact visible role=option from the fresh snapshot. Use select only for a native select element.",
+    "After choosing a combobox option, complete only with evidence from the final combobox value or selected label/tag. Text that appears only in the candidate option list is not completion evidence.",
     "If loopState.reobserve is present, the previous snapshot and refs are invalid. Replan only from the current Page snapshot and never retry an old ref.",
     "Use only data-ai-ref values present in simplifiedDom as targetRef. Prefer visible, unoccluded, enabled elements. Never output JavaScript, CSS selectors, XPath, credentials, secrets, OTPs, file uploads, destructive actions, or actions outside the requested test flow.",
     "A successful action is not task completion. Once an action has been executed, never use answer to report completion; use complete with exact evidence copied from the current snapshot. Navigation alone is not completion.",
