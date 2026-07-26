@@ -585,7 +585,7 @@ export function SidePanelController() {
           onChoose={(tab) => void activateTab(tab.tabId)}
         />
         <div className="flex items-center gap-1.5">
-          <Button size="sm" disabled={busy} onClick={() => void newConversation()} aria-label="New conversation">
+          <Button size="sm" className="min-w-[72px] shrink-0 whitespace-nowrap px-3.5" disabled={busy} onClick={() => void newConversation()} aria-label="New conversation">
             <Plus size={14} />
             New
           </Button>

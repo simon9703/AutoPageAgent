@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Bot, Camera, Check, ChevronDown, CircleStop, Code2, Copy, Globe2, Image, MousePointer2, Play, RefreshCw, Send, Sparkles, WandSparkles, WifiOff, X } from "lucide-react";
 import type { AgentEvent, BrowserActionPlan, BrowserTabTarget, ChatMessage, InspectedElement, PageSkillSummary, RecordedBrowserAction, SkillCatalogItem } from "@auto-page-agent/shared";
 import { eventLabel, hostname } from "./formatters.js";
+import { orderTabsForPicker } from "./tab-picker.js";
 
 export type SkillView = "page" | "installed" | "marketplace";
 
@@ -41,8 +42,20 @@ export function TargetTabHeader(props: {
   onChoose: (tab: BrowserTabTarget) => void;
 }) {
   const targetVisible = props.target?.tabId === props.activeTabId;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const orderedTabs = orderTabsForPicker(props.tabs, props.activeTabId, props.target?.tabId ?? null);
+
+  useEffect(() => {
+    if (!props.open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) props.onToggle();
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+  }, [props.open, props.onToggle]);
+
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+    <div ref={rootRef} className="flex min-w-0 flex-1 items-center gap-2.5">
       <img src="assets/icon-48.png" className="h-9 w-9 shrink-0 rounded-[11px]" alt="" />
       <button type="button" onClick={props.onToggle} className="flex min-w-0 max-w-[calc(100%-46px)] items-center gap-1.5 rounded-xl px-1.5 py-1 text-left transition hover:bg-slate-50" aria-expanded={props.open} aria-label="Switch browser tab">
         <span className="min-w-0">
@@ -60,7 +73,7 @@ export function TargetTabHeader(props: {
       </button>
       {props.open ? (
         <div className="absolute left-3 right-3 top-[calc(100%-4px)] z-40 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl">
-          {props.tabs.length ? props.tabs.map((tab) => (
+          {orderedTabs.length ? orderedTabs.map((tab) => (
             <button key={tab.tabId} type="button" onClick={() => props.onChoose(tab)} className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left hover:bg-slate-50">
               {tab.favIconUrl ? <img src={tab.favIconUrl} className="h-4 w-4 shrink-0 rounded-sm" alt="" /> : <Globe2 size={15} className="shrink-0 text-slate-400" />}
               <span className="min-w-0 flex-1">
