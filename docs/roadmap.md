@@ -92,6 +92,10 @@ planned only and must not be described as available.
 - [x] Run Skills through the same constrained Agent Runtime
 - [x] Redact sensitive recorded values and use manual-input checkpoints
 - [x] Enable or disable installed Skills
+- [x] Explicitly select one Skill and retain it across Agent loop turns
+- [x] Add, delete, download, and import Skills from the side-panel Registry
+- [x] Record live forms, checkable controls, container scrolling, navigation, and bounded key-frame screenshots
+- [x] Summarize the current page conversation and operations into an editable Skill draft
 
 ### Local Repository Intelligence
 
@@ -125,7 +129,7 @@ model or introducing a full multi-conversation system.
 - [ ] Regenerate stale refs/selectors through a fresh page observation
 - [ ] Add step-specific confirmation policies without bypassing the global safety boundary
 - [ ] Declare required browser tools and permissions in Skill metadata
-- [ ] Export and import a portable Skill bundle
+- [x] Export and import a portable Skill bundle
 - [ ] Show workflow success rate and failed-step metrics
 
 ### P1 — Source-to-page analysis

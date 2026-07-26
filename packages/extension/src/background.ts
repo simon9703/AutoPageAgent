@@ -1,9 +1,11 @@
-import type { ActionExecutionResult, AgentDecision, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ElementSelectionGeometry, InspectedElement, PageSnapshot, PerformanceSnapshot, RecordedBrowserAction, ServerMessage } from "@auto-page-agent/shared";
+import type { ActionExecutionResult, AgentDecision, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ElementSelectionGeometry, InspectedElement, PageSnapshot, PerformanceSnapshot, RecordedBrowserAction, ServerMessage, SkillExportBundle, SkillSummaryRequest } from "@auto-page-agent/shared";
 import { reconnectBridge, requestBridge } from "./background/bridge-client.js";
 import { PendingAgentRunStore, type PendingAgentRun } from "./background/pending-agent-run.js";
 import {
   appendRecordedAction,
+  captureRecordingFrame,
   getRecordingState,
+  recordNavigation,
   replayRecording,
   resumeRecordingForSender,
   startRecording,
@@ -54,6 +56,7 @@ chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.url) void clearSelectionForTab(tabId, tab.windowId);
+  if (changeInfo.status === "complete" && tab.url) void recordNavigation(tabId, tab.url, tab.title ?? "");
   if (changeInfo.url || changeInfo.title || changeInfo.status === "complete") {
     void chrome.runtime.sendMessage({
       type: "ui.tabs.changed",
@@ -126,6 +129,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       Number(message.targetTabId),
       Number(message.windowId),
       message.screenshot && typeof message.screenshot === "object" ? message.screenshot as { dataUrl?: string; title?: string; url?: string } : undefined,
+      typeof message.selectedSkillSlug === "string" ? message.selectedSkillSlug : undefined,
     ).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
@@ -178,6 +182,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void replayRecording(message.actions as RecordedBrowserAction[], Number(message.targetTabId)).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
+  if (message?.type === "ui.recording.screenshot") {
+    void captureRecordingFrame(Number(message.targetTabId), "manual").then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
   if (message?.type === "ui.skill.save") {
     void requestBridge({ id: crypto.randomUUID(), type: "skill.save", draft: message.draft as AutomationSkillDraft, ...(typeof message.existingSlug === "string" ? { existingSlug: message.existingSlug } : {}) }).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
@@ -202,6 +210,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       ...(typeof message.enabled === "boolean" ? { enabled: message.enabled } : {}),
       ...(Array.isArray(message.pagePatterns) ? { pagePatterns: message.pagePatterns.map(String) } : {}),
     }).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.skill.delete") {
+    void requestBridge({ id: crypto.randomUUID(), type: "skill.delete", slug: String(message.slug ?? "") }).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.skill.export") {
+    void requestBridge({ id: crypto.randomUUID(), type: "skill.export", slug: String(message.slug ?? "") }).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.skill.import") {
+    void requestBridge({ id: crypto.randomUUID(), type: "skill.import", bundle: message.bundle as SkillExportBundle }).then(sendResponse).catch(toErrorResponse(sendResponse));
+    return true;
+  }
+  if (message?.type === "ui.skill.summarize") {
+    void requestBridge({ id: crypto.randomUUID(), type: "skill.summarize", input: message.input as SkillSummaryRequest }).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
   }
   if (message?.type === "ui.skills.list") {
@@ -324,7 +348,15 @@ function normalizeScreenshot(
   };
 }
 
-async function runTask(task: string, conversationId: string, history: ChatMessage[], targetTabId: number, windowId: number, screenshot?: { dataUrl?: string; title?: string; url?: string }): Promise<ServerMessage> {
+async function runTask(
+  task: string,
+  conversationId: string,
+  history: ChatMessage[],
+  targetTabId: number,
+  windowId: number,
+  screenshot?: { dataUrl?: string; title?: string; url?: string },
+  selectedSkillSlug?: string,
+): Promise<ServerMessage> {
   if (!task.trim()) throw new Error("Enter a task first.");
   if (!conversationId) throw new Error("The conversation is unavailable. Click New and try again.");
   const run = beginAgentRun(conversationId, targetTabId, windowId);
@@ -353,6 +385,7 @@ async function runTask(task: string, conversationId: string, history: ChatMessag
       tabId: tab.id,
       windowId: tab.windowId,
       pageUrl: snapshot.url,
+      ...(selectedSkillSlug ? { selectedSkillSlug } : {}),
     };
     await pendingAgentRuns.save(pendingRun);
     try {
@@ -365,6 +398,7 @@ async function runTask(task: string, conversationId: string, history: ChatMessag
         snapshot,
         conversationId: pendingRun.conversationId,
         history: pendingRun.history,
+        ...(pendingRun.selectedSkillSlug ? { selectedSkillSlug: pendingRun.selectedSkillSlug } : {}),
       }, (event) => emitUiEvent(event, pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId));
       assertAgentRunActive(run);
       if (response.type === "agent.result" && response.decision.kind === "action_plan") {
@@ -516,6 +550,7 @@ async function requestContinuation(
     conversationId: pendingRun.conversationId,
     history: pendingRun.history,
     loop,
+    ...(pendingRun.selectedSkillSlug ? { selectedSkillSlug: pendingRun.selectedSkillSlug } : {}),
   }, (event) => emitUiEvent(event, pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId));
   assertAgentRunActive(run);
   if (response.type === "agent.error") throw new Error(response.error);

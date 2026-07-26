@@ -3,13 +3,17 @@ import { AgentRouter } from "../agent.js";
 import { loadRepositoryRoots, LocalRepositoryProvider } from "../repositories.js";
 import {
   configureAutomationSkill,
+  deleteAutomationSkill,
+  exportAutomationSkill,
   getEditableSkill,
+  importAutomationSkill,
   installMarketplaceSkill,
   listSkillCatalog,
   listSkillsForPage,
   loadSkills,
   saveAutomationSkill,
 } from "../skills.js";
+import { summarizeSkill } from "../skills/summarize.js";
 
 export type ServerMessageSink = (message: ServerMessage) => void;
 
@@ -85,6 +89,7 @@ export class BridgeMessageRouter {
             history: request.history,
             loop: request.loop,
             signal: controller.signal,
+            selectedSkillSlug: request.selectedSkillSlug,
           },
           (event) => emit({ id: request.id, type: "agent.event", event }),
         );
@@ -128,6 +133,18 @@ export class BridgeMessageRouter {
         type: "skill.saved",
         skill: await saveAutomationSkill(request.draft, undefined, request.existingSlug),
       };
+    }
+    if (request.type === "skill.delete") {
+      return { id: request.id, type: "skill.deleted", slug: await deleteAutomationSkill(request.slug) };
+    }
+    if (request.type === "skill.export") {
+      return { id: request.id, type: "skill.exported", ...await exportAutomationSkill(request.slug) };
+    }
+    if (request.type === "skill.import") {
+      return { id: request.id, type: "skill.saved", skill: await importAutomationSkill(request.bundle) };
+    }
+    if (request.type === "skill.summarize") {
+      return { id: request.id, type: "skill.summary.result", draft: summarizeSkill(request.input) };
     }
     return assertNever(request);
   }

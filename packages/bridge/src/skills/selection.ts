@@ -64,7 +64,7 @@ function summarizeSkill(skill: LoadedSkill, page: URL): PageSkillSummary {
   const pagePatterns = skill.workflow ? getPagePatterns(skill.workflow) : [];
   const steps = Array.isArray(skill.workflow?.steps) ? skill.workflow.steps : [];
   const actions = Array.from(new Set(steps.map((step) => step.action).filter((action): action is RecordedActionKind =>
-    typeof action === "string" && ["click", "fill", "select", "scroll", "submit"].includes(action),
+    typeof action === "string" && ["click", "fill", "select", "scroll", "submit", "navigate"].includes(action),
   )));
   const variableNames = Array.from(new Set(steps.flatMap((step) => typeof step.value === "string"
     ? Array.from(step.value.matchAll(/\{\{([a-z0-9_]+)\}\}/giu), (match) => match[1]!)

@@ -5,6 +5,7 @@ export interface LoadedWorkflow {
   enabled?: boolean;
   startUrl?: string;
   pagePatterns?: string[];
+  instructions?: string;
   steps?: Array<Partial<RecordedBrowserAction> & { value?: string }>;
 }
 

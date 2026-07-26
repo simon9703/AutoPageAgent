@@ -19,7 +19,7 @@ The MVP implements the browser-page domain, lightweight performance evidence, lo
 - **Content script** creates a bounded snapshot and executes approved actions.
 - **Element picker** captures source metadata and stable textual/attribute clues for repository analysis.
 - **Screenshot capture** uses `captureVisibleTab`, keeps the JPEG data URL inside the extension, and attaches it only when the user sends a message while the preview is selected.
-- **Workflow recorder** captures bounded declarative actions in Chrome session storage and never records sensitive values.
+- **Workflow recorder** captures bounded declarative actions plus session-only key-frame screenshots and never records sensitive values.
 
 The extension source follows entrypoint-first boundaries:
 
@@ -227,9 +227,11 @@ Resource Timing entries initiated by `fetch` or `xmlhttprequest` are normalized 
 
 ## Recorded automation Skills
 
-The content script records supported user interactions as declarative steps: action, sanitized selector, page URL, accessible label, scroll position, and an optional non-sensitive session value. The background worker owns recorder state so a same-tab navigation can re-arm recording. A test replay is explicit and confirmation-gated.
+The content script records supported user interactions as declarative steps: live debounced text/contenteditable input, checkbox/radio state, selects, clicks, submits, window or scroll-container positions, sanitized selectors, page URLs, and accessible labels. The background worker owns recorder state, adds navigation steps after same-tab loads, and re-arms recording when the content script reloads. It also stores at most 12 compressed session-only screenshots captured at the start, after key actions/navigation, or on explicit request. A test replay is explicit and confirmation-gated.
 
-When saved, the bridge validates every URL and action, bounds the workflow to 100 steps, removes all recorded values, and replaces non-sensitive form values with named `{{variables}}`. Each generated folder contains instructions in `SKILL.md` and machine-readable configuration in `workflow.json`; both are loaded into the Codex planning context. Selectors are hints, not trusted commands, and current targets must be revalidated before execution.
+When saved, the bridge validates every URL and action, bounds the workflow to 100 steps, removes all recorded values, and replaces non-sensitive form values with named `{{variables}}`. Screenshot binaries never enter the durable workflow. Each generated folder contains instructions in `SKILL.md` and machine-readable configuration in `workflow.json`; both are loaded into the Codex planning context. Selectors are hints, not trusted commands, and current targets must be revalidated before execution.
+
+The Registry supports explicit Skill selection, create/update/delete, portable JSON import/export, and Marketplace reinstall after deletion. The conversation summary flow generates an editable page-scoped draft from recent chat messages, Agent action/verification notes, and recorded steps; it still uses the same validated save boundary.
 
 The Skill discovery endpoint classifies hand-written Skills without workflow metadata as global. Recorded Skills match only pages with the same HTTP(S) origin and the recorded start-path prefix. Page-scoped Skills sort before global capabilities in the side panel, and unrelated page workflows are excluded from the Codex prompt as well as the visible function list.
 

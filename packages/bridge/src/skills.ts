@@ -1,8 +1,8 @@
-import { cp, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AutomationSkillDraft, ConfiguredAutomationSkill, EditableAutomationSkill, SavedAutomationSkill, SkillCatalogItem } from "@auto-page-agent/shared";
+import type { AutomationSkillDraft, ConfiguredAutomationSkill, EditableAutomationSkill, SavedAutomationSkill, SkillCatalogItem, SkillExportBundle } from "@auto-page-agent/shared";
 import type { LoadedSkill, LoadedWorkflow } from "./skills/model.js";
 import { getPagePatterns, normalizePagePatterns, safeParseHttpUrl } from "./skills/page-patterns.js";
 import { isEditableStep, parameterizeWorkflow, renderSkillMarkdown } from "./skills/workflow.js";
@@ -125,6 +125,7 @@ export async function getEditableSkill(slug: string, root?: string): Promise<Edi
       timestamp: Number(step.timestamp) || index + 1,
       scrollX: Number(step.scrollX) || undefined,
       scrollY: Number(step.scrollY) || undefined,
+      checked: typeof step.checked === "boolean" ? step.checked : undefined,
     }))
     : [];
   return {
@@ -137,6 +138,7 @@ export async function getEditableSkill(slug: string, root?: string): Promise<Edi
     enabled: skill.workflow?.enabled !== false,
     pagePatterns: skill.workflow ? getPagePatterns(skill.workflow) : [],
     steps,
+    instructions: skill.workflow?.instructions ?? extractInstructions(skill.body),
   };
 }
 
@@ -168,7 +170,8 @@ export async function saveAutomationSkill(
   const name = cleanSingleLine(draft.name, 80);
   const description = cleanSingleLine(draft.description, 240);
   if (!name) throw new Error("Skill name is required.");
-  if (!draft.steps.length) throw new Error("Record at least one browser action before saving a Skill.");
+  const instructions = draft.instructions?.trim().slice(0, 20_000) ?? "";
+  if (!draft.steps.length && !instructions) throw new Error("Record at least one browser action or add Skill instructions before saving.");
   if (draft.steps.length > 100) throw new Error("A recorded Skill can contain at most 100 steps.");
   const slug = existingSlug ? validateSkillSlug(existingSlug) : toSkillSlug(name);
   const folder = resolve(actualRoot, slug);
@@ -192,6 +195,101 @@ export async function saveAutomationSkill(
     operation: existingSlug ? "updated" : "created",
     version,
   };
+}
+
+export async function deleteAutomationSkill(slug: string, root?: string): Promise<string> {
+  const actualRoot = root ?? await ensureSkillRegistry();
+  const safeSlug = validateSkillSlug(slug);
+  const folder = resolve(actualRoot, safeSlug);
+  if (!await pathExists(folder)) throw new Error("Skill was not found.");
+  await rm(folder, { recursive: true, force: false });
+  return safeSlug;
+}
+
+export async function exportAutomationSkill(slug: string, root?: string): Promise<{ filename: string; bundle: SkillExportBundle }> {
+  const actualRoot = root ?? await ensureSkillRegistry();
+  const safeSlug = validateSkillSlug(slug);
+  const skill = (await loadSkills(actualRoot)).find((item) => item.slug === safeSlug);
+  if (!skill) throw new Error("Skill was not found.");
+  return {
+    filename: `${safeSlug}.auto-page-agent-skill.json`,
+    bundle: {
+      format: "auto-page-agent-skill",
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      skill: {
+        name: skill.name,
+        description: skill.description,
+        category: skill.category,
+        version: skill.version,
+        instructions: skill.workflow
+          ? skill.workflow.instructions ?? extractInstructions(skill.body)
+          : stripFrontmatter(skill.body),
+        ...(skill.workflow ? { workflow: skill.workflow as Record<string, unknown> } : {}),
+      },
+    },
+  };
+}
+
+export async function importAutomationSkill(bundle: SkillExportBundle, root?: string): Promise<SavedAutomationSkill> {
+  if (!bundle || bundle.format !== "auto-page-agent-skill" || bundle.schemaVersion !== 1 || !bundle.skill) {
+    throw new Error("Unsupported Skill file.");
+  }
+  const workflow = bundle.skill.workflow;
+  const actualRoot = root ?? await ensureSkillRegistry();
+  if (!workflow) {
+    const name = cleanSingleLine(bundle.skill.name, 80);
+    const description = cleanSingleLine(bundle.skill.description, 240);
+    const instructions = String(bundle.skill.instructions ?? "").trim().slice(0, 20_000);
+    if (!name || !instructions) throw new Error("Imported Skill must include a name and instructions.");
+    const slug = toSkillSlug(name);
+    const folder = resolve(actualRoot, slug);
+    if (await pathExists(folder)) throw new Error("A Skill with this name already exists. Delete it first or import a renamed copy.");
+    const version = normalizeVersion(bundle.skill.version);
+    await mkdir(folder, { recursive: true });
+    await writeFile(resolve(folder, "SKILL.md"), [
+      "---",
+      `name: ${name}`,
+      `description: ${description}`,
+      `category: ${normalizeCategory(bundle.skill.category)}`,
+      `version: ${version}`,
+      "---",
+      "",
+      instructions,
+      "",
+    ].join("\n"), "utf8");
+    return {
+      name,
+      slug,
+      skillPath: `skills/${slug}/SKILL.md`,
+      variableNames: [],
+      operation: "created",
+      version,
+    };
+  }
+  const rawSteps = workflow && Array.isArray(workflow.steps) ? workflow.steps : [];
+  const steps = rawSteps.filter(isEditableStep).map((step, index) => ({
+    id: cleanSingleLine(step.id || `${index + 1}`, 100),
+    action: step.action,
+    url: typeof step.url === "string" ? step.url : String(workflow?.startUrl ?? ""),
+    selector: typeof step.selector === "string" ? step.selector : undefined,
+    label: typeof step.label === "string" ? step.label : undefined,
+    value: typeof step.value === "string" && !step.value.includes("{{") ? step.value : undefined,
+    sensitive: Boolean(step.sensitive),
+    timestamp: Number(step.timestamp) || index + 1,
+    scrollX: Number(step.scrollX) || undefined,
+    scrollY: Number(step.scrollY) || undefined,
+    checked: typeof step.checked === "boolean" ? step.checked : undefined,
+  }));
+  return saveAutomationSkill({
+    name: cleanSingleLine(bundle.skill.name, 80),
+    description: cleanSingleLine(bundle.skill.description, 240),
+    startUrl: typeof workflow?.startUrl === "string" ? workflow.startUrl : inferStartUrl(steps),
+    createdAt: new Date().toISOString(),
+    requiresConfirmation: true,
+    steps,
+    instructions: String(bundle.skill.instructions ?? "").slice(0, 20_000),
+  }, actualRoot);
 }
 
 
@@ -219,4 +317,18 @@ function toCatalogItem(skill: LoadedSkill, installed: boolean, source: "marketpl
 
 function catalogSort(left: SkillCatalogItem, right: SkillCatalogItem): number {
   return left.category.localeCompare(right.category) || left.name.localeCompare(right.name);
+}
+
+function extractInstructions(body: string): string {
+  return /^## Instructions\s*\n+([\s\S]*?)(?=\n## |\nUse this Skill|\s*$)/mu.exec(body)?.[1]?.trim() ?? "";
+}
+
+function stripFrontmatter(body: string): string {
+  return body.replace(/^---\s*\n[\s\S]*?\n---\s*/u, "").trim().slice(0, 20_000);
+}
+
+function inferStartUrl(steps: Array<{ url: string }>): string {
+  const first = steps.find((step) => /^https?:\/\//iu.test(step.url));
+  if (!first) throw new Error("Imported Skill must include a valid start URL.");
+  return first.url;
 }

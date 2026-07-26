@@ -7,7 +7,7 @@ import {
 import type {
   AgentEvent, AgentNeedsUser, AutomationSkillDraft, BrowserActionPlan, BrowserTabTarget, ChatMessage,
   EditableAutomationSkill, InspectedElement, PageSkillSummary,
-  RecordedBrowserAction, RepositoryAnalysis, ServerMessage, SkillCatalogItem,
+  RecordedBrowserAction, RecordedPageScreenshot, RepositoryAnalysis, ServerMessage, SkillCatalogItem, SkillExportBundle,
 } from "@auto-page-agent/shared";
 import { defaultSkillName, formatRepositoryAnalysis } from "./formatters.js";
 import { ApprovalCard, ChoiceCard, ComposerToolButton, ConnectionGate, ContextCard, EmptyState, Message, RecordingModal, ScreenshotCard, SkillsModal, TargetTabHeader, Timeline, type SkillView } from "./components.js";
@@ -53,10 +53,13 @@ export function SidePanelController() {
   const [catalog, setCatalog] = useState<{ installed: SkillCatalogItem[]; marketplace: SkillCatalogItem[] }>({ installed: [], marketplace: [] });
   const [recording, setRecording] = useState(false);
   const [recordedActions, setRecordedActions] = useState<RecordedBrowserAction[]>([]);
+  const [recordedScreenshots, setRecordedScreenshots] = useState<RecordedPageScreenshot[]>([]);
   const [recordingStartUrl, setRecordingStartUrl] = useState("");
   const [skillName, setSkillName] = useState("");
   const [skillDescription, setSkillDescription] = useState("");
+  const [skillInstructions, setSkillInstructions] = useState("");
   const [editingSkillSlug, setEditingSkillSlug] = useState("");
+  const [selectedSkill, setSelectedSkill] = useState<{ slug: string; name: string } | null>(null);
   const [tabs, setTabs] = useState<BrowserTabTarget[]>([]);
   const [targetTab, setTargetTab] = useState<BrowserTabTarget | null>(null);
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
@@ -77,11 +80,12 @@ export function SidePanelController() {
   const activeTaskRef = useRef("");
   const pendingUserTaskRef = useRef<string | null>(null);
   const pendingChoiceRef = useRef<AgentNeedsUser | null>(null);
+  const selectedSkillRef = useRef<{ slug: string; name: string } | null>(null);
 
   useEffect(() => {
     void initialize();
     const listener = (message: unknown) => {
-      const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; tabId?: number; windowId?: number; targetTabId?: number; screenshot?: { dataUrl: string; title: string; url: string }; reason?: string; error?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent; conversationId?: string };
+      const value = message as { type?: string; element?: InspectedElement; pageUrl?: string; tabId?: number; windowId?: number; targetTabId?: number; screenshot?: { dataUrl: string; title: string; url: string }; screenshots?: RecordedPageScreenshot[]; reason?: string; error?: string; actions?: RecordedBrowserAction[]; event?: AgentEvent; conversationId?: string };
       if (typeof value.windowId === "number" && value.windowId !== windowIdRef.current) return;
       if (value.type === "ui.element.selected" && value.element && value.tabId === targetTabRef.current?.tabId) {
         setSelected({ element: value.element, pageUrl: value.pageUrl ?? "", screenshot: value.screenshot });
@@ -94,7 +98,10 @@ export function SidePanelController() {
         setSelectionMode(null);
         setNotice(value.reason || t("notice.selectionCancelled"));
       }
-      if (value.type === "ui.recording.updated") setRecordedActions(value.actions ?? []);
+      if (value.type === "ui.recording.updated") {
+        setRecordedActions(value.actions ?? []);
+        setRecordedScreenshots(value.screenshots ?? []);
+      }
       if (value.type === "ui.bridge.disconnected") {
         setConnection({
           phase: "disconnected",
@@ -150,9 +157,11 @@ export function SidePanelController() {
     conversationIdRef.current = initialConversationId;
     pendingUserTaskRef.current = session?.pendingTask ?? null;
     pendingChoiceRef.current = session?.pendingChoice ?? null;
+    selectedSkillRef.current = session?.selectedSkill ?? null;
     setMessages(storedMessages);
     messagesRef.current = storedMessages;
     setPendingChoice(session?.pendingChoice ?? null);
+    setSelectedSkill(session?.selectedSkill ?? null);
     setTabs(availableTabs);
     setActiveTabId(tabState.activeTabId ?? null);
     setTargetTabValue(initialTarget);
@@ -220,6 +229,7 @@ export function SidePanelController() {
         ...(typeof targetTabId === "number" ? { targetTabId } : {}),
         ...(pendingUserTaskRef.current ? { pendingTask: pendingUserTaskRef.current } : {}),
         ...(pendingChoiceRef.current ? { pendingChoice: pendingChoiceRef.current } : {}),
+        ...(selectedSkillRef.current ? { selectedSkill: selectedSkillRef.current } : {}),
       },
     });
   }
@@ -262,10 +272,11 @@ export function SidePanelController() {
   }
 
   async function restoreRecording() {
-    const state = await chrome.runtime.sendMessage({ type: "ui.recording.status" }) as { active?: boolean; startUrl?: string; actions?: RecordedBrowserAction[] };
+    const state = await chrome.runtime.sendMessage({ type: "ui.recording.status" }) as { active?: boolean; startUrl?: string; actions?: RecordedBrowserAction[]; screenshots?: RecordedPageScreenshot[] };
     setRecording(Boolean(state.active));
     setRecordingStartUrl(state.startUrl ?? "");
     setRecordedActions(state.actions ?? []);
+    setRecordedScreenshots(state.screenshots ?? []);
   }
 
   async function refreshSkills(targetTabId = targetTabRef.current?.tabId) {
@@ -329,6 +340,8 @@ export function SidePanelController() {
     setSelected(null);
     setScreenshot(null);
     setPrompt("");
+    selectedSkillRef.current = null;
+    setSelectedSkill(null);
     activeTaskRef.current = "";
     pendingUserTaskRef.current = null;
     setActiveTabId(tabState.activeTabId ?? null);
@@ -410,6 +423,7 @@ export function SidePanelController() {
       const response = await chrome.runtime.sendMessage({
         type: "ui.run", task, history, ...scope,
         ...(screenshot ? { screenshot: { dataUrl: screenshot.dataUrl, title: screenshot.title, url: screenshot.url } } : {}),
+        ...(selectedSkill ? { selectedSkillSlug: selectedSkill.slug } : {}),
       }) as ServerMessage;
       if (stopRequestedRef.current || !isCurrentScope(scope)) return;
       if (response.type === "agent.error") throw new Error(response.error);
@@ -552,7 +566,11 @@ export function SidePanelController() {
     setNotice(t("notice.repositoryEvidenceAdded"));
   }
 
-  function chooseSkill(skill: Pick<SkillCatalogItem, "name" | "description">, debug = false) {
+  function chooseSkill(skill: Pick<SkillCatalogItem, "name" | "description" | "slug">, debug = false) {
+    const selected = { slug: skill.slug, name: skill.name };
+    selectedSkillRef.current = selected;
+    setSelectedSkill(selected);
+    void persistConversation(conversationIdRef.current, messagesRef.current);
     setPrompt(t("skills.selectedPrompt", {
       action: debug ? t("skills.debugAction") : t("skills.useAction"),
       name: skill.name,
@@ -577,6 +595,50 @@ export function SidePanelController() {
     await refreshSkills();
   }
 
+  function addSkill() {
+    setEditingSkillSlug("");
+    setRecording(false);
+    setRecordingStartUrl(targetTab?.url ?? "");
+    setRecordedActions([]);
+    setRecordedScreenshots([]);
+    setSkillName(targetTab ? defaultSkillName(targetTab.url, t) : "");
+    setSkillDescription("");
+    setSkillInstructions("");
+    setModal("recording");
+  }
+
+  async function importSkill(bundle: SkillExportBundle) {
+    const response = await chrome.runtime.sendMessage({ type: "ui.skill.import", bundle }) as ServerMessage;
+    if (response.type !== "skill.saved") return setNotice(response.type === "agent.error" ? response.error : t("notice.unexpectedSkillResponse"));
+    await refreshSkills();
+    setNotice(t("notice.skillImported", { name: response.skill.name }));
+  }
+
+  async function exportSkill(slug: string) {
+    const response = await chrome.runtime.sendMessage({ type: "ui.skill.export", slug }) as ServerMessage;
+    if (response.type !== "skill.exported") return setNotice(response.type === "agent.error" ? response.error : t("notice.unexpectedSkillResponse"));
+    const url = URL.createObjectURL(new Blob([`${JSON.stringify(response.bundle, null, 2)}\n`], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = response.filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setNotice(t("notice.skillDownloaded"));
+  }
+
+  async function deleteSkill(slug: string, name: string) {
+    if (!confirm(t("notice.confirmSkillDelete", { name }))) return;
+    const response = await chrome.runtime.sendMessage({ type: "ui.skill.delete", slug }) as ServerMessage;
+    if (response.type !== "skill.deleted") return setNotice(response.type === "agent.error" ? response.error : t("notice.unexpectedSkillResponse"));
+    if (selectedSkillRef.current?.slug === slug) {
+      selectedSkillRef.current = null;
+      setSelectedSkill(null);
+      void persistConversation(conversationIdRef.current, messagesRef.current);
+    }
+    await refreshSkills();
+    setNotice(t("notice.skillDeleted", { name }));
+  }
+
   async function editSkill(slug: string) {
     const response = await chrome.runtime.sendMessage({ type: "ui.skill.get", slug }) as ServerMessage;
     if (response.type !== "skill.detail") return setNotice(response.type === "agent.error" ? response.error : t("notice.unexpectedSkillResponse"));
@@ -587,17 +649,26 @@ export function SidePanelController() {
     setRecordedActions(skill.steps);
     setSkillName(skill.name);
     setSkillDescription(skill.description);
+    setSkillInstructions(skill.instructions ?? "");
+    setRecordedScreenshots([]);
     setModal("recording");
   }
 
   async function toggleRecording() {
     if (!recording && !targetTab) return setNotice(t("notice.chooseTarget"));
-    const response = await chrome.runtime.sendMessage({ type: recording ? "ui.recording.stop" : "ui.recording.start", targetTabId: targetTab?.tabId }) as { active?: boolean; startUrl?: string; actions?: RecordedBrowserAction[]; error?: string };
+    if (!recording && modal !== "recording") {
+      setEditingSkillSlug("");
+      setSkillDescription("");
+      setSkillInstructions("");
+      setRecordedScreenshots([]);
+    }
+    const response = await chrome.runtime.sendMessage({ type: recording ? "ui.recording.stop" : "ui.recording.start", targetTabId: targetTab?.tabId }) as { active?: boolean; startUrl?: string; actions?: RecordedBrowserAction[]; screenshots?: RecordedPageScreenshot[]; error?: string };
     if (response.error) return setNotice(response.error);
     const active = !recording;
     setRecording(active);
     setRecordingStartUrl(response.startUrl ?? recordingStartUrl);
     setRecordedActions(response.actions ?? []);
+    setRecordedScreenshots(response.screenshots ?? []);
     if (active && !skillName) setSkillName(defaultSkillName(response.startUrl ?? "", t));
     setModal("recording");
     setNotice(active ? t("notice.recordingActive") : t("notice.recordingStopped"));
@@ -610,11 +681,51 @@ export function SidePanelController() {
     setNotice(response.ok ? t("notice.replayCompleted") : response.error ?? t("notice.replayFailed"));
   }
 
+  async function captureRecordingScreenshot() {
+    if (!recording || !targetTab) return;
+    const response = await chrome.runtime.sendMessage({ type: "ui.recording.screenshot", targetTabId: targetTab.tabId }) as { screenshots?: RecordedPageScreenshot[]; error?: string };
+    if (response.error) return setNotice(response.error);
+    setRecordedScreenshots(response.screenshots ?? recordedScreenshots);
+    setNotice(t("notice.recordingScreenshotCaptured"));
+  }
+
+  async function summarizeAsSkill() {
+    if (!targetTab) return setNotice(t("notice.chooseTarget"));
+    if (!messages.length && !events.length && !recordedActions.length) return setNotice(t("notice.nothingToSummarize"));
+    setNotice(t("notice.summarizingSkill"));
+    const operationNotes = events.flatMap((event) => {
+      if (event.type === "action") return [`${t(`browserAction.${event.action}`)}：${event.detail || event.status}`];
+      if (event.type === "verify") return [`${t("agent.verify")}：${event.summary}`];
+      return [];
+    });
+    const response = await chrome.runtime.sendMessage({
+      type: "ui.skill.summarize",
+      input: {
+        pageUrl: targetTab.url,
+        pageTitle: targetTab.title,
+        messages: messagesRef.current,
+        actions: recordedActions,
+        operationNotes,
+      },
+    }) as ServerMessage;
+    if (response.type !== "skill.summary.result") return setNotice(response.type === "agent.error" ? response.error : t("notice.unexpectedSkillResponse"));
+    setEditingSkillSlug("");
+    setRecording(false);
+    setRecordingStartUrl(response.draft.startUrl);
+    setRecordedActions(response.draft.steps);
+    setSkillName(response.draft.name);
+    setSkillDescription(response.draft.description);
+    setSkillInstructions(response.draft.instructions);
+    setModal("recording");
+    setNotice(t("notice.skillSummaryReady"));
+  }
+
   async function saveSkill() {
-    if (recording || !recordedActions.length || !skillName.trim()) return setNotice(t("notice.skillDetailsRequired"));
+    if (recording || (!recordedActions.length && !skillInstructions.trim()) || !skillName.trim()) return setNotice(t("notice.skillDetailsRequired"));
     const draft: AutomationSkillDraft = {
       name: skillName.trim(), description: skillDescription.trim() || t("notice.defaultSkillDescription", { name: skillName.trim() }),
-      startUrl: recordingStartUrl || recordedActions[0]!.url, createdAt: new Date().toISOString(), requiresConfirmation: true, steps: recordedActions,
+      startUrl: recordingStartUrl || recordedActions[0]?.url || targetTab?.url || "", createdAt: new Date().toISOString(), requiresConfirmation: true, steps: recordedActions,
+      instructions: skillInstructions.trim(),
     };
     const response = await chrome.runtime.sendMessage({ type: "ui.skill.save", draft, ...(editingSkillSlug ? { existingSlug: editingSkillSlug } : {}) }) as ServerMessage;
     if (response.type !== "skill.saved") return setNotice(response.type === "agent.error" ? response.error : t("notice.unexpectedSkillResponse"));
@@ -669,8 +780,9 @@ export function SidePanelController() {
       <div className="shrink-0 px-3 pb-3">
         {pendingPlan ? <ApprovalCard plan={pendingPlan} onCancel={() => setPendingPlan(null)} onConfirm={() => void executePlan()} /> : null}
         {pendingChoice ? <ChoiceCard key={`${pendingChoice.question}:${pendingChoice.options?.join("|")}`} choice={pendingChoice} onCancel={cancelChoice} onConfirm={(option) => void submitTask(undefined, option)} /> : null}
+        {messages.length || events.length || recordedActions.length ? <div className="mb-1.5 flex justify-end px-1"><button type="button" disabled={busy} onClick={() => void summarizeAsSkill()} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[10px] font-medium text-slate-500 transition hover:bg-white hover:text-violet-700 disabled:opacity-40"><Sparkles size={12} />{t("action.summarizeSkill")}</button></div> : null}
         <form onSubmit={(event) => void submitTask(event)} className="composer rounded-[22px] border border-slate-200 bg-white p-2.5 shadow-[0_10px_32px_rgba(15,23,42,.09)] transition focus-within:border-slate-300 focus-within:shadow-[0_12px_36px_rgba(15,23,42,.12)]">
-          {contextLabel ? <div className="mb-2 flex"><span className="flex max-w-full items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600"><MousePointer2 size={12} /><span className="truncate">{contextLabel}</span><button type="button" onClick={() => void clearContext()} aria-label={t("action.removeContext")}><X size={12} /></button></span></div> : null}
+          {contextLabel || selectedSkill ? <div className="mb-2 flex flex-wrap gap-1.5">{contextLabel ? <span className="flex max-w-full items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600"><MousePointer2 size={12} /><span className="truncate">{contextLabel}</span><button type="button" onClick={() => void clearContext()} aria-label={t("action.removeContext")}><X size={12} /></button></span> : null}{selectedSkill ? <span className="flex max-w-full items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] text-violet-700"><Sparkles size={12} /><span className="truncate">{selectedSkill.name}</span><button type="button" onClick={() => { selectedSkillRef.current = null; setSelectedSkill(null); void persistConversation(conversationIdRef.current, messagesRef.current); }} aria-label={t("action.removeSkill")}><X size={12} /></button></span> : null}</div> : null}
           <textarea ref={inputRef} value={prompt} disabled={connection.phase !== "ready"} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitTask(); } }} rows={2} placeholder={connection.phase === "ready" ? t("prompt.ready") : t("prompt.unavailable")} className="composer-input max-h-32 min-h-10 w-full resize-none border-0 bg-transparent px-1 text-[14px] leading-5 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400" />
           <div className="mt-1 flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-0.5" aria-label={t("prompt.tips")}>
@@ -688,8 +800,8 @@ export function SidePanelController() {
         <p className="mt-1.5 truncate px-2 text-center text-[10px] text-slate-400">{notice}</p>
       </div>
 
-      {modal === "skills" ? <SkillsModal view={skillView} setView={setSkillView} scope={skillScope} items={activeSkills} onClose={() => setModal(null)} onRefresh={() => void refreshSkills()} onUse={chooseSkill} onInstall={(slug, update) => void installSkill(slug, update)} onToggle={(slug, enabled) => void configureSkill(slug, enabled)} onEdit={(slug) => void editSkill(slug)} /> : null}
-      {modal === "recording" ? <RecordingModal active={recording} actions={recordedActions} name={skillName} description={skillDescription} editing={Boolean(editingSkillSlug)} onName={setSkillName} onDescription={setSkillDescription} onClose={() => setModal(null)} onToggle={() => void toggleRecording()} onReplay={() => void replayRecording()} onSave={() => void saveSkill()} /> : null}
+      {modal === "skills" ? <SkillsModal view={skillView} setView={setSkillView} scope={skillScope} items={activeSkills} selectedSlug={selectedSkill?.slug ?? ""} onClose={() => setModal(null)} onRefresh={() => void refreshSkills()} onAdd={addSkill} onImport={(bundle) => void importSkill(bundle)} onUse={chooseSkill} onInstall={(slug, update) => void installSkill(slug, update)} onToggle={(slug, enabled) => void configureSkill(slug, enabled)} onEdit={(slug) => void editSkill(slug)} onDelete={(slug, name) => void deleteSkill(slug, name)} onExport={(slug) => void exportSkill(slug)} /> : null}
+      {modal === "recording" ? <RecordingModal active={recording} actions={recordedActions} screenshots={recordedScreenshots} name={skillName} description={skillDescription} instructions={skillInstructions} editing={Boolean(editingSkillSlug)} onName={setSkillName} onDescription={setSkillDescription} onInstructions={setSkillInstructions} onClose={() => setModal(null)} onToggle={() => void toggleRecording()} onCapture={() => void captureRecordingScreenshot()} onReplay={() => void replayRecording()} onSave={() => void saveSkill()} /> : null}
     </main>
   );
 }

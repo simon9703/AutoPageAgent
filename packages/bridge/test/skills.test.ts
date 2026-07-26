@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { AutomationSkillDraft } from "@auto-page-agent/shared";
-import { configureAutomationSkill, listSkillsForPage, loadSkills, saveAutomationSkill, selectSkillContext, selectSkills } from "../src/skills.js";
+import { configureAutomationSkill, deleteAutomationSkill, exportAutomationSkill, importAutomationSkill, listSkillsForPage, loadSkills, saveAutomationSkill, selectSkillContext, selectSkills } from "../src/skills.js";
+import { summarizeSkill } from "../src/skills/summarize.js";
 
 test("recorded Skills parameterize values and never persist sensitive input", async () => {
   const root = await mkdtemp(join(tmpdir(), "auto-page-agent-skills-"));
@@ -137,5 +138,71 @@ test("V3 Skill save requires an explicit update and increments its version", asy
     assert.match(markdown, /Updated report workflow/u);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Skills can be exported, imported, and deleted without overwriting an existing Skill", async () => {
+  const sourceRoot = await mkdtemp(join(tmpdir(), "auto-page-agent-export-"));
+  const targetRoot = await mkdtemp(join(tmpdir(), "auto-page-agent-import-"));
+  try {
+    const created = await saveAutomationSkill({
+      name: "Release helper",
+      description: "Prepare a release.",
+      startUrl: "https://example.com/releases/new",
+      createdAt: new Date().toISOString(),
+      requiresConfirmation: true,
+      instructions: "Open the release form and verify the preview.",
+      steps: [{ id: "1", action: "click", url: "https://example.com/releases/new", selector: "#preview", sensitive: false, timestamp: 1 }],
+    }, sourceRoot);
+    const exported = await exportAutomationSkill(created.slug, sourceRoot);
+    assert.equal(exported.bundle.format, "auto-page-agent-skill");
+    assert.match(exported.bundle.skill.instructions, /verify the preview/u);
+    const imported = await importAutomationSkill(exported.bundle, targetRoot);
+    assert.equal(imported.name, "Release helper");
+    await assert.rejects(() => importAutomationSkill(exported.bundle, targetRoot), /already exists/u);
+    assert.equal(await deleteAutomationSkill(imported.slug, targetRoot), imported.slug);
+    assert.equal((await loadSkills(targetRoot)).length, 0);
+  } finally {
+    await Promise.all([
+      rm(sourceRoot, { recursive: true, force: true }),
+      rm(targetRoot, { recursive: true, force: true }),
+    ]);
+  }
+});
+
+test("conversation summary creates editable Skill instructions and retains recorded steps", () => {
+  const result = summarizeSkill({
+    pageUrl: "https://example.com/releases/new",
+    pageTitle: "Create release",
+    messages: [
+      { id: "1", role: "user", content: "创建一个测试发布单", createdAt: new Date().toISOString() },
+      { id: "2", role: "assistant", content: "测试发布单已完成。", createdAt: new Date().toISOString() },
+    ],
+    actions: [{ id: "a", action: "click", url: "https://example.com/releases/new", selector: "#create", label: "Create", sensitive: false, timestamp: 1 }],
+    operationNotes: ["点击：Create", "验证：已显示成功提示"],
+  });
+  assert.equal(result.name, "Create release Skill");
+  assert.equal(result.steps.length, 1);
+  assert.match(result.instructions, /创建一个测试发布单/u);
+  assert.match(result.instructions, /已显示成功提示/u);
+});
+
+test("hand-written Skills without workflow.json remain portable", async () => {
+  const sourceRoot = await mkdtemp(join(tmpdir(), "auto-page-agent-handwritten-"));
+  const targetRoot = await mkdtemp(join(tmpdir(), "auto-page-agent-handwritten-import-"));
+  try {
+    const folder = join(sourceRoot, "page-helper");
+    await mkdir(folder);
+    await writeFile(join(folder, "SKILL.md"), "---\nname: Page helper\ndescription: Explain a page.\ncategory: page\nversion: 1.2.0\n---\n\n# Page helper\n\nInspect the current page and explain its visible state.\n", "utf8");
+    const exported = await exportAutomationSkill("page-helper", sourceRoot);
+    const imported = await importAutomationSkill(exported.bundle, targetRoot);
+    assert.equal(imported.workflowPath, undefined);
+    const markdown = await readFile(join(targetRoot, imported.slug, "SKILL.md"), "utf8");
+    assert.match(markdown, /Inspect the current page/u);
+  } finally {
+    await Promise.all([
+      rm(sourceRoot, { recursive: true, force: true }),
+      rm(targetRoot, { recursive: true, force: true }),
+    ]);
   }
 });

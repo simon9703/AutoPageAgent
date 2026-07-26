@@ -76,8 +76,16 @@ export function isHiddenInput(element: Element): boolean {
 }
 
 export function isSensitiveElement(element: Element): boolean {
-  if (!(element instanceof HTMLInputElement)) return false;
-  return ["password", "file"].includes(element.type) || /password|secret|token|otp|card|cvv|credential/iu.test(`${element.name} ${element.autocomplete}`);
+  const inputType = element instanceof HTMLInputElement ? element.type : "";
+  const metadata = [
+    element.getAttribute("name"),
+    element.getAttribute("id"),
+    element.getAttribute("autocomplete"),
+    element.getAttribute("placeholder"),
+    element.getAttribute("aria-label"),
+  ].filter(Boolean).join(" ");
+  return ["password", "file"].includes(inputType)
+    || /password|passcode|secret|token|otp|one[- ]?time|card|cvv|cvc|credential|api[-_ ]?key/iu.test(metadata);
 }
 
 export function isSensitiveCaptureTarget(element: Element): boolean {

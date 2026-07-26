@@ -32,6 +32,8 @@ A lightweight Chrome side-panel agent that understands a conversation-bound targ
 - Browse Current page, My Skills, and Marketplace views in one local Skill Registry.
 - Install built-in daily-report, release, translation, and page-assistant templates.
 - Debug a selected Skill through the same observable agent loop, then save a new Skill or explicitly update an existing version.
+- Explicitly select one Skill for a conversation, or add, import, download, and delete local Skills.
+- Summarize the current page conversation and observed operations into an editable Skill draft.
 - Keep user Skills in durable local storage outside the extension/repository package.
 - Use a compact React + Tailwind side panel with icon-first page tools, modal Skill browsing, and a fixed conversation composer.
 - Start a genuinely fresh provider conversation with **New**, clearing chat, pending actions, selected page context, Codex thread mapping, and Responses chaining state.
@@ -110,14 +112,16 @@ Run `npm run bridge` again after changing this configuration, click **Reconnect*
 
 ## Record an automation Skill
 
-1. Choose the target page, click **Record** in the top tool bar, and operate that tab normally.
-2. Click **Stop recording** and review the captured steps.
+1. Choose the target page, click **Record** in the composer, and operate that tab normally. The recorder captures live form values, checkboxes/radios, selects, window or container scrolling, navigation, and bounded key-frame screenshots.
+2. Click **Stop recording** and review the captured steps and screenshot previews.
 3. Use **Test replay** for a confirmation-gated replay on the current page.
-4. Name the workflow and click **Save as new**, or load an existing recorded Skill and choose **Update Skill**.
+4. Name the workflow, edit its reusable instructions, and click **Save Skill**, or load an existing recorded Skill and choose **Update Skill**.
 
 The bridge stores user Skills in `~/.auto-page-agent/skills/<name>/` by default. On the first V3 run it migrates existing repository Skills into that durable directory; later extension and repository upgrades do not replace them. Non-sensitive typed values are retained only in Chrome session storage for the immediate test replay; saved workflows replace them with `{{runtime_variables}}`. Password, token, OTP, payment, credential, and file fields never persist their values and stop automated replay for manual input.
 
-Generated Skills are page-scoped by origin and recorded start-path prefix. The **Skills** modal provides **This page**, **My Skills**, and **Explore** views. **Use** prepares a normal task; **Debug** asks the agent to explain and verify each Skill step. Neither bypasses the normal plan and confirmation flow.
+Generated Skills are page-scoped by origin and recorded start-path prefix. The **Skills** modal provides **Current page**, **My Skills**, and **Skills Marketplace** views. Its header creates or imports Skills; each installed Skill can be selected, downloaded, edited, enabled/disabled, or deleted. **Debug** asks the agent to explain and verify each Skill step. Neither selection nor debug bypasses the normal plan and confirmation flow.
+
+The **Summarize as Skill** action below the conversation combines the bound page, recent user/Agent messages, runtime action/verification notes, and any current recording into an editable Skill draft. Screenshot binaries remain session-only and are not written into `workflow.json`.
 
 Recorded Skills can be enabled, disabled, or assigned custom page patterns from the same card. Patterns require a fixed HTTP(S) origin and accept `*` for one path segment or `**` for multiple segments. Disabled Skills remain visible on matching pages for management but are excluded from Codex selection and cannot be run.
 

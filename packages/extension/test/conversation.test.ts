@@ -30,6 +30,7 @@ test("conversation sessions retain one bound tab, pending task, and confirmable 
       options: ["Personal", "Business"],
       recommendedOption: "Business",
     },
+    selectedSkill: { slug: "invoice-download", name: "Invoice download" },
   }), {
     conversationId: "conversation-1",
     messages: [],
@@ -41,6 +42,7 @@ test("conversation sessions retain one bound tab, pending task, and confirmable 
       options: ["Personal", "Business"],
       recommendedOption: "Business",
     },
+    selectedSkill: { slug: "invoice-download", name: "Invoice download" },
   });
   assert.equal(normalizeConversationSession({ messages: [] }), null);
 });

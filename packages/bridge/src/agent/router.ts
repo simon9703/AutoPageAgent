@@ -1,5 +1,5 @@
 import type { AgentDecision, AgentEvent, AgentRuntimeStatus, CodexRuntimeStatus, PageSnapshot, SkillSelection } from "@auto-page-agent/shared";
-import { loadSkills, selectSkillContext } from "../skills.js";
+import { loadSkills, selectSkillContext, skillMatchesPage } from "../skills.js";
 import { CodexProvider } from "./providers/codex.js";
 import { OpenAIResponsesProvider } from "./providers/openai.js";
 import type { AgentEventSink, AgentRunContext } from "./types.js";
@@ -35,7 +35,23 @@ export class AgentRouter {
   ): Promise<{ decision: AgentDecision; provider: string; selectedSkills: Omit<SkillSelection, "body">[] }> {
     const status = await this.status();
     if (!status.available || !status.authenticated) throw new Error(status.error || "No agent provider is available.");
-    const selectedSkills = selectSkillContext(task, await loadSkills(), snapshot.url);
+    const loadedSkills = await loadSkills();
+    const requested = context.selectedSkillSlug
+      ? loadedSkills.find((skill) => skill.slug === context.selectedSkillSlug)
+      : undefined;
+    if (context.selectedSkillSlug && (!requested || requested.workflow?.enabled === false || (!context.loop && !skillMatchesPage(requested, snapshot.url)))) {
+      throw new Error("The selected Skill is unavailable or does not match the current page.");
+    }
+    const selectedSkills = requested
+      ? [{
+          name: requested.name,
+          slug: requested.slug,
+          reason: "Explicitly selected by the user.",
+          score: 100,
+          scope: requested.workflow?.startUrl ? "page" as const : "global" as const,
+          body: requested.body,
+        }]
+      : selectSkillContext(task, loadedSkills, snapshot.url);
     const providerContext = { ...context, selectedSkills };
     const decision = status.id === "openai"
       ? await this.openai.run(task, snapshot, providerContext, onEvent)
