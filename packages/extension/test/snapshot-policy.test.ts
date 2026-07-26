@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  getSnapshotCandidatePriority,
+  parseAriaIdRefs,
   resolveSnapshotRole,
   shouldIncludeSnapshotCandidate,
   SNAPSHOT_CANDIDATE_SELECTOR,
@@ -16,9 +18,30 @@ const available = {
 };
 
 test("snapshot selector covers combobox and dynamic option semantics", () => {
-  for (const selector of ['[role="combobox"]', '[role="option"]', "[aria-controls]", "[aria-expanded]", "[aria-selected]"]) {
+  for (const selector of ['[role="combobox"]', '[role="listbox"]', '[role="option"]', "[aria-controls]", "[aria-expanded]", "[aria-selected]"]) {
     assert.match(SNAPSHOT_CANDIDATE_SELECTOR, new RegExp(selector.replaceAll("[", "\\[").replaceAll("]", "\\]"), "u"));
   }
+});
+
+test("expanded controls and their popup content rank before viewport and nearby candidates", () => {
+  const base = {
+    expandedControl: false,
+    relatedToExpandedControl: false,
+    visiblePopup: false,
+    inViewport: false,
+    changedOrAdded: false,
+    nearViewport: true,
+  };
+  assert.equal(getSnapshotCandidatePriority({ ...base, relatedToExpandedControl: true }), 0);
+  assert.equal(getSnapshotCandidatePriority({ ...base, visiblePopup: true }), 1);
+  assert.equal(getSnapshotCandidatePriority({ ...base, inViewport: true }), 2);
+  assert.equal(getSnapshotCandidatePriority({ ...base, changedOrAdded: true }), 3);
+  assert.equal(getSnapshotCandidatePriority(base), 4);
+});
+
+test("ARIA relations accept multiple whitespace-separated ids", () => {
+  assert.deepEqual(parseAriaIdRefs(" project-list  project-help\n"), ["project-list", "project-help"]);
+  assert.deepEqual(parseAriaIdRefs(null), []);
 });
 
 test("hidden, zero-size, covered, disabled, and readonly candidates are excluded", () => {

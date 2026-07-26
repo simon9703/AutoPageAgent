@@ -15,7 +15,7 @@ import { hasObservableActionEffect, hasVerifiedOptionSelection, isOptionSnapshot
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
 import { buildSelector, buildSimplifiedDom, cleanText, collectPageInfo, createElementFingerprint, delay, getAccessibleLabel, inferRole, isAvailableOption, isComboboxLike, isDisabledElement, isHiddenInput, isNearViewport, isReadonlyElement, isSensitiveElement, isTopLayerElement, isVisible, round, setElementValue, shouldExposeValue, simulateClick } from "./dom.js";
-import { resolveSnapshotRole, shouldIncludeSnapshotCandidate, SNAPSHOT_CANDIDATE_SELECTOR } from "./snapshot-policy.js";
+import { getSnapshotCandidatePriority, parseAriaIdRefs, resolveSnapshotRole, shouldIncludeSnapshotCandidate, SNAPSHOT_CANDIDATE_SELECTOR } from "./snapshot-policy.js";
 
 const elementRefs = new Map<string, Element>();
 let currentSnapshotId = "";
@@ -82,21 +82,48 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
   currentSnapshotId = `${Date.now()}-${crypto.randomUUID()}`;
   currentSnapshotUrl = location.href;
   elementRefs.clear();
-  const candidates = document.querySelectorAll(SNAPSHOT_CANDIDATE_SELECTOR);
+  const candidates = Array.from(document.querySelectorAll(SNAPSHOT_CANDIDATE_SELECTOR));
   const elements: PageElementSnapshot[] = [];
   const fingerprintCounts = new Map<string, number>();
-  for (const element of candidates) {
-    if (elements.length >= 200 || !shouldIncludeSnapshotCandidate({
+  const previousByFingerprint = new Map(currentSnapshot?.elements.map((element) => [element.fingerprint, element]) ?? []);
+  const expandedControls = candidates.filter((element) =>
+    isComboboxLike(element) && element.getAttribute("aria-expanded") === "true");
+  const relatedElements = collectRelatedElements(expandedControls);
+  const rankedCandidates = candidates.flatMap((element, domOrder) => {
+    if (!shouldIncludeSnapshotCandidate({
       visible: isVisible(element),
       nearViewport: isNearViewport(element, 700),
       hiddenInput: isHiddenInput(element),
       topLayer: isTopLayerElement(element),
       disabled: isDisabledElement(element),
       readonly: isReadonlyElement(element),
-    })) continue;
+    })) return [];
     const fingerprint = createElementFingerprint(element);
     const occurrence = (fingerprintCounts.get(fingerprint) ?? 0) + 1;
     fingerprintCounts.set(fingerprint, occurrence);
+    const stableFingerprint = `${fingerprint}-${occurrence}`;
+    const role = resolveSnapshotRole(element.getAttribute("role"), inferRole(element), element.hasAttribute("aria-selected"));
+    const previous = previousByFingerprint.get(stableFingerprint);
+    const changedOrAdded = !previous || snapshotStateChanged(previous, element);
+    return [{
+      element,
+      domOrder,
+      role,
+      stableFingerprint,
+      priority: getSnapshotCandidatePriority({
+        expandedControl: expandedControls.includes(element),
+        relatedToExpandedControl: relatedElements.has(element),
+        visiblePopup: ["dialog", "listbox", "menu"].includes(role),
+        inViewport: isNearViewport(element, 0),
+        changedOrAdded,
+        nearViewport: true,
+      }),
+    }];
+  }).sort((left, right) => left.priority - right.priority || left.domOrder - right.domOrder).slice(0, 200);
+
+  for (const { element, role, stableFingerprint } of rankedCandidates) {
+    const occurrence = Number(stableFingerprint.slice(stableFingerprint.lastIndexOf("-") + 1));
+    const fingerprint = stableFingerprint.slice(0, stableFingerprint.lastIndexOf("-"));
     const ref = `el-${fingerprint}-${occurrence}`;
     elementRefs.set(ref, element);
     const html = element as HTMLElement;
@@ -105,7 +132,7 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
     elements.push({
       ref,
       tagName: element.tagName.toLowerCase(),
-      role: resolveSnapshotRole(element.getAttribute("role"), inferRole(element), element.hasAttribute("aria-selected")),
+      role,
       label: getAccessibleLabel(element),
       text: cleanText(html.innerText || element.textContent || "", 300),
       selector: buildSelector(element),
@@ -116,7 +143,7 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
       disabled: isDisabledElement(element),
       sensitive: isSensitiveElement(element),
       contentEditable: html.isContentEditable,
-      fingerprint: `${fingerprint}-${occurrence}`,
+      fingerprint: stableFingerprint,
       inViewport: isNearViewport(element, 0),
       occluded: !isTopLayerElement(element),
       readonly: isReadonlyElement(element),
@@ -124,8 +151,11 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
       ...(element.hasAttribute("aria-selected") ? { selected: element.getAttribute("aria-selected") === "true" } : {}),
       ...(element.hasAttribute("aria-expanded") ? { expanded: element.getAttribute("aria-expanded") === "true" } : {}),
       ...(element.hasAttribute("aria-busy") ? { busy: element.getAttribute("aria-busy") === "true" } : {}),
+      ...(element.id ? { domId: element.id } : {}),
       ...(element.getAttribute("aria-controls") ? { controls: element.getAttribute("aria-controls") ?? undefined } : {}),
+      ...(element.getAttribute("aria-owns") ? { owns: element.getAttribute("aria-owns") ?? undefined } : {}),
       ...(element.getAttribute("aria-activedescendant") ? { activeDescendant: element.getAttribute("aria-activedescendant") ?? undefined } : {}),
+      ...resolveSemanticOwnerId(element),
       viewportRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
     });
   }
@@ -225,10 +255,62 @@ async function waitForActionSettled(step: BrowserActionStep, target?: Element): 
     await delay(pollMs);
     if (domVersion !== lastVersion) { lastVersion = domVersion; quietSince = Date.now(); }
     if (waitForOption && !optionAvailable) {
-      optionAvailable = Array.from(document.querySelectorAll('[role="option"],[aria-selected]')).some(isAvailableOption);
+      optionAvailable = (target ? resolveControlledRoots(target) : []).some((root) => {
+        if (isAvailableOption(root)) return true;
+        return Array.from(root.querySelectorAll('[role="option"],[aria-selected]')).some(isAvailableOption);
+      });
     }
     if (Date.now() - start >= minWaitMs && optionAvailable && Date.now() - quietSince >= quietMs) return;
   }
+}
+
+function collectRelatedElements(controls: Element[]): Set<Element> {
+  const related = new Set<Element>();
+  for (const control of controls) {
+    related.add(control);
+    for (const root of resolveControlledRoots(control)) {
+      related.add(root);
+      for (const element of root.querySelectorAll(SNAPSHOT_CANDIDATE_SELECTOR)) related.add(element);
+    }
+    for (const id of parseAriaIdRefs(control.getAttribute("aria-activedescendant"))) {
+      const active = document.getElementById(id);
+      if (active) related.add(active);
+    }
+  }
+  return related;
+}
+
+function resolveControlledRoots(control: Element): Element[] {
+  const ids = [
+    ...parseAriaIdRefs(control.getAttribute("aria-controls")),
+    ...parseAriaIdRefs(control.getAttribute("aria-owns")),
+  ];
+  return ids.flatMap((id) => {
+    const root = document.getElementById(id);
+    return root ? [root] : [];
+  });
+}
+
+function resolveSemanticOwnerId(element: Element): { ownerId?: string } {
+  const owner = element.closest('[role="listbox"],[role="menu"]');
+  return owner?.id ? { ownerId: owner.id } : {};
+}
+
+function snapshotStateChanged(previous: PageElementSnapshot, element: Element): boolean {
+  const input = element as HTMLInputElement;
+  return JSON.stringify([
+    previous.value,
+    previous.checked,
+    previous.selected,
+    previous.expanded,
+    previous.busy,
+  ]) !== JSON.stringify([
+    shouldExposeValue(input) ? cleanText(String(input.value ?? ""), 500) : undefined,
+    element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type) ? element.checked : undefined,
+    element.hasAttribute("aria-selected") ? element.getAttribute("aria-selected") === "true" : undefined,
+    element.hasAttribute("aria-expanded") ? element.getAttribute("aria-expanded") === "true" : undefined,
+    element.hasAttribute("aria-busy") ? element.getAttribute("aria-busy") === "true" : undefined,
+  ]);
 }
 
 export function diffSnapshots(before: PageSnapshot, after: PageSnapshot): PageSnapshotDiff {
@@ -266,10 +348,10 @@ function verifyAction(step: BrowserActionStep, before: PageSnapshot, snapshot: P
     success = Boolean(active && createElementFingerprint(active) === targetFingerprint?.split("-")[0]);
     summary = success ? "The target received focus." : "The target did not retain focus.";
   } else if (step.action === "scroll") {
-    success = hasObservableActionEffect(step, before, snapshot, diff);
+    success = hasObservableActionEffect(step, before, snapshot, diff, targetFingerprint);
     summary = success ? "The viewport position changed after scrolling." : "The viewport did not move after the scroll action.";
   } else {
-    success = hasObservableActionEffect(step, before, snapshot, diff);
+    success = hasObservableActionEffect(step, before, snapshot, diff, targetFingerprint);
     summary = success ? diff.summary.join("; ") : "The action produced no observable page change.";
   }
   return { success, summary, changes: diff.summary, diff };

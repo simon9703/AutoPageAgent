@@ -43,6 +43,31 @@ test("completion evidence must be copied from the latest snapshot", () => {
   assert.equal(completionEvidenceMatchesSnapshot("Payment succeeded", snapshot), false);
 });
 
+test("unselected popup option text is not completion evidence", () => {
+  const optionSnapshot = {
+    ...snapshot,
+    mainText: "cloud kucoin-cloud-mining-rn",
+    simplifiedDom: '[1]<div role="option">kucoin-cloud-mining-rn</div>',
+    elements: [{
+      ...snapshot.elements[0],
+      role: "option",
+      label: "kucoin-cloud-mining-rn",
+      text: "kucoin-cloud-mining-rn",
+      selected: false,
+    }],
+  };
+  assert.equal(completionEvidenceMatchesSnapshot("kucoin-cloud-mining-rn", optionSnapshot), false);
+  assert.equal(completionEvidenceMatchesSnapshot("kucoin-cloud-mining-rn", {
+    ...optionSnapshot,
+    elements: [{ ...optionSnapshot.elements[0], selected: true }],
+  }), true);
+  assert.equal(completionEvidenceMatchesSnapshot("Deployment succeeded", {
+    ...optionSnapshot,
+    mainText: "Deployment succeeded",
+    simplifiedDom: "<EMPTY>",
+  }), true);
+});
+
 test("normalizeDecision keeps blocked and needs-user states distinct from answers", () => {
   assert.deepEqual(
     normalizeDecision({ kind: "blocked", reason: "Login required", recoverable: false }, snapshot),

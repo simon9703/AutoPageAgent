@@ -5,12 +5,20 @@ export function hasObservableActionEffect(
   before: PageSnapshot,
   after: PageSnapshot,
   diff: PageSnapshotDiff,
+  targetFingerprint?: string,
 ): boolean {
   if (step.action === "scroll") {
     return before.pageInfo.scrollX !== after.pageInfo.scrollX
       || before.pageInfo.scrollY !== after.pageInfo.scrollY;
   }
-  return diff.summary.length > 0;
+  if (diff.urlChanged) return true;
+  if (!targetFingerprint) return false;
+  if (diff.changedFingerprints.includes(targetFingerprint) || diff.removedFingerprints.includes(targetFingerprint)) {
+    return true;
+  }
+  const resultRoles = new Set(["alert", "dialog", "status"]);
+  return after.elements.some((element) =>
+    diff.addedFingerprints.includes(element.fingerprint) && resultRoles.has(element.role));
 }
 
 export function isOptionSnapshot(element: PageElementSnapshot | undefined): element is PageElementSnapshot {
@@ -28,26 +36,49 @@ export function hasVerifiedOptionSelection(
   const targetAfter = after.elements.find((element) => element.fingerprint === targetFingerprint);
   if (targetAfter?.selected === true) return true;
 
+  const associatedBefore = findAssociatedComboboxes(before, targetBefore);
+  if (!associatedBefore.length) return false;
+  const associatedAfter = after.elements.filter((element) =>
+    element.role === "combobox"
+    && associatedBefore.some((previous) => isSameSemanticControl(previous, element)));
+
   const selectedMatch = after.elements.some((element) =>
-    element.selected === true && snapshotValueMatches(element, targetName));
+    element.selected === true
+    && belongsToSamePopup(element, targetBefore)
+    && snapshotValueMatches(element, targetName));
   if (selectedMatch) return true;
 
-  const comboboxValueMatch = after.elements.some((element) =>
-    element.role === "combobox" && snapshotValueMatches(element, targetName));
+  const comboboxValueMatch = associatedAfter.some((element) => snapshotValueMatches(element, targetName));
   if (comboboxValueMatch) return true;
 
-  const beforeComboboxes = new Map(before.elements
-    .filter((element) => element.role === "combobox")
-    .map((element) => [element.fingerprint, element]));
-  const comboboxCollapsed = after.elements.some((element) =>
-    element.role === "combobox"
-    && element.expanded === false
-    && beforeComboboxes.get(element.fingerprint)?.expanded === true);
-  if (comboboxCollapsed) return true;
+  return Boolean(targetBefore.domId && associatedAfter.some((element) =>
+    element.activeDescendant === targetBefore.domId));
+}
 
-  const optionDisappeared = !targetAfter;
-  return optionDisappeared && after.elements.some((element) =>
-    !isOptionSnapshot(element) && snapshotValueMatches(element, targetName));
+function isSameSemanticControl(before: PageElementSnapshot, after: PageElementSnapshot): boolean {
+  if (before.fingerprint === after.fingerprint) return true;
+  if (before.domId && before.domId === after.domId) return true;
+  return Boolean(before.controls && before.controls === after.controls
+    && before.label && before.label === after.label);
+}
+
+function findAssociatedComboboxes(snapshot: PageSnapshot, target: PageElementSnapshot): PageElementSnapshot[] {
+  return snapshot.elements.filter((element) => {
+    if (element.role !== "combobox") return false;
+    const controlledIds = new Set([...parseIdRefs(element.controls), ...parseIdRefs(element.owns)]);
+    return Boolean(
+      (target.ownerId && controlledIds.has(target.ownerId))
+      || (target.domId && (controlledIds.has(target.domId) || element.activeDescendant === target.domId)),
+    );
+  });
+}
+
+function belongsToSamePopup(candidate: PageElementSnapshot, target: PageElementSnapshot): boolean {
+  return Boolean(target.ownerId && candidate.ownerId === target.ownerId);
+}
+
+function parseIdRefs(value: string | undefined): string[] {
+  return value?.split(/\s+/u).filter(Boolean) ?? [];
 }
 
 function snapshotValueMatches(element: PageElementSnapshot, expected: string): boolean {
