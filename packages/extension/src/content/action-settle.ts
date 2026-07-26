@@ -8,6 +8,12 @@ export interface ActionSettlePolicy {
   waitForOption?: boolean;
 }
 
+export interface DelayedActionObservationPolicy {
+  maxWaitMs: number;
+  quietMs: number;
+  pollMs: number;
+}
+
 export function getActionSettlePolicy(
   action: BrowserActionStep["action"],
   options: { comboboxFill?: boolean } = {},
@@ -19,4 +25,11 @@ export function getActionSettlePolicy(
   if (action === "select") return { maxWaitMs: 900, quietMs: 180 };
   if (action === "scroll") return { maxWaitMs: 700, quietMs: 160 };
   return { maxWaitMs: 1_800, quietMs: 250 };
+}
+
+export function getDelayedActionObservationPolicy(
+  action: BrowserActionStep["action"],
+): DelayedActionObservationPolicy | undefined {
+  if (action !== "click" && action !== "submit") return undefined;
+  return { maxWaitMs: 2_500, quietMs: 250, pollMs: 100 };
 }

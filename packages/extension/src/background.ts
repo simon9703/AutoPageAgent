@@ -479,6 +479,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       const outcome = await executePlanResilient({ ...plan, steps: [step] }, pendingRun.tabId);
       assertAgentRunActive(run);
       if (outcome.kind === "reobserve") {
+        failures = 0;
         iteration = consumeReobserveStep(iteration, outcome.signal);
         const displayStep = outcome.signal.actionMayHaveExecuted ? iteration : iteration + 1;
         emitUiEvent(createEvent({

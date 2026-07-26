@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { BrowserActionStep, PageElementSnapshot, PageSnapshot, PageSnapshotDiff } from "@auto-page-agent/shared";
-import { getActionSettlePolicy } from "../src/content/action-settle.js";
+import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "../src/content/action-settle.js";
 import { hasObservableActionEffect, hasVerifiedOptionSelection } from "../src/content/action-verification.js";
 
 const snapshot: PageSnapshot = {
@@ -101,6 +101,16 @@ test("settle policy keeps direct state updates short and async actions bounded",
   assert.deepEqual(getActionSettlePolicy("scroll"), { maxWaitMs: 700, quietMs: 160 });
   assert.deepEqual(getActionSettlePolicy("click"), { maxWaitMs: 1_800, quietMs: 250 });
   assert.deepEqual(getActionSettlePolicy("submit"), { maxWaitMs: 1_800, quietMs: 250 });
+});
+
+test("only click and submit receive a bounded delayed observation", () => {
+  const expected = { maxWaitMs: 2_500, quietMs: 250, pollMs: 100 };
+  assert.deepEqual(getDelayedActionObservationPolicy("click"), expected);
+  assert.deepEqual(getDelayedActionObservationPolicy("submit"), expected);
+  assert.equal(getDelayedActionObservationPolicy("fill"), undefined);
+  assert.equal(getDelayedActionObservationPolicy("select"), undefined);
+  assert.equal(getDelayedActionObservationPolicy("focus"), undefined);
+  assert.equal(getDelayedActionObservationPolicy("scroll"), undefined);
 });
 
 const combobox = (expanded: boolean, value = ""): PageElementSnapshot => ({

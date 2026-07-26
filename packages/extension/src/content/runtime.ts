@@ -10,7 +10,7 @@ import type {
   PageSnapshotDiff,
 } from "@auto-page-agent/shared";
 import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer } from "./agent-activity.js";
-import { getActionSettlePolicy } from "./action-settle.js";
+import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "./action-settle.js";
 import { hasObservableActionEffect, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
@@ -234,13 +234,61 @@ async function executePlan(plan: BrowserActionPlan): Promise<ActionExecutionResu
   try {
     const results = [await executeStep(step)];
     await waitForActionSettled(step, step.targetRef ? elementRefs.get(step.targetRef) : undefined);
-    const after = createPageSnapshot();
-    const diff = diffSnapshots(before, after);
-    const verification = verifyAction(step, before, after, diff, targetFingerprint);
+    let after = createPageSnapshot();
+    let diff = diffSnapshots(before, after);
+    let verification = verifyAction(step, before, after, diff, targetFingerprint);
+    if (!verification.success) {
+      const delayedObservation = await observeDelayedActionEffect(step, before, targetFingerprint);
+      if (delayedObservation) {
+        ({ snapshot: after, diff, verification } = delayedObservation);
+      }
+    }
     return { ok: verification.success, results, snapshot: after, verification, ...(!verification.success ? { error: verification.summary } : {}) };
   } finally {
     hideAgentFrame(650);
   }
+}
+
+async function observeDelayedActionEffect(
+  step: BrowserActionStep,
+  before: PageSnapshot,
+  targetFingerprint?: string,
+): Promise<{
+  snapshot: PageSnapshot;
+  diff: PageSnapshotDiff;
+  verification: ActionVerification;
+} | undefined> {
+  const policy = getDelayedActionObservationPolicy(step.action);
+  if (!policy) return undefined;
+  const startedAt = Date.now();
+  let lastVersion = domVersion;
+  let quietSince = startedAt;
+  let pageChanged = false;
+
+  while (Date.now() - startedAt < policy.maxWaitMs) {
+    await delay(policy.pollMs);
+    if (domVersion !== lastVersion) {
+      lastVersion = domVersion;
+      quietSince = Date.now();
+      pageChanged = true;
+    }
+    const urlChanged = location.href !== before.url;
+    pageChanged ||= urlChanged;
+    if (!pageChanged || (!urlChanged && Date.now() - quietSince < policy.quietMs)) continue;
+
+    const snapshot = createPageSnapshot();
+    const diff = diffSnapshots(before, snapshot);
+    const verification = verifyAction(step, before, snapshot, diff, targetFingerprint);
+    if (verification.success) return { snapshot, diff, verification };
+    pageChanged = false;
+    lastVersion = domVersion;
+    quietSince = Date.now();
+  }
+
+  const snapshot = createPageSnapshot();
+  const diff = diffSnapshots(before, snapshot);
+  const verification = verifyAction(step, before, snapshot, diff, targetFingerprint);
+  return { snapshot, diff, verification };
 }
 
 async function waitForActionSettled(step: BrowserActionStep, target?: Element): Promise<void> {
