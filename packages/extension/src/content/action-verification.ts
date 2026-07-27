@@ -18,7 +18,44 @@ export function hasObservableActionEffect(
   }
   const resultRoles = new Set(["alert", "dialog", "status"]);
   return after.elements.some((element) =>
-    diff.addedFingerprints.includes(element.fingerprint) && resultRoles.has(element.role));
+    diff.addedFingerprints.includes(element.fingerprint)
+    && resultRoles.has(element.role)
+    && hasMeaningfulSnapshotContent(element));
+}
+
+export function hasPendingRouteTransition(
+  after: PageSnapshot,
+  diff: PageSnapshotDiff,
+): boolean {
+  return after.elements.some((element) =>
+    diff.addedFingerprints.includes(element.fingerprint)
+    && (element.role === "alert" || element.role === "status")
+    && !hasMeaningfulSnapshotContent(element)
+    && isOffscreenOrHiddenRegion(element));
+}
+
+export function hasCompletedRouteTransition(
+  before: PageSnapshot,
+  after: PageSnapshot,
+  diff: PageSnapshotDiff,
+): boolean {
+  if (diff.urlChanged) return true;
+  if (before.title !== after.title && Boolean(after.title.trim())) return true;
+  if (normalizeValue(before.mainText) !== normalizeValue(after.mainText) && Boolean(after.mainText.trim())) {
+    return true;
+  }
+  if (
+    JSON.stringify(before.headings.map(({ level, text }) => [level, normalizeValue(text)]))
+    !== JSON.stringify(after.headings.map(({ level, text }) => [level, normalizeValue(text)]))
+    && after.headings.some(({ text }) => Boolean(text.trim()))
+  ) {
+    return true;
+  }
+  const resultRoles = new Set(["alert", "dialog", "status"]);
+  return after.elements.some((element) =>
+    diff.addedFingerprints.includes(element.fingerprint)
+    && resultRoles.has(element.role)
+    && hasMeaningfulSnapshotContent(element));
 }
 
 export function isOptionSnapshot(element: PageElementSnapshot | undefined): element is PageElementSnapshot {
@@ -128,6 +165,20 @@ function snapshotValueMatches(element: PageElementSnapshot, expected: string): b
   if (!expected) return false;
   return [element.value, element.displayValue, ...(element.selectedValues ?? []), element.label, element.text]
     .some((value) => normalizeValue(value ?? "") === expected);
+}
+
+function hasMeaningfulSnapshotContent(element: PageElementSnapshot): boolean {
+  return [element.label, element.text, element.value, element.displayValue, ...(element.selectedValues ?? [])]
+    .some((value) => Boolean(value?.trim()));
+}
+
+function isOffscreenOrHiddenRegion(element: PageElementSnapshot): boolean {
+  const rect = element.viewportRect;
+  return element.inViewport === false
+    || element.occluded
+    || !rect
+    || rect.width <= 1
+    || rect.height <= 1;
 }
 
 function normalizeValue(value: string): string {

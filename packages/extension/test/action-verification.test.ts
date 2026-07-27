@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { BrowserActionStep, PageElementSnapshot, PageSnapshot, PageSnapshotDiff } from "@auto-page-agent/shared";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "../src/content/action-settle.js";
-import { hasObservableActionEffect, hasVerifiedDismissal, hasVerifiedOptionSelection } from "../src/content/action-verification.js";
+import {
+  hasCompletedRouteTransition,
+  hasObservableActionEffect,
+  hasPendingRouteTransition,
+  hasVerifiedDismissal,
+  hasVerifiedOptionSelection,
+} from "../src/content/action-verification.js";
 
 const snapshot: PageSnapshot = {
   snapshotId: "snapshot-1",
@@ -74,6 +80,76 @@ test("click verification accepts target state changes and semantic result region
     addedFingerprints: ["saved-status-1"],
     summary: ["1 interactive element added"],
   }, "save-1"), true);
+});
+
+test("click verification rejects an empty offscreen status as result evidence", () => {
+  const emptyRouteStatus: PageElementSnapshot = {
+    ...option,
+    ref: "route-status",
+    role: "status",
+    label: "",
+    text: "",
+    value: "",
+    fingerprint: "route-status-1",
+    inViewport: false,
+    occluded: true,
+    viewportRect: { x: -9_999, y: -9_999, width: 1, height: 1 },
+  };
+  const after = { ...snapshot, elements: [emptyRouteStatus] };
+  const diff = {
+    ...noDiff,
+    addedFingerprints: ["route-status-1"],
+    summary: ["1 interactive element added"],
+  };
+
+  assert.equal(hasObservableActionEffect(click, snapshot, after, diff, "save-1"), false);
+  assert.equal(hasPendingRouteTransition(after, diff), true);
+  assert.equal(hasCompletedRouteTransition(snapshot, after, diff), false);
+});
+
+test("delayed SPA navigation completes only after the destination context appears", () => {
+  const emptyRouteStatus: PageElementSnapshot = {
+    ...option,
+    ref: "route-status",
+    role: "status",
+    label: "",
+    text: "",
+    value: "",
+    fingerprint: "route-status-1",
+    inViewport: false,
+    occluded: true,
+    viewportRect: { x: -9_999, y: -9_999, width: 1, height: 1 },
+  };
+  const transition = {
+    ...snapshot,
+    snapshotId: "snapshot-2",
+    elements: [emptyRouteStatus],
+  };
+  const transitionDiff = {
+    ...noDiff,
+    addedFingerprints: ["route-status-1"],
+    summary: ["1 interactive element added"],
+  };
+  assert.equal(hasPendingRouteTransition(transition, transitionDiff), true);
+  assert.equal(hasCompletedRouteTransition(snapshot, transition, transitionDiff), false);
+
+  const destination = {
+    ...snapshot,
+    snapshotId: "snapshot-3",
+    url: "https://example.com/mining/btc",
+    title: "BTC Mining",
+    headings: [{ level: 1, text: "BTC Mining Products" }],
+    mainText: "BTC Mining Products Quantity Submit order",
+  };
+  const destinationDiff = {
+    ...noDiff,
+    urlChanged: true,
+    titleChanged: true,
+    removedFingerprints: ["save-1"],
+    summary: ["URL changed to https://example.com/mining/btc", "Page title changed"],
+  };
+  assert.equal(hasPendingRouteTransition(destination, destinationDiff), false);
+  assert.equal(hasCompletedRouteTransition(snapshot, destination, destinationDiff), true);
 });
 
 test("scroll verification requires the viewport to move", () => {

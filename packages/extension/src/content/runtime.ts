@@ -11,7 +11,7 @@ import type {
 } from "@auto-page-agent/shared";
 import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer } from "./agent-activity.js";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "./action-settle.js";
-import { hasObservableActionEffect, hasVerifiedDismissal, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
+import { hasCompletedRouteTransition, hasObservableActionEffect, hasPendingRouteTransition, hasVerifiedDismissal, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
 import { blurComboboxAfterFailedDismiss, dispatchEscapeKey } from "./dismiss.js";
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
@@ -247,6 +247,8 @@ async function executePlan(plan: BrowserActionPlan): Promise<ActionExecutionResu
     let after = createPageSnapshot();
     let diff = diffSnapshots(before, after);
     let verification = verifyAction(step, before, after, diff, targetFingerprint);
+    const routeTransitionObserved = isNavigationAction(step)
+      && hasPendingRouteTransition(after, diff);
     if (step.action === "dismiss"
       && !verification.success
       && blurComboboxAfterFailedDismiss(dismissRecipient)) {
@@ -255,8 +257,13 @@ async function executePlan(plan: BrowserActionPlan): Promise<ActionExecutionResu
       diff = diffSnapshots(before, after);
       verification = verifyAction(step, before, after, diff, targetFingerprint);
     }
-    if (!verification.success) {
-      const delayedObservation = await observeDelayedActionEffect(step, before, targetFingerprint);
+    if (!verification.success || routeTransitionObserved) {
+      const delayedObservation = await observeDelayedActionEffect(
+        step,
+        before,
+        targetFingerprint,
+        routeTransitionObserved,
+      );
       if (delayedObservation) {
         ({ snapshot: after, diff, verification } = delayedObservation);
       }
@@ -271,6 +278,7 @@ async function observeDelayedActionEffect(
   step: BrowserActionStep,
   before: PageSnapshot,
   targetFingerprint?: string,
+  routeTransitionObserved = false,
 ): Promise<{
   snapshot: PageSnapshot;
   diff: PageSnapshotDiff;
@@ -282,6 +290,7 @@ async function observeDelayedActionEffect(
   let lastVersion = domVersion;
   let quietSince = startedAt;
   let pageChanged = false;
+  let waitingForRouteTransition = routeTransitionObserved;
 
   while (Date.now() - startedAt < policy.maxWaitMs) {
     await delay(policy.pollMs);
@@ -296,7 +305,16 @@ async function observeDelayedActionEffect(
 
     const snapshot = createPageSnapshot();
     const diff = diffSnapshots(before, snapshot);
-    const verification = verifyAction(step, before, snapshot, diff, targetFingerprint);
+    waitingForRouteTransition ||= isNavigationAction(step)
+      && hasPendingRouteTransition(snapshot, diff);
+    const verification = verifyObservedAction(
+      step,
+      before,
+      snapshot,
+      diff,
+      targetFingerprint,
+      waitingForRouteTransition,
+    );
     if (verification.success) return { snapshot, diff, verification };
     pageChanged = false;
     lastVersion = domVersion;
@@ -305,8 +323,44 @@ async function observeDelayedActionEffect(
 
   const snapshot = createPageSnapshot();
   const diff = diffSnapshots(before, snapshot);
-  const verification = verifyAction(step, before, snapshot, diff, targetFingerprint);
+  waitingForRouteTransition ||= isNavigationAction(step)
+    && hasPendingRouteTransition(snapshot, diff);
+  const verification = verifyObservedAction(
+    step,
+    before,
+    snapshot,
+    diff,
+    targetFingerprint,
+    waitingForRouteTransition,
+  );
   return { snapshot, diff, verification };
+}
+
+function verifyObservedAction(
+  step: BrowserActionStep,
+  before: PageSnapshot,
+  snapshot: PageSnapshot,
+  diff: PageSnapshotDiff,
+  targetFingerprint: string | undefined,
+  routeTransitionObserved: boolean,
+): ActionVerification {
+  if (routeTransitionObserved) {
+    const success = hasCompletedRouteTransition(before, snapshot, diff);
+    return {
+      success,
+      summary: success
+        ? "The route transition completed and the new page context was observed."
+        : "A route transition started, but the destination page is not ready yet.",
+      changes: diff.summary,
+      diff,
+      ...(success ? { routeTransitioned: true } : {}),
+    };
+  }
+  return verifyAction(step, before, snapshot, diff, targetFingerprint);
+}
+
+function isNavigationAction(step: BrowserActionStep): boolean {
+  return step.action === "click" || step.action === "submit";
 }
 
 async function waitForActionSettled(step: BrowserActionStep, target?: Element): Promise<void> {

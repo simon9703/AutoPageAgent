@@ -169,6 +169,7 @@ export interface ActionVerification {
   summary: string;
   changes: string[];
   diff: PageSnapshotDiff;
+  routeTransitioned?: boolean;
 }
 
 export interface ActionExecutionResult {

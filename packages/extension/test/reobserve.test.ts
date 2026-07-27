@@ -53,6 +53,8 @@ test("agent loop executes a verified queue locally and replans only at a branch 
   const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
 
   assert.match(background, /let pendingSteps = \[\.\.\.initialPlan\.steps\];/u);
+  assert.match(background, /verification\?\.routeTransitioned === true/u);
+  assert.match(background, /reason: "page_context_changed"/u);
   assert.match(background, /const rebound = rebindQueuedStep\(pendingSteps\[0\]!, observedSnapshot\);/u);
   assert.match(background, /plan = \{ \.\.\.plan, snapshotId: observedSnapshot\.snapshotId, steps: pendingSteps \};\s*continue;/u);
   assert.match(background, /The next queued target could not be uniquely rebound/u);

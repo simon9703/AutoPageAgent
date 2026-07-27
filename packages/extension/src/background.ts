@@ -566,7 +566,8 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
         ...(verification ? { lastVerification: verification } : {}),
       };
       const verified = execution.ok && (verification?.success ?? true);
-      const pageBranched = verification?.diff.urlChanged === true;
+      const pageBranched = verification?.diff.urlChanged === true
+        || verification?.routeTransitioned === true;
       pendingSteps = pendingSteps.slice(1);
       baseLoop.remainingPlan = summarizePendingSteps(pendingSteps);
       if (verified && !pageBranched && pendingSteps.length) {
@@ -578,11 +579,17 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
         }
       }
       const reobserve = pageBranched
-        ? {
-            reason: "page_url_changed" as const,
-            summary: "The page navigated after the action, so the remaining queued targets were discarded.",
-            actionMayHaveExecuted: true,
-          }
+        ? verification?.diff.urlChanged
+          ? {
+              reason: "page_url_changed" as const,
+              summary: "The page navigated after the action, so the remaining queued targets were discarded.",
+              actionMayHaveExecuted: true,
+            }
+          : {
+              reason: "page_context_changed" as const,
+              summary: "The SPA route changed its page context, so the remaining queued targets were discarded.",
+              actionMayHaveExecuted: true,
+            }
         : verified && pendingSteps.length
           ? {
               reason: "snapshot_expired" as const,
