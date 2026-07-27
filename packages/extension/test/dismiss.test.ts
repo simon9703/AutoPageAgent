@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blurComboboxAfterFailedDismiss, dispatchEscapeKey, type DismissKeyboardTarget } from "../src/content/dismiss.js";
+import { dispatchEscapeKey, findSafeDismissPoint, type DismissKeyboardTarget } from "../src/content/dismiss.js";
 
 function createTarget(role = "combobox") {
   const calls: string[] = [];
   const events: Event[] = [];
   const target: DismissKeyboardTarget = {
     focus: () => { calls.push("focus"); },
-    blur: () => { calls.push("blur"); },
     dispatchEvent: (event) => {
       calls.push(event.type);
       events.push(event);
@@ -43,12 +42,27 @@ test("dismiss focuses before sending complete Escape keydown and keyup events", 
   }
 });
 
-test("blur fallback is restricted to the resolved combobox recipient", () => {
-  const combobox = createTarget("combobox");
-  const listbox = createTarget("listbox");
-  assert.equal(blurComboboxAfterFailedDismiss(combobox.target), true);
-  assert.equal(blurComboboxAfterFailedDismiss(listbox.target), false);
-  assert.equal(blurComboboxAfterFailedDismiss(undefined), false);
-  assert.deepEqual(combobox.calls, ["blur"]);
-  assert.deepEqual(listbox.calls, []);
+test("safe exterior point is selected outside the popup boundary", () => {
+  const visited: Array<{ x: number; y: number }> = [];
+  const result = findSafeDismissPoint(
+    { left: 0, top: 0, right: 400, bottom: 300, width: 400, height: 300 },
+    [{ left: 0, top: 0, right: 180, bottom: 120, width: 180, height: 120 }],
+    (point) => {
+      visited.push(point);
+      return "safe-target";
+    },
+  );
+
+  assert.deepEqual(result, { point: { x: 388, y: 12 }, target: "safe-target" });
+  assert.deepEqual(visited, [{ x: 388, y: 12 }]);
+});
+
+test("unsafe exterior candidates are skipped without inventing a fallback coordinate", () => {
+  const result = findSafeDismissPoint(
+    { left: 100, top: 100, right: 500, bottom: 400, width: 400, height: 300 },
+    [{ left: 250, top: 180, right: 450, bottom: 350, width: 200, height: 170 }],
+    () => undefined,
+  );
+
+  assert.equal(result, undefined);
 });

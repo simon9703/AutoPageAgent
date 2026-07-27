@@ -48,7 +48,7 @@ export function createAgentPrompt(
     "Opening a combobox is a branch point. Reobserve before choosing an option, and never reuse a ref from before the expansion, selection, or dismissal.",
     "Never click an option whose aria-selected state is already true in order to close a popup. For a multi-select, choose all required unselected options, then use dismiss on the expanded combobox or its visible listbox/menu, reobserve, and continue with the next field.",
     "Dismiss is restricted to the current snapshot's expanded combobox, visible listbox/menu, or topmost dialog. Prefer dismissing the innermost dropdown. Use an explicit close button with ordinary click, and never invent a backdrop, blank-area coordinate, selector, or ref.",
-    "A dismiss succeeds only when the fresh snapshot proves the target collapsed or disappeared. If the previous action produced no change, do not repeat the same dismissal strategy.",
+    "A dismiss succeeds only when the fresh snapshot proves the target collapsed or disappeared. Escape and the content script's restricted safe exterior-click fallback are one internal dismiss attempt; never plan coordinates or repeat a separate closing strategy for that attempt.",
     "Do not dismiss an entire dialog that contains filled values unless the user explicitly asked to cancel or close that dialog; close only the inner dropdown instead.",
     compactContinuation ? "" : "After choosing a combobox option, complete only with evidence from the final combobox value or selected label/tag. Text that appears only in the candidate option list is not completion evidence.",
     "If loopState.reobserve is present, the previous snapshot and refs are invalid. Replan only from the current Page snapshot and never retry an old ref.",

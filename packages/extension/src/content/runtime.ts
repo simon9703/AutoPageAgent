@@ -12,7 +12,7 @@ import type {
 import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer } from "./agent-activity.js";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "./action-settle.js";
 import { hasCompletedRouteTransition, hasObservableActionEffect, hasPendingRouteTransition, hasVerifiedDismissal, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
-import { blurComboboxAfterFailedDismiss, dispatchEscapeKey } from "./dismiss.js";
+import { clickSafePopupExterior, dispatchEscapeKey } from "./dismiss.js";
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
 import { buildSelector, buildSimplifiedDom, cleanText, collectPageInfo, createElementFingerprint, delay, getAccessibleLabel, getSelectedValues, inferRole, isAvailableOption, isComboboxLike, isDisabledElement, isHiddenInput, isNearViewport, isReadonlyElement, isSensitiveElement, isTopLayerElement, isVisible, round, setElementValue, shouldExposeValue, simulateClick } from "./dom.js";
@@ -238,9 +238,6 @@ async function executePlan(plan: BrowserActionPlan): Promise<ActionExecutionResu
   showAgentFrame();
   const targetFingerprint = step.targetRef ? before.elements.find((element) => element.ref === step.targetRef)?.fingerprint : undefined;
   const targetElement = step.targetRef ? elementRefs.get(step.targetRef) : undefined;
-  const dismissRecipient = step.action === "dismiss" && targetElement instanceof HTMLElement
-    ? resolveDismissRecipient(targetElement)
-    : undefined;
   try {
     const results = [await executeStep(step)];
     await waitForActionSettled(step, targetElement);
@@ -251,8 +248,9 @@ async function executePlan(plan: BrowserActionPlan): Promise<ActionExecutionResu
       && hasPendingRouteTransition(after, diff);
     if (step.action === "dismiss"
       && !verification.success
-      && blurComboboxAfterFailedDismiss(dismissRecipient)) {
-      await waitForActionSettled(step, dismissRecipient);
+      && targetElement instanceof HTMLElement
+      && clickSafePopupExterior(targetElement)) {
+      await waitForActionSettled(step, targetElement);
       after = createPageSnapshot();
       diff = diffSnapshots(before, after);
       verification = verifyAction(step, before, after, diff, targetFingerprint);
@@ -553,25 +551,7 @@ function dismissElement(element: HTMLElement, allowFilledDialog: boolean): void 
     throw new Error("Dismiss only supports an expanded combobox, visible listbox/menu, or topmost dialog.");
   }
 
-  dispatchEscapeKey(resolveDismissRecipient(element));
-}
-
-function resolveDismissRecipient(element: HTMLElement): HTMLElement {
-  const role = element.getAttribute("role") || inferRole(element);
-  return role === "listbox" || role === "menu"
-    ? findPopupOwner(element) ?? element
-    : element;
-}
-
-function findPopupOwner(popup: HTMLElement): HTMLElement | undefined {
-  if (!popup.id) return undefined;
-  return Array.from(document.querySelectorAll('[role="combobox"][aria-expanded="true"]'))
-    .find((candidate): candidate is HTMLElement =>
-      candidate instanceof HTMLElement
-      && [
-        ...parseAriaIdRefs(candidate.getAttribute("aria-controls")),
-        ...parseAriaIdRefs(candidate.getAttribute("aria-owns")),
-      ].includes(popup.id));
+  dispatchEscapeKey(element);
 }
 
 function getTopmostVisibleDialog(): HTMLElement | undefined {
