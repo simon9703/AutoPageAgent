@@ -77,10 +77,23 @@ test("completion evidence rejection gets one bounded recovery turn", async () =>
 test("an initially blocked async boundary waits for meaningful change and replans once", async () => {
   const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
 
+  assert.match(background, /response\.decision\.kind === "blocked"[\s\S]+timeoutMs: 6_000/u);
+  assert.match(background, /pendingRun\.snapshotId = snapshot\.snapshotId/u);
   assert.match(background, /getBlockedRecoveryBoundary\(loop\)/u);
   assert.match(background, /waitForPageDecisionReadiness\(/u);
   assert.match(background, /Math\.min\(6_000, remainingMs - 250\)/u);
   assert.match(background, /blockedBoundaries\.has\(boundary\)/u);
   assert.match(background, /reason: "page_content_changed"/u);
   assert.match(background, /requestContinuation\(readySnapshot/u);
+});
+
+test("blocked recovery captures at most one active viewport per action boundary", async () => {
+  const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
+  const screenshot = await readFile(new URL("../src/background/screenshot.ts", import.meta.url), "utf8");
+
+  assert.match(background, /visualBoundaries: new Set<string>\(\)/u);
+  assert.match(background, /!recoveryState\.visualBoundaries\.has\(boundary\)/u);
+  assert.match(background, /captureAutomaticScreenshot\(pendingRun\.tabId\)/u);
+  assert.match(background, /reason: "viewport_screenshot"/u);
+  assert.match(screenshot, /if \(activeTab\?\.id !== tab\.id\) return undefined;/u);
 });

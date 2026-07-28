@@ -17,6 +17,7 @@ import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
 import { buildSelector, buildSimplifiedDom, cleanText, collectPageInfo, createElementFingerprint, delay, getAccessibleLabel, getSelectedValues, inferRole, isAvailableOption, isComboboxLike, isDisabledElement, isHiddenInput, isNearViewport, isReadonlyElement, isSensitiveElement, isTopLayerElement, isVisible, round, setElementValue, shouldExposeValue, simulateClick } from "./dom.js";
 import { getSnapshotCandidatePriority, parseAriaIdRefs, resolveSnapshotRole, shouldIncludeSnapshotCandidate, SNAPSHOT_CANDIDATE_SELECTOR } from "./snapshot-policy.js";
+import { collectVisualSignals } from "./visual-signals.js";
 
 const elementRefs = new Map<string, Element>();
 let currentSnapshotId = "";
@@ -181,6 +182,7 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
     mainText: cleanText((document.querySelector("main,article") ?? document.body).textContent ?? "", 20_000),
     simplifiedDom,
     pageInfo,
+    visualSignals: collectVisualSignals(),
     elements,
     ...(includePerformance ? { performance: collectPerformance() } : {}),
     capturedAt: new Date().toISOString(),

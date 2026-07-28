@@ -2,6 +2,7 @@ import type { AgentDecision, CodexRuntimeStatus, PageSnapshot } from "@auto-page
 import { CodexAppServerClient } from "../../codex-app-server.js";
 import { loadSkills, selectSkillContext } from "../../skills.js";
 import { extractJson, mockDecision, normalizeDecision } from "../decision.js";
+import { prepareCodexImageInput, type CodexImageInput } from "../image-input.js";
 import { createAgentPrompt } from "../prompt.js";
 import type { AgentEventSink, AgentRunContext } from "../types.js";
 
@@ -63,10 +64,17 @@ export class CodexProvider {
       this.#threads.set(context.conversationId, threadId);
     }
     const prompt = createAgentPrompt(task, snapshot, skills.map((skill) => skill.body), isNewThread ? context.history : [], context.loop, skills);
-    return this.#runTurn(threadId, prompt, snapshot, task, context.signal);
+    const imageSource = snapshot.context?.screenshot?.dataUrl
+      ?? snapshot.context?.selectedElement?.image?.src;
+    const image = await prepareCodexImageInput(imageSource);
+    try {
+      return await this.#runTurn(threadId, prompt, snapshot, task, image.item, context.signal);
+    } finally {
+      await image.cleanup();
+    }
   }
 
-  async #runTurn(threadId: string, prompt: string, snapshot: PageSnapshot, task: string, signal?: AbortSignal): Promise<AgentDecision> {
+  async #runTurn(threadId: string, prompt: string, snapshot: PageSnapshot, task: string, image?: CodexImageInput, signal?: AbortSignal): Promise<AgentDecision> {
     if (signal?.aborted) throw new Error("Agent run stopped.");
     let turnId = "";
     let text = "";
@@ -100,7 +108,10 @@ export class CodexProvider {
     try {
       const turn = await this.#client.request<{ turn?: { id?: string } }>("turn/start", {
         threadId,
-        input: [{ type: "text", text: prompt, text_elements: [] }],
+        input: [
+          { type: "text", text: prompt, text_elements: [] },
+          ...(image ? [image] : []),
+        ],
         effort: "low",
         approvalPolicy: "never",
       });

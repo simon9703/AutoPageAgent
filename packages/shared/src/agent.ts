@@ -76,6 +76,10 @@ export interface AgentLoopContext {
     summary: string;
     actionMayHaveExecuted: boolean;
   };
+  visualRecovery?: {
+    reason: "viewport_screenshot";
+    summary: string;
+  };
   completionEvidenceFailure?: {
     reason: string;
     unmatchedEvidence: string[];

@@ -47,7 +47,8 @@ planned only and must not be described as available.
 - [x] Exclude attachment summaries and screenshot binary data from later model history
 - [x] Isolate pending selected-element context by target tab
 - [x] Send supported visual input through the Responses provider
-- [ ] Send screenshot/binary image input to local Codex
+- [x] Send session-only screenshot/binary image input to local Codex
+- [x] Add bounded adaptive screenshot recovery for visual pages and unresolved blocked boundaries
 
 ### Page Understanding and Performance
 

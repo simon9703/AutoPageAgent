@@ -17,6 +17,7 @@ export function createAgentPrompt(
     lastVerification: loop.lastVerification,
     remainingPlan: loop.remainingPlan,
     reobserve: loop.reobserve,
+    visualRecovery: loop.visualRecovery,
     completionEvidenceFailure: loop.completionEvidenceFailure,
   } : undefined;
   const promptSnapshot = {
@@ -52,6 +53,7 @@ export function createAgentPrompt(
     "Do not dismiss an entire dialog that contains filled values unless the user explicitly asked to cancel or close that dialog; close only the inner dropdown instead.",
     compactContinuation ? "" : "After choosing a combobox option, complete only with evidence from the final combobox value or selected label/tag. Text that appears only in the candidate option list is not completion evidence.",
     "If loopState.reobserve is present, the previous snapshot and refs are invalid. Replan only from the current Page snapshot and never retry an old ref.",
+    "If loopState.visualRecovery is present, inspect the attached viewport image together with the current DOM snapshot. The image may explain a visual state, but actions must still target current data-ai-ref values and completion still requires exact DOM or URL evidence. If the needed control is visible only in the image, return blocked instead of inventing coordinates.",
     "If loopState.completionEvidenceFailure is present, the previous completion claim was rejected. Copy exact success evidence from the current snapshot, take one safe action to find or reveal a verifiable result, or return blocked; never repeat unsupported completion evidence.",
     compactContinuation ? "" : "Use only data-ai-ref values present in simplifiedDom as targetRef. Prefer visible, unoccluded, enabled elements. Never output JavaScript, CSS selectors, XPath, credentials, secrets, OTPs, file uploads, destructive actions, or actions outside the requested test flow.",
     "A successful action is not task completion. After navigation, analyze the latest destination page and return complete when it visibly shows the requested result. Once an action has been executed, never use answer to report completion; use complete with exact evidence copied from the latest snapshot.",
