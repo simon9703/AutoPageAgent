@@ -20,7 +20,7 @@ const available = {
 };
 
 test("snapshot selector covers combobox and dynamic option semantics", () => {
-  for (const selector of ['[role="combobox"]', '[role="listbox"]', '[role="option"]', "[aria-controls]", "[aria-expanded]", "[aria-selected]"]) {
+  for (const selector of ['[role="combobox"]', '[role="listbox"]', '[role="option"]', '[role="progressbar"]', "[aria-controls]", "[aria-expanded]", "[aria-selected]", '[aria-busy="true"]']) {
     assert.match(SNAPSHOT_CANDIDATE_SELECTOR, new RegExp(selector.replaceAll("[", "\\[").replaceAll("]", "\\]"), "u"));
   }
 });

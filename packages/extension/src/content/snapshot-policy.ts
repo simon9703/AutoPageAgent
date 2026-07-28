@@ -14,6 +14,7 @@ export const SNAPSHOT_CANDIDATE_SELECTOR = [
   '[role="option"]',
   '[role="status"]',
   '[role="alert"]',
+  '[role="progressbar"]',
   '[role="menuitem"]',
   '[role="tab"]',
   '[role="checkbox"]',
@@ -21,6 +22,7 @@ export const SNAPSHOT_CANDIDATE_SELECTOR = [
   "[aria-controls]",
   "[aria-expanded]",
   "[aria-selected]",
+  '[aria-busy="true"]',
   "[tabindex]",
 ].join(",");
 

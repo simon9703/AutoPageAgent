@@ -21,6 +21,10 @@ import {
   consumeReobserveStep,
   type ReobserveSignal,
 } from "./background/reobserve.js";
+import {
+  getBlockedRecoveryBoundary,
+  waitForPageDecisionReadiness,
+} from "./background/page-readiness.js";
 import { rebindQueuedStep } from "./background/step-queue.js";
 import {
   activateTargetTab,
@@ -489,7 +493,10 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
     const timeoutMs = 90_000;
     let iteration = 0;
     let failures = 0;
-    const completionRecovery = { attempts: 0 };
+    const recoveryState = {
+      completionAttempts: 0,
+      blockedBoundaries: new Set<string>(),
+    };
     let plan = initialPlan;
     let pendingSteps = [...initialPlan.steps];
     if (initialTab.url !== pendingRun.pageUrl) {
@@ -507,7 +514,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
         startedAt,
         remainingPlan: summarizePendingSteps(pendingSteps),
         reobserve: signal,
-      }, pendingRun, run, completionRecovery);
+      }, pendingRun, run, recoveryState);
       const terminal = terminalAgentResult(decision, iteration);
       if (terminal) return terminal;
       if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
@@ -539,7 +546,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
           remainingPlan: summarizePendingSteps(pendingSteps),
           reobserve: outcome.signal,
         };
-        const decision = await requestContinuation(outcome.snapshot, loop, pendingRun, run, completionRecovery);
+        const decision = await requestContinuation(outcome.snapshot, loop, pendingRun, run, recoveryState);
         const terminal = terminalAgentResult(decision, iteration);
         if (terminal) return terminal;
         if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
@@ -600,7 +607,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       const decision = await requestContinuation(observedSnapshot, {
         ...baseLoop,
         ...(reobserve ? { reobserve } : {}),
-      }, pendingRun, run, completionRecovery);
+      }, pendingRun, run, recoveryState);
       const terminal = terminalAgentResult(decision, iteration);
       if (terminal) return terminal;
       if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
@@ -625,7 +632,10 @@ async function requestContinuation(
   loop: AgentLoopContext,
   pendingRun: PendingAgentRun,
   run: ActiveAgentRun,
-  completionRecovery: { attempts: number },
+  recoveryState: {
+    completionAttempts: number;
+    blockedBoundaries: Set<string>;
+  },
 ): Promise<AgentDecision> {
   const requestId = crypto.randomUUID();
   run.bridgeRequestId = requestId;
@@ -642,16 +652,39 @@ async function requestContinuation(
   assertAgentRunActive(run);
   if (response.type === "agent.error") throw new Error(response.error);
   if (response.type !== "agent.result") throw new Error("Unexpected agent loop response.");
+  if (response.decision.kind === "blocked") {
+    const boundary = getBlockedRecoveryBoundary(loop);
+    const remainingMs = loop.timeoutMs - (Date.now() - loop.startedAt);
+    if (boundary && !recoveryState.blockedBoundaries.has(boundary) && remainingMs > 500) {
+      recoveryState.blockedBoundaries.add(boundary);
+      const readySnapshot = await waitForPageDecisionReadiness(
+        snapshot,
+        () => readSnapshot(pendingRun.tabId),
+        { timeoutMs: Math.min(6_000, remainingMs - 250) },
+      );
+      assertAgentRunActive(run);
+      if (readySnapshot) {
+        return requestContinuation(readySnapshot, {
+          ...loop,
+          reobserve: {
+            reason: "page_content_changed",
+            summary: "The page changed after an initially blocked decision, so fresh refs must be used to replan.",
+            actionMayHaveExecuted: false,
+          },
+        }, pendingRun, run, recoveryState);
+      }
+    }
+  }
   if (response.decision.kind === "blocked" && response.decision.code === "completion_evidence_missing") {
-    if (completionRecovery.attempts < 1) {
-      completionRecovery.attempts += 1;
+    if (recoveryState.completionAttempts < 1) {
+      recoveryState.completionAttempts += 1;
       return requestContinuation(snapshot, {
         ...loop,
         completionEvidenceFailure: {
           reason: response.decision.reason,
           unmatchedEvidence: response.decision.unmatchedEvidence ?? [],
         },
-      }, pendingRun, run, completionRecovery);
+      }, pendingRun, run, recoveryState);
     }
     return {
       ...response.decision,

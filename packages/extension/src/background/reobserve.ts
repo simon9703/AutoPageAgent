@@ -1,6 +1,7 @@
 export type ReobserveReason =
   | "page_url_changed"
   | "page_context_changed"
+  | "page_content_changed"
   | "snapshot_expired"
   | "page_context_invalidated";
 

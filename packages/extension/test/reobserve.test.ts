@@ -67,9 +67,20 @@ test("agent loop executes a verified queue locally and replans only at a branch 
 test("completion evidence rejection gets one bounded recovery turn", async () => {
   const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
 
-  assert.match(background, /const completionRecovery = \{ attempts: 0 \};/u);
+  assert.match(background, /completionAttempts: 0/u);
   assert.match(background, /response\.decision\.code === "completion_evidence_missing"/u);
-  assert.match(background, /completionRecovery\.attempts < 1/u);
+  assert.match(background, /recoveryState\.completionAttempts < 1/u);
   assert.match(background, /completionEvidenceFailure:/u);
   assert.match(background, /操作已提交，但当前页面没有可验证的成功结果，暂不能确认完成。/u);
+});
+
+test("an initially blocked async boundary waits for meaningful change and replans once", async () => {
+  const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
+
+  assert.match(background, /getBlockedRecoveryBoundary\(loop\)/u);
+  assert.match(background, /waitForPageDecisionReadiness\(/u);
+  assert.match(background, /Math\.min\(6_000, remainingMs - 250\)/u);
+  assert.match(background, /blockedBoundaries\.has\(boundary\)/u);
+  assert.match(background, /reason: "page_content_changed"/u);
+  assert.match(background, /requestContinuation\(readySnapshot/u);
 });

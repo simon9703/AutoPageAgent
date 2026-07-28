@@ -72,7 +72,7 @@ export interface AgentLoopContext {
     reason: string;
   }>;
   reobserve?: {
-    reason: "page_url_changed" | "page_context_changed" | "snapshot_expired" | "page_context_invalidated";
+    reason: "page_url_changed" | "page_context_changed" | "page_content_changed" | "snapshot_expired" | "page_context_invalidated";
     summary: string;
     actionMayHaveExecuted: boolean;
   };
