@@ -239,6 +239,7 @@ export function createElementFingerprint(element: Element): string {
 
 export function buildSimplifiedDom(elements: PageElementSnapshot[], elementRefs: ReadonlyMap<string, Element>): string {
   if (!elements.length) return "<EMPTY>";
+  const visualIndexes = new Map(elements.map((element, index) => [element.ref, index + 1]));
   const groups = new Map<string, PageElementSnapshot[]>();
   for (const element of elements) {
     const domElement = elementRefs.get(element.ref);
@@ -250,7 +251,7 @@ export function buildSimplifiedDom(elements: PageElementSnapshot[], elementRefs:
   }
   return Array.from(groups, ([name, group]) => [
     `<${name} data-ai-group=\"${name}\">`,
-    ...group.map((element, index) => `  ${simplifyElement(element, index + 1)}`),
+    ...group.map((element) => `  ${simplifyElement(element, visualIndexes.get(element.ref)!)}`),
     `</${name}>`,
   ].join("\n")).join("\n");
 }

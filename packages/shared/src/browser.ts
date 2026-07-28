@@ -7,6 +7,11 @@ export interface ViewportRect {
   height: number;
 }
 
+export interface ScreenshotVisualMark {
+  index: number;
+  ref: string;
+}
+
 export interface PageElementSnapshot {
   ref: string;
   tagName: string;
@@ -133,7 +138,12 @@ export interface PageSnapshot {
   };
   context?: {
     selectedElement?: InspectedElement;
-    screenshot?: { dataUrl: string; title: string; url: string };
+    screenshot?: {
+      dataUrl: string;
+      title: string;
+      url: string;
+      visualMarks?: ScreenshotVisualMark[];
+    };
   };
   elements: PageElementSnapshot[];
   performance?: PerformanceSnapshot;

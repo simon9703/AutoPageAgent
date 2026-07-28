@@ -34,6 +34,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse(createPageSnapshot(message.includePerformance === true));
     return false;
   }
+  if (message?.type === "page.snapshot.validate") {
+    sendResponse({
+      valid: message.snapshotId === currentSnapshotId
+        && message.url === currentSnapshotUrl
+        && location.href === currentSnapshotUrl
+        && message.domVersion === domVersion,
+    });
+    return false;
+  }
   if (message?.type === "page.actions.execute") {
     void executePlan(message.plan as BrowserActionPlan).then(sendResponse).catch((error) => {
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });

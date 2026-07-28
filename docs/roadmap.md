@@ -49,6 +49,7 @@ planned only and must not be described as available.
 - [x] Send supported visual input through the Responses provider
 - [x] Send session-only screenshot/binary image input to local Codex
 - [x] Add bounded adaptive screenshot recovery for visual pages and unresolved blocked boundaries
+- [x] Draw snapshot-aligned Set-of-Mark numbers on automatic visual screenshots and map each number back to the current DOM ref
 
 ### Page Understanding and Performance
 

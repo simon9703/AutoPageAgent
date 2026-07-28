@@ -93,7 +93,9 @@ test("blocked recovery captures at most one active viewport per action boundary"
 
   assert.match(background, /visualBoundaries: new Set<string>\(\)/u);
   assert.match(background, /!recoveryState\.visualBoundaries\.has\(boundary\)/u);
-  assert.match(background, /captureAutomaticScreenshot\(pendingRun\.tabId\)/u);
+  assert.match(background, /captureAutomaticScreenshot\(pendingRun\.tabId, snapshot\)/u);
   assert.match(background, /reason: "viewport_screenshot"/u);
   assert.match(screenshot, /if \(activeTab\?\.id !== tab\.id\) return undefined;/u);
+  assert.match(screenshot, /if \(!await isSnapshotCurrent\(tab\.id, snapshot\)\) return undefined;/u);
+  assert.match(screenshot, /stillActiveTab\?\.id !== tab\.id \|\| !await isSnapshotCurrent\(tab\.id, snapshot\)/u);
 });

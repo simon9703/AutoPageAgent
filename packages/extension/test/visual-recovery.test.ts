@@ -79,3 +79,14 @@ test("automatic capture skips existing visual context and sensitive pages", () =
   };
   assert.equal(canCaptureAutomaticScreenshot({ ...snapshot, elements: [sensitive] }), false);
 });
+
+test("visual recovery preserves the screenshot index to current-ref mapping", () => {
+  const result = attachViewportScreenshot(snapshot, {
+    dataUrl: "data:image/jpeg;base64,AA==",
+    visualMarks: [{ index: 7, ref: "el-submit-1" }],
+  });
+  assert.deepEqual(result.context?.screenshot?.visualMarks, [{
+    index: 7,
+    ref: "el-submit-1",
+  }]);
+});

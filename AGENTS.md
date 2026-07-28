@@ -44,17 +44,19 @@ Read `README.md` for usage, `docs/architecture.md` for component boundaries, `do
 - `docs/github/page-agent-analysis.md`: source-backed Page Agent architecture, DOM-agent, navigation, action, and integration analysis.
 - `docs/github/chromex-analysis.md`: source-backed Chromex side-panel, Codex app-server, read-routing, screenshot, and action analysis.
 - `docs/github/ego-lite-analysis.md`: source-backed Ego Lite semantic/visual/CDP browser-control, readiness, and learned-tool analysis.
+- `docs/github/browser-use-analysis.md`: source-backed Browser Use DOM/AX serialization, selector-map index, screenshot Set-of-Mark, and indexed-action analysis.
+- `docs/github/vimium-analysis.md`: source-backed Vimium Link Hints discovery, hint generation, cross-frame coordination, overlay, and activation analysis.
 
 ## Reference implementation analyses
 
 The comparison documents under `docs/github/` are maintained engineering references, not one-time summaries.
 
-- Before changing page snapshots, visual recovery, navigation/readiness, browser actions, provider image inputs, site adapters, or browser-control ownership, read the relevant Page Agent, Chromex, or Ego Lite analysis first.
+- Before changing page snapshots, visual recovery, navigation/readiness, browser actions, provider image inputs, site adapters, or browser-control ownership, read the relevant Page Agent, Chromex, Ego Lite, Browser Use, or Vimium analysis first.
 - Treat the reference checkout source as authoritative. Each analysis header records the exact reviewed commit; when a reference checkout changes, update both that commit and the affected findings.
 - Keep three categories explicit in future additions: source-confirmed behavior, engineering inference, and proposed Auto Page Agent adaptation.
 - Add new source-specific discoveries to the matching analysis instead of scattering notes. Cross-project conclusions may also be reflected in architecture or roadmap documents, but implementation details remain under `docs/github/`.
 - Preserve Auto Page Agent's safety boundaries. Page Agent's optional JavaScript execution, Chromex's product routing and selectors, and Ego Lite's raw CDP or coordinate controls are references, not authorization to weaken constrained actions.
-- Treat `../refs/page-agent`, `../refs/chromex`, and `../refs/ego-lite` as read-only comparison checkouts.
+- Treat any checkout under `../refs/` as a read-only comparison checkout.
 
 ## Commands
 

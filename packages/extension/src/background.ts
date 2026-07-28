@@ -422,7 +422,7 @@ async function runTask(
     );
     if (selectedElement || selectedScreenshot) snapshot.context = { ...(selectedElement ? { selectedElement } : {}), ...(selectedScreenshot ? { screenshot: selectedScreenshot } : {}) };
     if (shouldCaptureInitialVisualContext(snapshot)) {
-      const captured = await captureAutomaticScreenshot(tab.id).catch(() => undefined);
+      const captured = await captureAutomaticScreenshot(tab.id, snapshot).catch(() => undefined);
       if (captured) snapshot = attachViewportScreenshot(snapshot, captured);
     }
     const pendingRun = {
@@ -476,7 +476,7 @@ async function runTask(
         && response.decision.kind === "blocked"
         && canCaptureAutomaticScreenshot(snapshot)
       ) {
-        const captured = await captureAutomaticScreenshot(tab.id).catch(() => undefined);
+        const captured = await captureAutomaticScreenshot(tab.id, snapshot).catch(() => undefined);
         assertAgentRunActive(run);
         if (captured) {
           snapshot = attachViewportScreenshot(snapshot, captured);
@@ -728,7 +728,7 @@ async function requestContinuation(
       && remainingMs > 500
     ) {
       recoveryState.visualBoundaries.add(boundary);
-      const captured = await captureAutomaticScreenshot(pendingRun.tabId).catch(() => undefined);
+      const captured = await captureAutomaticScreenshot(pendingRun.tabId, snapshot).catch(() => undefined);
       assertAgentRunActive(run);
       if (captured) {
         return requestContinuation(attachViewportScreenshot(snapshot, captured), {

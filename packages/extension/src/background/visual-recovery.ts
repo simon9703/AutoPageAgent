@@ -1,4 +1,4 @@
-import type { PageSnapshot } from "@auto-page-agent/shared";
+import type { PageSnapshot, ScreenshotVisualMark } from "@auto-page-agent/shared";
 
 const SPARSE_PAGE_TEXT_LENGTH = 500;
 
@@ -24,7 +24,12 @@ export function shouldCaptureInitialVisualContext(snapshot: PageSnapshot): boole
 
 export function attachViewportScreenshot(
   snapshot: PageSnapshot,
-  screenshot: { dataUrl: string; title?: string; url?: string },
+  screenshot: {
+    dataUrl: string;
+    title?: string;
+    url?: string;
+    visualMarks?: ScreenshotVisualMark[];
+  },
 ): PageSnapshot {
   return {
     ...snapshot,
@@ -34,6 +39,7 @@ export function attachViewportScreenshot(
         dataUrl: screenshot.dataUrl,
         title: screenshot.title ?? "Current viewport",
         url: screenshot.url ?? snapshot.url,
+        ...(screenshot.visualMarks?.length ? { visualMarks: screenshot.visualMarks } : {}),
       },
     },
   };

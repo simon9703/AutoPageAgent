@@ -380,6 +380,24 @@ test("agent prompt authorizes the requested test flow while preserving runtime b
   assert.match(prompt, /"options":\["\.\.\."\]/u);
 });
 
+test("agent prompt exposes visual mark mappings without executable index targets", () => {
+  const prompt = createAgentPrompt("Click the marked control", {
+    ...snapshot,
+    context: {
+      screenshot: {
+        dataUrl: "data:image/jpeg;base64,AA==",
+        title: "Marked viewport",
+        url: snapshot.url,
+        visualMarks: [{ index: 3, ref: "element-1" }],
+      },
+    },
+  }, []);
+  assert.match(prompt, /"visualMarks":\[\{"index":3,"ref":"element-1"\}\]/u);
+  assert.match(prompt, /Use the matching current data-ai-ref as targetRef/u);
+  assert.match(prompt, /never return a number or coordinate as an action target/u);
+  assert.doesNotMatch(prompt, /data:image\/jpeg;base64/u);
+});
+
 test("completion evidence recovery tells the agent to verify instead of repeating completion", () => {
   const prompt = createAgentPrompt("Top up the test account", snapshot, ["FULL SKILL BODY"], [], {
     runId: "run-1",
