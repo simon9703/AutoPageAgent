@@ -34,7 +34,7 @@ export function classifyReobserveError(error: unknown): ReobserveSignal | undefi
     };
   }
   if (
-    /message port closed|receiving end does not exist|context invalidated|frame (?:was )?removed|no frame with id/iu
+    /message port closed|could not establish connection|receiving end does not exist|cannot access contents|context invalidated|frame (?:was )?removed|no frame with id/iu
       .test(message)
   ) {
     return {

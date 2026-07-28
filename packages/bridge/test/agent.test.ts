@@ -223,11 +223,22 @@ test("normalizeDecision requires evidence before completing a browser task", () 
     { kind: "complete", summary: "BTC details opened", evidence: ["BTC details", "Save"] },
     snapshot,
   ), {
+    kind: "complete",
+    summary: "BTC details opened",
+    evidence: ["Save"],
+  });
+});
+
+test("completion fails only when none of the claimed evidence exists on the latest page", () => {
+  assert.deepEqual(normalizeDecision(
+    { kind: "complete", summary: "BTC details opened", evidence: ["BTC details", "Payment succeeded"] },
+    snapshot,
+  ), {
     kind: "blocked",
     reason: "The agent claimed completion with evidence that is not present in the current page snapshot.",
     recoverable: true,
     code: "completion_evidence_missing",
-    unmatchedEvidence: ["BTC details"],
+    unmatchedEvidence: ["BTC details", "Payment succeeded"],
   });
 });
 

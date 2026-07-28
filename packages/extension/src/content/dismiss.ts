@@ -119,7 +119,7 @@ function exposeLegacyEscapeCodes(event: Event): void {
 
 function resolvePopupRoots(origin: HTMLElement): HTMLElement[] {
   const role = origin.getAttribute("role");
-  if (role === "listbox" || role === "menu") return [origin];
+  if (role === "listbox" || role === "menu") return [resolveVisiblePopupRegion(origin)];
   if (role !== "combobox") return [];
   const ids = [
     origin.getAttribute("aria-controls"),
@@ -128,9 +128,33 @@ function resolvePopupRoots(origin: HTMLElement): HTMLElement[] {
   return ids.flatMap((id) => {
     const root = document.getElementById(id);
     return root instanceof HTMLElement && ["listbox", "menu"].includes(root.getAttribute("role") ?? "")
-      ? [root]
+      ? [resolveVisiblePopupRegion(root)]
       : [];
-  });
+  }).filter((root, index, roots) => roots.indexOf(root) === index);
+}
+
+function resolveVisiblePopupRegion(root: HTMLElement): HTMLElement {
+  let resolved = hasVisibleArea(root) ? root : undefined;
+  let candidate = root.parentElement;
+  while (candidate && candidate !== document.body && candidate !== document.documentElement) {
+    if (candidate.getAttribute("role") === "dialog") break;
+    if (hasVisibleArea(candidate)) {
+      const rect = candidate.getBoundingClientRect();
+      if (rect.width * rect.height > innerWidth * innerHeight * 0.7) break;
+      resolved = candidate;
+    }
+    candidate = candidate.parentElement;
+  }
+  return resolved ?? root;
+}
+
+function hasVisibleArea(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect();
+  const style = getComputedStyle(element);
+  return rect.width > 1
+    && rect.height > 1
+    && style.display !== "none"
+    && style.visibility !== "hidden";
 }
 
 function resolveDismissDialog(origin: HTMLElement): HTMLElement | undefined {

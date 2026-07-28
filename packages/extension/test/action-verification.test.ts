@@ -3,9 +3,8 @@ import test from "node:test";
 import type { BrowserActionStep, PageElementSnapshot, PageSnapshot, PageSnapshotDiff } from "@auto-page-agent/shared";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "../src/content/action-settle.js";
 import {
-  hasCompletedRouteTransition,
+  getPageTransitionState,
   hasObservableActionEffect,
-  hasPendingRouteTransition,
   hasVerifiedDismissal,
   hasVerifiedOptionSelection,
 } from "../src/content/action-verification.js";
@@ -103,8 +102,7 @@ test("click verification rejects an empty offscreen status as result evidence", 
   };
 
   assert.equal(hasObservableActionEffect(click, snapshot, after, diff, "save-1"), false);
-  assert.equal(hasPendingRouteTransition(after, diff), true);
-  assert.equal(hasCompletedRouteTransition(snapshot, after, diff), false);
+  assert.equal(getPageTransitionState(snapshot, after, diff), "pending");
 });
 
 test("delayed SPA navigation completes only after the destination context appears", () => {
@@ -130,8 +128,7 @@ test("delayed SPA navigation completes only after the destination context appear
     addedFingerprints: ["route-status-1"],
     summary: ["1 interactive element added"],
   };
-  assert.equal(hasPendingRouteTransition(transition, transitionDiff), true);
-  assert.equal(hasCompletedRouteTransition(snapshot, transition, transitionDiff), false);
+  assert.equal(getPageTransitionState(snapshot, transition, transitionDiff), "pending");
 
   const destination = {
     ...snapshot,
@@ -148,8 +145,24 @@ test("delayed SPA navigation completes only after the destination context appear
     removedFingerprints: ["save-1"],
     summary: ["URL changed to https://example.com/mining/btc", "Page title changed"],
   };
-  assert.equal(hasPendingRouteTransition(destination, destinationDiff), false);
-  assert.equal(hasCompletedRouteTransition(snapshot, destination, destinationDiff), true);
+  assert.equal(getPageTransitionState(snapshot, destination, destinationDiff), "completed");
+});
+
+test("a URL change stays pending until destination-page context is visible", () => {
+  const destinationPending = {
+    ...snapshot,
+    snapshotId: "snapshot-2",
+    url: "https://example.com/mining/btc",
+  };
+  assert.equal(getPageTransitionState(snapshot, destinationPending, {
+    ...noDiff,
+    urlChanged: true,
+    summary: ["URL changed"],
+  }), "pending");
+});
+
+test("ordinary DOM changes are not mistaken for a route transition", () => {
+  assert.equal(getPageTransitionState(snapshot, snapshot, noDiff), "none");
 });
 
 test("scroll verification requires the viewport to move", () => {

@@ -23,39 +23,41 @@ export function hasObservableActionEffect(
     && hasMeaningfulSnapshotContent(element));
 }
 
-export function hasPendingRouteTransition(
-  after: PageSnapshot,
-  diff: PageSnapshotDiff,
-): boolean {
-  return after.elements.some((element) =>
-    diff.addedFingerprints.includes(element.fingerprint)
-    && (element.role === "alert" || element.role === "status")
-    && !hasMeaningfulSnapshotContent(element)
-    && isOffscreenOrHiddenRegion(element));
-}
+export type PageTransitionState = "none" | "pending" | "completed";
 
-export function hasCompletedRouteTransition(
+export function getPageTransitionState(
   before: PageSnapshot,
   after: PageSnapshot,
   diff: PageSnapshotDiff,
-): boolean {
-  if (diff.urlChanged) return true;
-  if (before.title !== after.title && Boolean(after.title.trim())) return true;
+): PageTransitionState {
+  const titleChanged = before.title !== after.title && Boolean(after.title.trim());
+  if (titleChanged) return "completed";
   if (normalizeValue(before.mainText) !== normalizeValue(after.mainText) && Boolean(after.mainText.trim())) {
-    return true;
+    return "completed";
   }
   if (
     JSON.stringify(before.headings.map(({ level, text }) => [level, normalizeValue(text)]))
     !== JSON.stringify(after.headings.map(({ level, text }) => [level, normalizeValue(text)]))
     && after.headings.some(({ text }) => Boolean(text.trim()))
   ) {
-    return true;
+    return "completed";
   }
   const resultRoles = new Set(["alert", "dialog", "status"]);
-  return after.elements.some((element) =>
+  if (after.elements.some((element) =>
     diff.addedFingerprints.includes(element.fingerprint)
     && resultRoles.has(element.role)
-    && hasMeaningfulSnapshotContent(element));
+    && hasMeaningfulSnapshotContent(element))) {
+    return "completed";
+  }
+  if (diff.urlChanged) return "pending";
+  if (after.elements.some((element) =>
+    diff.addedFingerprints.includes(element.fingerprint)
+    && (element.role === "alert" || element.role === "status")
+    && !hasMeaningfulSnapshotContent(element)
+    && isOffscreenOrHiddenRegion(element))) {
+    return "pending";
+  }
+  return "none";
 }
 
 export function isOptionSnapshot(element: PageElementSnapshot | undefined): element is PageElementSnapshot {

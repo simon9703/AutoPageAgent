@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { dispatchEscapeKey, findSafeDismissPoint, type DismissKeyboardTarget } from "../src/content/dismiss.js";
 
@@ -65,4 +66,13 @@ test("unsafe exterior candidates are skipped without inventing a fallback coordi
   );
 
   assert.equal(result, undefined);
+});
+
+test("popup dismiss tries a safe exterior click before Escape", async () => {
+  const runtime = await readFile(new URL("../src/content/runtime.ts", import.meta.url), "utf8");
+  const dismissBody = /function dismissElement[\s\S]+?\n\}\n\nfunction getTopmostVisibleDialog/u.exec(runtime)?.[0] ?? "";
+
+  assert.match(dismissBody, /role === "combobox"[\s\S]+clickSafePopupExterior\(element\)\) return;/u);
+  assert.match(dismissBody, /role === "listbox" \|\| role === "menu"[\s\S]+clickSafePopupExterior\(element\)\) return;/u);
+  assert.ok(dismissBody.indexOf("clickSafePopupExterior(element)") < dismissBody.lastIndexOf("dispatchEscapeKey(element)"));
 });
