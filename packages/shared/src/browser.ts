@@ -125,6 +125,12 @@ export interface PageSnapshot {
   mainText: string;
   simplifiedDom: string;
   pageInfo: PageInfoSnapshot;
+  visualSignals?: {
+    imageCount: number;
+    largeImageCount: number;
+    canvasCount: number;
+    videoCount: number;
+  };
   context?: {
     selectedElement?: InspectedElement;
     screenshot?: { dataUrl: string; title: string; url: string };

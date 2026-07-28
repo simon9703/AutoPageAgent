@@ -12,10 +12,16 @@ import {
   stopRecording,
 } from "./background/recording.js";
 import {
+  captureAutomaticScreenshot,
   captureScreenshot,
   captureSelectedElement,
   MAX_SCREENSHOT_DATA_URL_LENGTH,
 } from "./background/screenshot.js";
+import {
+  attachViewportScreenshot,
+  canCaptureAutomaticScreenshot,
+  shouldCaptureInitialVisualContext,
+} from "./background/visual-recovery.js";
 import {
   classifyReobserveError,
   consumeReobserveStep,
@@ -402,7 +408,7 @@ async function runTask(
     const tab = await getTargetTab(targetTabId);
     if (tab.windowId !== windowId) throw new Error("The conversation page belongs to another browser window.");
     assertAgentRunActive(run);
-    const snapshot = await sendPageMessage<PageSnapshot>(tab.id, {
+    let snapshot = await sendPageMessage<PageSnapshot>(tab.id, {
       type: "page.snapshot",
       includePerformance: taskNeedsPerformance(task),
     });
@@ -415,6 +421,10 @@ async function runTask(
       tab,
     );
     if (selectedElement || selectedScreenshot) snapshot.context = { ...(selectedElement ? { selectedElement } : {}), ...(selectedScreenshot ? { screenshot: selectedScreenshot } : {}) };
+    if (shouldCaptureInitialVisualContext(snapshot)) {
+      const captured = await captureAutomaticScreenshot(tab.id).catch(() => undefined);
+      if (captured) snapshot = attachViewportScreenshot(snapshot, captured);
+    }
     const pendingRun = {
       task,
       conversationId: conversationId || crypto.randomUUID(),
@@ -427,18 +437,53 @@ async function runTask(
     };
     await pendingAgentRuns.save(pendingRun);
     try {
-      const requestId = crypto.randomUUID();
-      run.bridgeRequestId = requestId;
-      const response = await requestBridge({
-        id: requestId,
-        type: "agent.run",
-        task,
-        snapshot,
-        conversationId: pendingRun.conversationId,
-        history: pendingRun.history,
-        ...(pendingRun.selectedSkillSlug ? { selectedSkillSlug: pendingRun.selectedSkillSlug } : {}),
-      }, (event) => emitUiEvent(event, pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId));
+      const requestDecision = async (currentSnapshot: PageSnapshot) => {
+        const requestId = crypto.randomUUID();
+        run.bridgeRequestId = requestId;
+        return requestBridge({
+          id: requestId,
+          type: "agent.run",
+          task,
+          snapshot: currentSnapshot,
+          conversationId: pendingRun.conversationId,
+          history: pendingRun.history,
+          ...(pendingRun.selectedSkillSlug ? { selectedSkillSlug: pendingRun.selectedSkillSlug } : {}),
+        }, (event) => emitUiEvent(event, pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId));
+      };
+      let response = await requestDecision(snapshot);
       assertAgentRunActive(run);
+      if (response.type === "agent.result" && response.decision.kind === "blocked") {
+        const readySnapshot = await waitForPageDecisionReadiness(
+          snapshot,
+          () => readSnapshot(tab.id),
+          { timeoutMs: 6_000 },
+        );
+        assertAgentRunActive(run);
+        if (readySnapshot) {
+          snapshot = {
+            ...readySnapshot,
+            ...(snapshot.context ? { context: snapshot.context } : {}),
+          };
+          pendingRun.snapshotId = snapshot.snapshotId;
+          pendingRun.pageUrl = snapshot.url;
+          await pendingAgentRuns.save(pendingRun);
+          response = await requestDecision(snapshot);
+          assertAgentRunActive(run);
+        }
+      }
+      if (
+        response.type === "agent.result"
+        && response.decision.kind === "blocked"
+        && canCaptureAutomaticScreenshot(snapshot)
+      ) {
+        const captured = await captureAutomaticScreenshot(tab.id).catch(() => undefined);
+        assertAgentRunActive(run);
+        if (captured) {
+          snapshot = attachViewportScreenshot(snapshot, captured);
+          response = await requestDecision(snapshot);
+          assertAgentRunActive(run);
+        }
+      }
       if (response.type === "agent.result" && response.decision.kind === "action_plan") {
         if (response.decision.snapshotId !== pendingRun.snapshotId) {
           await pendingAgentRuns.clearForSnapshot(pendingRun.snapshotId);
@@ -496,6 +541,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
     const recoveryState = {
       completionAttempts: 0,
       blockedBoundaries: new Set<string>(),
+      visualBoundaries: new Set<string>(),
     };
     let plan = initialPlan;
     let pendingSteps = [...initialPlan.steps];
@@ -635,6 +681,7 @@ async function requestContinuation(
   recoveryState: {
     completionAttempts: number;
     blockedBoundaries: Set<string>;
+    visualBoundaries: Set<string>;
   },
 ): Promise<AgentDecision> {
   const requestId = crypto.randomUUID();
@@ -670,6 +717,25 @@ async function requestContinuation(
             reason: "page_content_changed",
             summary: "The page changed after an initially blocked decision, so fresh refs must be used to replan.",
             actionMayHaveExecuted: false,
+          },
+        }, pendingRun, run, recoveryState);
+      }
+    }
+    if (
+      boundary
+      && !recoveryState.visualBoundaries.has(boundary)
+      && canCaptureAutomaticScreenshot(snapshot)
+      && remainingMs > 500
+    ) {
+      recoveryState.visualBoundaries.add(boundary);
+      const captured = await captureAutomaticScreenshot(pendingRun.tabId).catch(() => undefined);
+      assertAgentRunActive(run);
+      if (captured) {
+        return requestContinuation(attachViewportScreenshot(snapshot, captured), {
+          ...loop,
+          visualRecovery: {
+            reason: "viewport_screenshot",
+            summary: "A bounded viewport screenshot was attached after DOM readiness produced no actionable change.",
           },
         }, pendingRun, run, recoveryState);
       }

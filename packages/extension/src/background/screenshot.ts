@@ -9,6 +9,19 @@ const MAX_SCREENSHOT_DIMENSION = 1_600;
 export async function captureScreenshot(targetTabId: number) {
   const tab = await getTargetTab(targetTabId);
   await activateTargetTab(tab.id);
+  return captureVisibleViewport(tab);
+}
+
+export async function captureAutomaticScreenshot(targetTabId: number) {
+  const tab = await getTargetTab(targetTabId);
+  const [activeTab] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  if (activeTab?.id !== tab.id) return undefined;
+  const screenshot = await captureVisibleViewport(tab);
+  const [stillActiveTab] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  return stillActiveTab?.id === tab.id ? screenshot : undefined;
+}
+
+async function captureVisibleViewport(tab: chrome.tabs.Tab) {
   const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 82 });
   if (dataUrl.length > MAX_SCREENSHOT_DATA_URL_LENGTH) {
     throw new Error("The viewport screenshot is too large. Reduce the window size or display scale and try again.");

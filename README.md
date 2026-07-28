@@ -140,7 +140,7 @@ npm run build
 ## Current limits
 
 - The V2 loop is intentionally bounded to 8 actions and 90 seconds; cross-tab execution and unrestricted final-submit actions remain out of scope.
-- A selected public image URL is sent as `input_image` in Responses API mode. Local Codex currently receives its URL, alt text, dimensions, and surrounding DOM context rather than binary image data.
+- Visual input is adaptive rather than per-step: obvious canvas/video or sparse large-image pages, plus the first blocked decision after bounded DOM recovery, can attach one active-viewport image. Both Responses API and Local Codex receive it; actions and completion evidence remain DOM/URL constrained.
 - Recorded replay targets the conversation's selected page. Navigation-aware and multi-target workflows remain planned.
 - Resource Timing cannot expose all cross-origin sizes unless the resource sends `Timing-Allow-Origin`.
 - The native-host installer currently targets Chrome-family browsers on macOS, Windows, and Linux; browser-store packaging is still deferred.

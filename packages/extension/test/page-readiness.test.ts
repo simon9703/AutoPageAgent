@@ -61,6 +61,14 @@ test("semantic comparison ignores fresh ids and layout-only snapshot churn", () 
   assert.equal(semanticSnapshotSignature(refreshed), semanticSnapshotSignature(baseSnapshot));
 });
 
+test("semantic comparison notices newly rendered visual surfaces", () => {
+  const rendered = {
+    ...baseSnapshot,
+    visualSignals: { imageCount: 1, largeImageCount: 1, canvasCount: 0, videoCount: 0 },
+  };
+  assert.notEqual(semanticSnapshotSignature(rendered), semanticSnapshotSignature(baseSnapshot));
+});
+
 test("waits for changed page semantics to become quiet before returning fresh refs", async () => {
   let time = 0;
   let reads = 0;

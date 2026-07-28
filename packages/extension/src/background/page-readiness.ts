@@ -25,6 +25,7 @@ export function semanticSnapshotSignature(snapshot: PageSnapshot): string {
     title: normalizeText(snapshot.title),
     headings: snapshot.headings.map(({ level, text }) => [level, normalizeText(text)]),
     mainText: normalizeText(snapshot.mainText).slice(0, 12_000),
+    visualSignals: snapshot.visualSignals,
     elements: snapshot.elements.map(semanticElement),
   });
 }
