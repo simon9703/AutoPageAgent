@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { dispatchEscapeKey, findSafeDismissPoint, type DismissKeyboardTarget } from "../src/content/dismiss.js";
+import {
+  dispatchElementClick,
+  dispatchEscapeKey,
+  findSafeDismissPoint,
+  type DismissKeyboardTarget,
+} from "../src/content/dismiss.js";
 
 function createTarget(role = "combobox") {
   const calls: string[] = [];
@@ -68,11 +73,31 @@ test("unsafe exterior candidates are skipped without inventing a fallback coordi
   assert.equal(result, undefined);
 });
 
-test("popup dismiss tries a safe exterior click before Escape", async () => {
+test("safe exterior activation uses the resolved element's click method", () => {
+  const calls: string[] = [];
+  const target = {
+    dispatchEvent: (event: Event) => {
+      calls.push(event.type);
+      return true;
+    },
+    click: () => { calls.push("click"); },
+  };
+  const createEvent = (type: string, init: EventInit) => new Event(type, init);
+  dispatchElementClick(
+    target,
+    { x: 120, y: 80 },
+    (type, init) => createEvent(type, init),
+    (type, init) => createEvent(type, init),
+  );
+  assert.deepEqual(calls, ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]);
+});
+
+test("popup dismiss verifies the exterior click before falling back to Escape", async () => {
   const runtime = await readFile(new URL("../src/content/runtime.ts", import.meta.url), "utf8");
   const dismissBody = /function dismissElement[\s\S]+?\n\}\n\nfunction getTopmostVisibleDialog/u.exec(runtime)?.[0] ?? "";
 
-  assert.match(dismissBody, /role === "combobox"[\s\S]+clickSafePopupExterior\(element\)\) return;/u);
-  assert.match(dismissBody, /role === "listbox" \|\| role === "menu"[\s\S]+clickSafePopupExterior\(element\)\) return;/u);
+  assert.match(dismissBody, /function dismissElement\(element: HTMLElement, allowFilledDialog: boolean\): Promise<void>/u);
+  assert.match(dismissBody, /role === "combobox"[\s\S]+clickSafePopupExterior\(element\)[\s\S]+isPopupDismissTargetOpen\(element\)\) return;/u);
+  assert.match(dismissBody, /role === "listbox" \|\| role === "menu"[\s\S]+clickSafePopupExterior\(element\)[\s\S]+isPopupDismissTargetOpen\(element\)\) return;/u);
   assert.ok(dismissBody.indexOf("clickSafePopupExterior(element)") < dismissBody.lastIndexOf("dispatchEscapeKey(element)"));
 });
