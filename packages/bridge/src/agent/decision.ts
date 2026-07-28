@@ -21,17 +21,21 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot, task =
         unmatchedEvidence: [],
       };
     }
-    const unmatchedEvidence = evidence.filter((item) => !completionEvidenceMatchesSnapshot(item, snapshot));
-    if (unmatchedEvidence.length) {
+    const matchedEvidence = evidence.filter((item) => completionEvidenceMatchesSnapshot(item, snapshot));
+    if (!matchedEvidence.length) {
       return {
         kind: "blocked",
         reason: "The agent claimed completion with evidence that is not present in the current page snapshot.",
         recoverable: true,
         code: "completion_evidence_missing",
-        unmatchedEvidence,
+        unmatchedEvidence: evidence,
       };
     }
-    return { kind: "complete", summary: String(raw.summary || "Task completed.").slice(0, 2_000), evidence };
+    return {
+      kind: "complete",
+      summary: String(raw.summary || "Task completed.").slice(0, 2_000),
+      evidence: matchedEvidence,
+    };
   }
   if (raw.kind === "needs_user") {
     const options = Array.isArray(raw.options)

@@ -22,6 +22,8 @@ test("classifies stale page validation as reobserve without consuming an action"
 test("classifies replaced page contexts as reobserve without a verification failure", () => {
   for (const message of [
     "A listener indicated an asynchronous response, but the message port closed before a response was received",
+    "Could not establish connection. Receiving end does not exist.",
+    "Cannot access contents of the page.",
     "Extension context invalidated.",
     "The frame was removed.",
     "No frame with id 4 in tab 12.",
@@ -44,6 +46,8 @@ test("agent loop replans with a fresh snapshot before continuing", async () => {
   assert.match(background, /outcome\.kind === "reobserve"/u);
   assert.match(background, /outcome\.kind === "reobserve"\) \{\s*failures = 0;/u);
   assert.match(background, /snapshot: await reobservePage\(tabId\)/u);
+  assert.match(background, /for \(let attempt = 0; attempt < 4; attempt \+= 1\)/u);
+  assert.match(background, /if \(!classifyReobserveError\(error\)\) throw error;/u);
   assert.match(background, /requestContinuation\(outcome\.snapshot, loop/u);
   assert.match(background, /plan = decision;\s*pendingSteps = \[\.\.\.decision\.steps\];\s*continue;/u);
   assert.doesNotMatch(background, /The page navigated; the new page must be checked[\s\S]+failures \+= 1/u);

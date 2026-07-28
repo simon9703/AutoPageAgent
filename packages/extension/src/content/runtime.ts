@@ -11,7 +11,7 @@ import type {
 } from "@auto-page-agent/shared";
 import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer } from "./agent-activity.js";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "./action-settle.js";
-import { hasCompletedRouteTransition, hasObservableActionEffect, hasPendingRouteTransition, hasVerifiedDismissal, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
+import { getPageTransitionState, hasObservableActionEffect, hasVerifiedDismissal, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
 import { clickSafePopupExterior, dispatchEscapeKey } from "./dismiss.js";
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
@@ -245,16 +245,7 @@ async function executePlan(plan: BrowserActionPlan): Promise<ActionExecutionResu
     let diff = diffSnapshots(before, after);
     let verification = verifyAction(step, before, after, diff, targetFingerprint);
     const routeTransitionObserved = isNavigationAction(step)
-      && hasPendingRouteTransition(after, diff);
-    if (step.action === "dismiss"
-      && !verification.success
-      && targetElement instanceof HTMLElement
-      && clickSafePopupExterior(targetElement)) {
-      await waitForActionSettled(step, targetElement);
-      after = createPageSnapshot();
-      diff = diffSnapshots(before, after);
-      verification = verifyAction(step, before, after, diff, targetFingerprint);
-    }
+      && getPageTransitionState(before, after, diff) === "pending";
     if (!verification.success || routeTransitionObserved) {
       const delayedObservation = await observeDelayedActionEffect(
         step,
@@ -282,7 +273,9 @@ async function observeDelayedActionEffect(
   diff: PageSnapshotDiff;
   verification: ActionVerification;
 } | undefined> {
-  const policy = getDelayedActionObservationPolicy(step.action);
+  const policy = routeTransitionObserved
+    ? { maxWaitMs: 5_000, quietMs: 250, pollMs: 100 }
+    : getDelayedActionObservationPolicy(step.action);
   if (!policy) return undefined;
   const startedAt = Date.now();
   let lastVersion = domVersion;
@@ -304,7 +297,7 @@ async function observeDelayedActionEffect(
     const snapshot = createPageSnapshot();
     const diff = diffSnapshots(before, snapshot);
     waitingForRouteTransition ||= isNavigationAction(step)
-      && hasPendingRouteTransition(snapshot, diff);
+      && getPageTransitionState(before, snapshot, diff) === "pending";
     const verification = verifyObservedAction(
       step,
       before,
@@ -322,7 +315,7 @@ async function observeDelayedActionEffect(
   const snapshot = createPageSnapshot();
   const diff = diffSnapshots(before, snapshot);
   waitingForRouteTransition ||= isNavigationAction(step)
-    && hasPendingRouteTransition(snapshot, diff);
+    && getPageTransitionState(before, snapshot, diff) === "pending";
   const verification = verifyObservedAction(
     step,
     before,
@@ -343,7 +336,7 @@ function verifyObservedAction(
   routeTransitionObserved: boolean,
 ): ActionVerification {
   if (routeTransitionObserved) {
-    const success = hasCompletedRouteTransition(before, snapshot, diff);
+    const success = getPageTransitionState(before, snapshot, diff) === "completed";
     return {
       success,
       summary: success
@@ -535,9 +528,9 @@ function dismissElement(element: HTMLElement, allowFilledDialog: boolean): void 
     if (element.getAttribute("aria-expanded") !== "true") {
       throw new Error("Only an expanded combobox can be dismissed.");
     }
+    if (clickSafePopupExterior(element)) return;
   } else if (role === "listbox" || role === "menu") {
-    // Visible popup roots are allowed, but Escape is sent through their owning
-    // expanded control when one exists so framework key handlers receive it.
+    if (clickSafePopupExterior(element)) return;
   } else if (role === "dialog") {
     const innerPopupOpen = Array.from(document.querySelectorAll(
       '[role="combobox"][aria-expanded="true"],[role="listbox"],[role="menu"]',

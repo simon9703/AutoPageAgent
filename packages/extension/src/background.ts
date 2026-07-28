@@ -752,7 +752,17 @@ async function executePlanResilient(plan: BrowserActionPlan, tabId: number): Pro
 
 async function reobservePage(tabId: number): Promise<PageSnapshot> {
   await waitForTabReady(tabId);
-  return readSnapshot(tabId);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await readSnapshot(tabId);
+    } catch (error) {
+      lastError = error;
+      if (!classifyReobserveError(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+    }
+  }
+  throw lastError;
 }
 
 async function readSnapshot(tabId: number): Promise<PageSnapshot> {
