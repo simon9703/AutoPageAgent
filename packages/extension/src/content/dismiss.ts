@@ -4,6 +4,13 @@ export interface DismissKeyboardTarget {
 }
 
 type KeyboardEventFactory = (type: "keydown" | "keyup", init: KeyboardEventInit) => Event;
+type PointerEventFactory = (type: "pointerdown" | "pointerup", init: PointerEventInit) => Event;
+type MouseEventFactory = (type: "mousedown" | "mouseup" | "click", init: MouseEventInit) => Event;
+
+export interface DismissPointerTarget {
+  dispatchEvent(event: Event): boolean;
+  click?: () => void;
+}
 
 const ESCAPE_KEY_CODE = 27;
 const SAFE_POINT_INSET = 12;
@@ -85,8 +92,40 @@ export function clickSafePopupExterior(origin: HTMLElement): boolean {
   const resolved = findSafeDismissPoint(searchRect, popupRects, (point) =>
     resolveSafeExteriorTarget(point, popupRoots, dialog));
   if (!resolved) return false;
-  dispatchClickAtPoint(resolved.target, resolved.point);
+  dispatchElementClick(resolved.target, resolved.point);
   return true;
+}
+
+export function isPopupDismissTargetOpen(origin: HTMLElement): boolean {
+  const role = origin.getAttribute("role");
+  if (!origin.isConnected) return false;
+  if (role === "combobox" && origin.getAttribute("aria-expanded") !== "true") return false;
+  const popupRoots = resolvePopupRoots(origin);
+  if (!popupRoots.length) return role === "combobox";
+  return popupRoots.some((root) => root.isConnected && hasVisibleArea(root));
+}
+
+export function dispatchElementClick(
+  target: DismissPointerTarget,
+  point: DismissPoint,
+  createPointerEvent: PointerEventFactory = (type, init) => new PointerEvent(type, init),
+  createMouseEvent: MouseEventFactory = (type, init) => new MouseEvent(type, init),
+): void {
+  const mouseInit: MouseEventInit = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    clientX: point.x,
+    clientY: point.y,
+    button: 0,
+  };
+  const pointerInit: PointerEventInit = { ...mouseInit, pointerType: "mouse", isPrimary: true };
+  target.dispatchEvent(createPointerEvent("pointerdown", pointerInit));
+  target.dispatchEvent(createMouseEvent("mousedown", mouseInit));
+  target.dispatchEvent(createPointerEvent("pointerup", pointerInit));
+  target.dispatchEvent(createMouseEvent("mouseup", mouseInit));
+  if (target.click) target.click();
+  else target.dispatchEvent(createMouseEvent("click", mouseInit));
 }
 
 export function findSafeDismissPoint<T>(
@@ -191,23 +230,6 @@ function resolveSafeExteriorTarget(
   if (target.closest(INTERACTIVE_SELECTOR)) return undefined;
   if (getComputedStyle(target).cursor === "pointer") return undefined;
   return target;
-}
-
-function dispatchClickAtPoint(target: Element, point: DismissPoint): void {
-  const mouseInit: MouseEventInit = {
-    bubbles: true,
-    cancelable: true,
-    composed: true,
-    clientX: point.x,
-    clientY: point.y,
-    button: 0,
-  };
-  const pointerInit: PointerEventInit = { ...mouseInit, pointerType: "mouse", isPrimary: true };
-  target.dispatchEvent(new PointerEvent("pointerdown", pointerInit));
-  target.dispatchEvent(new MouseEvent("mousedown", mouseInit));
-  target.dispatchEvent(new PointerEvent("pointerup", pointerInit));
-  target.dispatchEvent(new MouseEvent("mouseup", mouseInit));
-  target.dispatchEvent(new MouseEvent("click", mouseInit));
 }
 
 function buildCandidatePoints(rect: DismissRect): DismissPoint[] {

@@ -12,7 +12,7 @@ import type {
 import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer } from "./agent-activity.js";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "./action-settle.js";
 import { getPageTransitionState, hasObservableActionEffect, hasVerifiedDismissal, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
-import { clickSafePopupExterior, dispatchEscapeKey } from "./dismiss.js";
+import { clickSafePopupExterior, dispatchEscapeKey, isPopupDismissTargetOpen } from "./dismiss.js";
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
 import { buildSelector, buildSimplifiedDom, cleanText, collectPageInfo, createElementFingerprint, delay, getAccessibleLabel, getSelectedValues, inferRole, isAvailableOption, isComboboxLike, isDisabledElement, isHiddenInput, isNearViewport, isReadonlyElement, isSensitiveElement, isTopLayerElement, isVisible, round, setElementValue, shouldExposeValue, simulateClick } from "./dom.js";
@@ -461,7 +461,7 @@ function verifyAction(step: BrowserActionStep, before: PageSnapshot, snapshot: P
     summary = success ? "The option selection changed the combobox state." : "The option click did not produce a verified selection state.";
   } else if (step.action === "dismiss") {
     success = Boolean(targetFingerprint && hasVerifiedDismissal(before, snapshot, targetFingerprint));
-    summary = success ? "The inner popup was verified as dismissed." : "The dismiss key did not produce a verified collapsed or hidden state.";
+    summary = success ? "The inner popup was verified as dismissed." : "The dismiss action did not produce a verified collapsed or hidden state.";
   } else if (step.action === "focus") {
     const active = document.activeElement;
     success = Boolean(active && createElementFingerprint(active) === targetFingerprint?.split("-")[0]);
@@ -505,7 +505,7 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   if (!isTopLayerElement(element)) throw new Error("Target is covered by another page element.");
   await showAiPointer(element, `AI · ${step.action}`);
   if (step.action === "click") await simulateClick(element);
-  if (step.action === "dismiss") dismissElement(element, step.allowDialogDismiss === true);
+  if (step.action === "dismiss") await dismissElement(element, step.allowDialogDismiss === true);
   if (step.action === "focus") element.focus();
   if (step.action === "submit") {
     const form = element.closest("form");
@@ -522,15 +522,21 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   return { action: step.action, ok: true };
 }
 
-function dismissElement(element: HTMLElement, allowFilledDialog: boolean): void {
+async function dismissElement(element: HTMLElement, allowFilledDialog: boolean): Promise<void> {
   const role = element.getAttribute("role") || inferRole(element);
   if (role === "combobox") {
     if (element.getAttribute("aria-expanded") !== "true") {
       throw new Error("Only an expanded combobox can be dismissed.");
     }
-    if (clickSafePopupExterior(element)) return;
+    if (clickSafePopupExterior(element)) {
+      await delay(250);
+      if (!isPopupDismissTargetOpen(element)) return;
+    }
   } else if (role === "listbox" || role === "menu") {
-    if (clickSafePopupExterior(element)) return;
+    if (clickSafePopupExterior(element)) {
+      await delay(250);
+      if (!isPopupDismissTargetOpen(element)) return;
+    }
   } else if (role === "dialog") {
     const innerPopupOpen = Array.from(document.querySelectorAll(
       '[role="combobox"][aria-expanded="true"],[role="listbox"],[role="menu"]',

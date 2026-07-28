@@ -370,6 +370,8 @@ test("agent prompt authorizes the requested test flow while preserving runtime b
   assert.match(prompt, /final combobox value or selected label\/tag/u);
   assert.match(prompt, /aria-selected state is already true/u);
   assert.match(prompt, /use dismiss on the expanded combobox/u);
+  assert.match(prompt, /clicks a verified real exterior element/u);
+  assert.match(prompt, /Never plan coordinates, click the combobox itself to close it/u);
   assert.match(prompt, /never invent a backdrop, blank-area coordinate, selector, or ref/u);
   assert.match(prompt, /complete ordered action sequence/u);
   assert.match(prompt, /one confirmation card/u);
