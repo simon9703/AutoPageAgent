@@ -52,12 +52,19 @@ export interface AgentNeedsUser {
   recommendedOption?: string;
 }
 
+export interface AgentObserve {
+  kind: "observe";
+  reason: string;
+  timeoutMs?: number;
+}
+
 export type AgentDecision =
   | BrowserActionPlan
   | AgentAnswer
   | AgentComplete
   | AgentBlocked
-  | AgentNeedsUser;
+  | AgentNeedsUser
+  | AgentObserve;
 
 export interface AgentLoopContext {
   runId: string;

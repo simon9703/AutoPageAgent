@@ -7,7 +7,7 @@ type KeyboardEventFactory = (type: "keydown" | "keyup", init: KeyboardEventInit)
 const ESCAPE_KEY_CODE = 27;
 const SAFE_POINT_INSET = 12;
 const POPUP_EDGE_PADDING = 6;
-const MAX_SAFE_CLICK_ATTEMPTS = 3;
+const MAX_SAFE_CLICK_ATTEMPTS = 1;
 const INTERACTIVE_SELECTOR = [
   "button",
   "a[href]",

@@ -23,6 +23,9 @@ Resource Timing 只在用户明确询问性能、网络、请求或 API 时采�
 - top-layer/遮挡检查；
 - 敏感字段标记；
 - expanded control、关联 popup、变化元素优先级排序。
+- 最上层 dialog、expanded combobox、受控 listbox/menu 和 option 优先；
+- dialog 打开时抑制其外部背景控件，expanded popup 抑制背景同语义候选；
+- disabled 分页控件仍可观察，但不能执行。
 
 Content Script 为每个候选建立：
 
@@ -30,7 +33,10 @@ Content Script 为每个候选建立：
 - `fingerprint`：Bridge 校验后用于后台队列重绑；
 - role、label、text、value 和几何信息；
 - checked、selected、expanded、busy；
+- multiple、current、relation；
 - controls、owns、activeDescendant、ownerId；
+- layerId、parentLayerId；
+- scrollable 与容器 scrollPosition；
 - `displayValue` 和 `selectedValues`。
 
 Selector 保留在 Content Script 内部，只用于录制或本地定位提示，不是模型动作输入。
@@ -42,10 +48,9 @@ Selector 保留在 Content Script 内部，只用于录制或本地定位提示�
 | `click` | 按钮、链接、option、类按钮控件 | 目标可见、未遮挡、未禁用 |
 | `fill` | 普通 input/textarea/contenteditable | 禁止敏感、readonly、自定义 combobox |
 | `select` | 原生 `<select>` | 不支持 ARIA combobox |
-| `scroll` | 页面或方向滚动 | 距离限制 0–2000px |
+| `scroll` | 页面或可信滚动容器 | 距离限制 0–2000px；容器必须有最新 targetRef |
 | `focus` | 聚焦控件 | 必须保留真实焦点 |
 | `submit` | 原生 form | 非 form 在 Bridge 归一化为 click |
-| `dismiss` | 当前最内层 popup/dialog | 不是任意坐标点击 |
 
 每步执行前会重新校验 Snapshot id、URL、目标可见性、敏感性、readonly、disabled 和 top-layer。
 
@@ -57,11 +62,11 @@ Selector 保留在 Content Script 内部，只用于录制或本地定位提示�
 | --- | --- |
 | fill / focus | 160ms |
 | combobox click | 1.2s，并等待关联 option |
-| select / dismiss | 900ms |
+| select | 900ms |
 | scroll | 700ms |
 | 普通 click / submit | 1.8s |
 
-click、submit、dismiss 在首次验证无结果时，可追加一次 mutation-aware delayed observation，最长 2.5s。路由转换 pending 时最多观察 5s。
+click、submit 在首次验证无结果时，可追加一次 mutation-aware delayed observation，最长 2.5s。路由转换 pending 时最多观察 5s。
 
 AI 指针只是可见反馈。其移动与点击动画保持短时阻塞，不能成为动作主要耗时。
 
@@ -72,7 +77,8 @@ Diff 以 fingerprint 比较：
 - URL/title 是否变化；
 - 交互元素新增/删除；
 - value、displayValue、selectedValues；
-- disabled、checked、selected、expanded、busy、occluded。
+- disabled、checked、selected、multiple、current、relation、expanded、busy、occluded；
+- layer 层级和滚动容器位置。
 
 “任意 DOM 有增删”不能直接证明动作成功。验证必须绑定目标或明确结果区域。
 
@@ -83,21 +89,16 @@ Diff 以 fingerprint 比较：
 | fill/select | 目标值精确匹配 |
 | option click | option selected、关联 combobox 最终值或 activeDescendant |
 | checkbox/radio/switch | 目标状态变化；或出现有文字的下一可操作控件 |
-| dismiss | expanded true→false 或受控 popup 消失，外层 dialog 保留 |
 | focus | activeElement 与目标一致 |
-| scroll | scrollX/scrollY 变化 |
+| scroll | 页面或目标容器 scroll position 变化 |
+| pagination click | current、URL 或 collection signature 变化 |
 | 普通 click/submit | 目标状态变化/消失、URL 变化或有意义结果区域 |
 
 新增 `alert/status/dialog` 只有包含非空 label、text、value、displayValue 或 selectedValues 才是证据。空的 offscreen status 只表示路由可能开始。
 
-## 7. Popup dismissal
+## 7. Popup housekeeping
 
-Dismiss 的目标只能是：
-
-- expanded combobox；
-- 可见 listbox/menu；
-- 属于该 popup 的已选择 option（仅作为锚点）；
-- 最上层 dialog。
+Popup close 属于 executor-owned housekeeping，不在 Provider action schema 中。dialog 不允许自动 dismiss；需要关闭 dialog 时，Provider 只能普通 click 当前 Snapshot 中显式的 Close/Cancel 控件。
 
 Popup 流程：
 
@@ -109,10 +110,10 @@ Popup 流程：
 6. 候选节点本身、祖先或后代包含交互控件时均拒绝，避免把代理 combobox 点击的普通 wrapper 误判为空白区域；
 7. Modal 中搜索范围限制在 Modal 内容内，并优先检查标题区等内部非交互区域，不点击 backdrop；
 8. Background 仅为当前运行的 top-frame Tab 派发 bounded trusted click；
-9. 每次点击后重新检查 expanded 状态和受控 popup；仍打开时排除该目标并尝试下一个候选，最多三次，整体仍计为一次 dismiss；
+9. 点击后 fresh Snapshot 检查 expanded 状态和受控 popup；只尝试一个安全点；
 10. 重新 Snapshot 并验证关闭。
 
-trusted Escape 的按键内容由扩展固定，模型不能提供按键。模型也不能提供坐标、backdrop、父 trigger、selector 或空白区域 ref。若所有固定回退均无法关闭，dismiss 失败。
+同一 owner 仍有 queued unselected option 时不关闭。下一目标在 popup 外或最后一个 queued option 已完成时才执行一次 housekeeping。trusted Escape 的按键内容由扩展固定，模型不能提供按键；安全点也由 Content Script 计算。两者均无效时立即失败，不循环尝试其他位置。
 
 ## 8. 截图与视觉标记
 

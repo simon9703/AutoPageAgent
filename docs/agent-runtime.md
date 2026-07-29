@@ -13,6 +13,9 @@ flowchart TD
   S --> V{"Verify"}
   V -->|成功且可重绑| Q["本地队列继续"]
   Q --> A
+  P -->|observe| W["有界语义轮询"]
+  W -->|稳定变化| P
+  W -->|超时| F
   V -->|跳转 / stale / 分支| R["Reobserve + Replan"]
   V -->|失败| F["带失败证据 Replan"]
   R --> A
@@ -36,10 +39,12 @@ Bridge 对完整计划执行 fail-closed 校验：
 
 - 最大 8 步；
 - 所有非 scroll 目标必须存在于当前 Snapshot；
+- 带目标的 scroll 必须指向 Snapshot 标记为 scrollable 的可信 ref；
 - 任何一步无效都会拒绝整个计划，不做部分执行；
 - `fill/select` 不能作用于 readonly、敏感或不可写目标；
 - 自定义 combobox 不能直接 `fill/select`；
 - 非原生 form 的 `submit` 归一化为 `click`；
+- 分页 Next/Previous 每个计划最多一个，且必须是计划最后一步；
 - 每个目标附加由 Bridge 生成的 `targetFingerprint`。
 
 ## 3. 本地队列与 ref 重绑
@@ -50,7 +55,7 @@ Bridge 对完整计划执行 fail-closed 校验：
 
 - 唯一匹配：替换为新 ref，本地继续，不调用 Provider；
 - 未找到或多义：丢弃剩余队列，携带 `snapshot_expired` 重新规划；
-- popup 仍打开：必要时插入受限 `dismiss` housekeeping step；
+- popup 仍打开且下一目标位于外层：执行不进入 Provider action schema 的 popup housekeeping；
 - URL 或页面上下文变化：丢弃剩余队列并 reobserve。
 
 这使 Provider 调用边界保持清晰：队列结束、动态目标尚未出现、目标无法唯一重绑、验证失败或页面分支。
@@ -108,11 +113,38 @@ Content Script 的异步消息会把异常包装为 `{ ok:false,error }`。Backg
 3. 捕获新 Snapshot；
 4. Provider 使用新 option ref 规划选择；
 5. 验证 `aria-selected`、combobox `displayValue/selectedValues` 或 `activeDescendant`；
-6. 多选完成后，队列插入受限 dismiss，再进入下一字段。
+6. 多选时，Provider 返回当前 Snapshot 中全部确定且未选择的目标 option；
+7. 同一 owner 仍有 queued option 时保持 popup 打开；
+8. 下一目标在 popup 外或最后一个 option 已选完时，由 executor 关闭 popup，再进入下一字段。
 
 旧 Snapshot 中不存在的 option 不能预排，也不能从截图生成坐标。
 
-## 6. 验证失败和恢复
+## 6. Observe 决策
+
+`AgentDecision kind="observe"` 用于打包中、推送中、加载中或等待列表更新，不是 `BrowserAction`：
+
+- Provider 只返回 `kind`、`reason` 和可选 `timeoutMs`；
+- Bridge 与 Background 都把单次 timeout 限制在 30 秒内；
+- Background 轮询 semantic snapshot signature，忽略 ref、时间戳和布局抖动；
+- busy/progress 消失且有意义变化进入稳定窗口后才请求 continuation；
+- 超时会明确 blocked，不把仍 busy 的最后快照当成 ready；
+- observe 不消耗 50 动作预算，也不累计验证失败，但受全局 30 分钟预算。
+
+不依赖站点专用状态文案，也不使用固定长 sleep。
+
+## 7. 分页
+
+分页仍使用普通 `click`。Snapshot 从 `aria-current`、`rel=next/prev` 和 navigation 可访问名称提取 `current/relation`。
+
+点击 Next/Previous 后至少满足一项才成功：
+
+- current page 语义变化；
+- URL 变化；
+- 有界列表/表格 collection signature 变化。
+
+成功标记为 `page_content_changed`，丢弃上一页剩余队列和旧 ref，并从 fresh Snapshot 重新规划。disabled Next 保留在 Snapshot 供停止判断，但 Bridge 不允许点击。
+
+## 8. 验证失败和恢复
 
 验证失败不会自动重复相同动作。Continuation 收到：
 
@@ -134,7 +166,7 @@ Provider 首次在异步边界返回 blocked 时，Background 可在同一边界
 
 DOM 恢复仍不可操作时，可在满足安全条件下附加一次当前活动视口截图。截图只辅助理解，动作仍必须使用最新 DOM ref。
 
-## 7. 完成语义
+## 9. 完成语义
 
 执行过浏览器动作后：
 
@@ -144,7 +176,7 @@ DOM 恢复仍不可操作时，可在满足安全条件下附加一次当前活�
 - 证据无法匹配时只允许一次恢复 turn；
 - 第二次仍无证据时报告“可能已提交，但无法确认完成”。
 
-## 8. 预算与性能
+## 10. 预算与性能
 
 单次 Provider Plan 仍限制为最多 8 步，避免动态页面中的 ref 在长计划内过期。整个 Agent 任务每轮限制为 50 个已执行动作、30 分钟、连续 3 次验证失败；stale/reobserve 不计入动作数。
 

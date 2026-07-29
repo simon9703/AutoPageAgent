@@ -22,6 +22,9 @@ export const SNAPSHOT_CANDIDATE_SELECTOR = [
   "[aria-controls]",
   "[aria-expanded]",
   "[aria-selected]",
+  "[aria-current]",
+  "[rel~='next']",
+  "[rel~='prev']",
   '[aria-busy="true"]',
   "[tabindex]",
 ].join(",");
@@ -61,10 +64,48 @@ export function shouldIncludeSnapshotCandidate(state: SnapshotCandidateState): b
   return state.visible
     && state.nearViewport
     && !state.hiddenInput
-    && state.topLayer
-    && !state.disabled;
+    && state.topLayer;
 }
 
 export function resolveSnapshotRole(explicitRole: string | null, inferredRole: string, hasAriaSelected: boolean): string {
   return explicitRole || inferredRole || (hasAriaSelected ? "option" : "");
+}
+
+export function resolveMultipleState(element: {
+  multiple?: boolean;
+  ariaMultiselectable?: string | null;
+  ownerAriaMultiselectable?: string | null;
+}): boolean | undefined {
+  if (element.multiple === true
+    || element.ariaMultiselectable === "true"
+    || element.ownerAriaMultiselectable === "true") return true;
+  return undefined;
+}
+
+export function resolveCurrentState(ariaCurrent: string | null | undefined): boolean | undefined {
+  if (!ariaCurrent || ariaCurrent === "false") return undefined;
+  return true;
+}
+
+export function resolvePaginationRelation(input: {
+  rel?: string | null;
+  ariaLabel?: string | null;
+  title?: string | null;
+  text?: string | null;
+  withinNavigation?: boolean;
+}): "next" | "previous" | undefined {
+  const relTokens = input.rel?.toLocaleLowerCase().split(/\s+/u) ?? [];
+  if (relTokens.includes("next")) return "next";
+  if (relTokens.includes("prev") || relTokens.includes("previous")) return "previous";
+  if (!input.withinNavigation) return undefined;
+  const accessibleName = [input.ariaLabel, input.title, input.text]
+    .filter(Boolean)
+    .join(" ")
+    .normalize("NFKC")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLocaleLowerCase();
+  if (/^(?:next|next page|下一页|下页|后一页|›|»|→)$/u.test(accessibleName)) return "next";
+  if (/^(?:previous|previous page|prev|上一页|上页|前一页|‹|«|←)$/u.test(accessibleName)) return "previous";
+  return undefined;
 }

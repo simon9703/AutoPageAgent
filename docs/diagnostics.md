@@ -19,7 +19,8 @@
 - Prompt 明确在导航、页面替换、动态 popup 和目标尚不存在前停止。
 - `{ ok:false,error }` 中的 URL changed、snapshot expired、target unavailable 和 context invalidated 会进入 reobserve。
 - reobserve 不累计 verification failure；派发前 stale 不消耗动作步骤。
-- fill/focus 等直接动作使用短 settle；click/submit/dismiss 才有 delayed observation。
+- fill/focus 等直接动作使用短 settle；click/submit 才有 delayed observation；popup housekeeping 使用独立的 fresh-Snapshot 验证。
+- observe 使用 stable semantic signature 轮询，不消耗动作预算。
 - Resource Timing 只按需采集。
 - 选择类控件可用目标状态、最终 combobox 值或后续控制变为可操作作为验证。
 - AI 指针和滚动准备时间保持可见但缩短。

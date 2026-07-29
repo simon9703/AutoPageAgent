@@ -63,13 +63,17 @@ sequenceDiagram
   CS-->>BG: PageSnapshot
   BG->>BR: agent.run
   BR->>AI: 受限 Prompt
-  AI-->>BR: JSON decision
+  AI-->>BR: action / observe / terminal decision
   BR-->>BG: 已归一化计划
   BG-->>UI: 一次确认
   UI->>BG: 开始执行
   loop 每个动作
     BG->>CS: 单步 action
     CS-->>BG: snapshot + diff + verification
+  end
+  opt popup housekeeping
+    BG->>CS: 内部 popup close
+    CS-->>BG: fresh snapshot + verification
   end
   BG->>BR: 仅在边界处 continuation
 ```
@@ -136,6 +140,8 @@ packages/bridge/src/
 - Extension 始终拥有浏览器状态和执行权。
 - Bridge 始终拥有 Provider 凭证和决策校验权。
 - Provider 不能创建 selector、XPath、JavaScript 或坐标。
+- Provider 不能请求 Escape 或 popup 外点；popup close 由 Extension 内部拥有。
+- observe 不进入动作白名单，分页仍是 click，滚动容器必须使用最新可信 ref。
 - Skills 只提供声明式上下文，不增加权限。
 - 导航、页面替换和 stale ref 必须重新观察，不能重试旧动作。
 - 页面动作成功不等于任务完成；完成必须匹配最新 Snapshot 中的精确证据。

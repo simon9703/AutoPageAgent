@@ -3,6 +3,9 @@ import test from "node:test";
 import {
   getSnapshotCandidatePriority,
   parseAriaIdRefs,
+  resolveCurrentState,
+  resolveMultipleState,
+  resolvePaginationRelation,
   resolveSnapshotRole,
   shouldIncludeSnapshotCandidate,
   SNAPSHOT_CANDIDATE_SELECTOR,
@@ -46,12 +49,22 @@ test("ARIA relations accept multiple whitespace-separated ids", () => {
   assert.deepEqual(parseAriaIdRefs(null), []);
 });
 
-test("hidden, zero-size, covered, and disabled candidates are excluded while readonly remains observable", () => {
+test("hidden and covered candidates are excluded while readonly and disabled pagination remain observable", () => {
   assert.equal(shouldIncludeSnapshotCandidate({ ...available, visible: false }), false);
   assert.equal(shouldIncludeSnapshotCandidate({ ...available, topLayer: false }), false);
-  assert.equal(shouldIncludeSnapshotCandidate({ ...available, disabled: true }), false);
+  assert.equal(shouldIncludeSnapshotCandidate({ ...available, disabled: true }), true);
   assert.equal(shouldIncludeSnapshotCandidate({ ...available, readonly: true }), true);
   assert.equal(shouldIncludeSnapshotCandidate(available), true);
+});
+
+test("snapshot derives multiple, current, and pagination relation from standard DOM and ARIA semantics", () => {
+  assert.equal(resolveMultipleState({ ariaMultiselectable: "true" }), true);
+  assert.equal(resolveMultipleState({ multiple: true }), true);
+  assert.equal(resolveCurrentState("page"), true);
+  assert.equal(resolveCurrentState("false"), undefined);
+  assert.equal(resolvePaginationRelation({ rel: "nofollow next" }), "next");
+  assert.equal(resolvePaginationRelation({ ariaLabel: "Previous page", withinNavigation: true }), "previous");
+  assert.equal(resolvePaginationRelation({ text: "Next", withinNavigation: false }), undefined);
 });
 
 test("aria-selected fallback receives option semantics without overriding an explicit role", () => {
@@ -71,6 +84,9 @@ test("simplified DOM exposes readonly combobox state and selected display values
     value: "",
     displayValue: "global",
     selectedValues: ["global", "cloud"],
+    multiple: true,
+    current: true,
+    relation: "next",
     disabled: false,
     sensitive: false,
     contentEditable: false,
@@ -80,6 +96,10 @@ test("simplified DOM exposes readonly combobox state and selected display values
     readonly: true,
     expanded: false,
     controls: "site-list",
+    layerId: "popup:site-list",
+    parentLayerId: "dialog:package",
+    scrollable: true,
+    scrollPosition: { x: 0, y: 20, maxX: 0, maxY: 200 },
     viewportRect: { x: 0, y: 0, width: 200, height: 32 },
   };
   const simplified = buildSimplifiedDom([element], new Map());
@@ -88,4 +108,10 @@ test("simplified DOM exposes readonly combobox state and selected display values
   assert.match(simplified, /aria-controls="site-list"/u);
   assert.match(simplified, /data-display-value="global"/u);
   assert.match(simplified, /data-selected-values="global \| cloud"/u);
+  assert.match(simplified, /aria-multiselectable="true"/u);
+  assert.match(simplified, /aria-current="page"/u);
+  assert.match(simplified, /rel="next"/u);
+  assert.match(simplified, /data-ai-layer="popup:site-list"/u);
+  assert.match(simplified, /data-ai-parent-layer="dialog:package"/u);
+  assert.match(simplified, /data-scrollable="true"/u);
 });

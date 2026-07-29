@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { BrowserActionStep, PageSnapshot } from "@auto-page-agent/shared";
 import {
-  createPopupDismissStepAfterOptionSelection,
+  findPopupHousekeepingRequest,
   rebindQueuedStep,
 } from "../src/background/step-queue.js";
 
@@ -104,8 +104,8 @@ const openSiteCombobox = {
   readonly: true,
 };
 
-test("verified option selection queues popup dismissal before the next field", () => {
-  const dismiss = createPopupDismissStepAfterOptionSelection({
+test("verified option selection requests popup housekeeping before the next field", () => {
+  const dismiss = findPopupHousekeepingRequest({
     action: "click",
     targetRef: "old-site-global",
     targetFingerprint: "site-global-1",
@@ -121,10 +121,9 @@ test("verified option selection queues popup dismissal before the next field", (
   });
 
   assert.deepEqual(dismiss, {
-    action: "dismiss",
+    snapshotId: "snapshot-2",
     targetRef: "site-combobox",
     targetFingerprint: "site-combobox-1",
-    reason: "Close the selected dropdown before continuing with the next field.",
   });
 });
 
@@ -137,7 +136,7 @@ test("verified option selection keeps another unselected option in the same popu
     fingerprint: "site-thailand-1",
     selected: false,
   };
-  const dismiss = createPopupDismissStepAfterOptionSelection({
+  const dismiss = findPopupHousekeepingRequest({
     action: "click",
     targetFingerprint: "site-global-1",
     reason: "Select global",
@@ -153,19 +152,55 @@ test("verified option selection keeps another unselected option in the same popu
   assert.equal(dismiss, undefined);
 });
 
-test("verified option selection does not duplicate an explicit queued dismiss", () => {
-  const dismiss = createPopupDismissStepAfterOptionSelection({
+test("opening a popup without a known next target does not immediately close it", () => {
+  const dismiss = findPopupHousekeepingRequest({
     action: "click",
-    targetFingerprint: "site-global-1",
-    reason: "Select global",
-  }, [{
-    action: "dismiss",
     targetFingerprint: "site-combobox-1",
-    reason: "Close sites",
-  }], {
+    reason: "Open sites",
+  }, [], {
     ...snapshot,
-    elements: [selectedOption, openSiteCombobox],
+    elements: [openSiteCombobox],
   });
 
   assert.equal(dismiss, undefined);
+});
+
+test("the last selected option closes the popup exactly once even when the queue ends", () => {
+  const dismiss = findPopupHousekeepingRequest({
+    action: "click",
+    targetFingerprint: "site-global-1",
+    reason: "Select global",
+  }, [], {
+    ...snapshot,
+    elements: [selectedOption, openSiteCombobox],
+  });
+  assert.equal(dismiss?.targetFingerprint, "site-combobox-1");
+});
+
+test("standalone ARIA menu can be housekeeping-owned without a combobox", () => {
+  const menu = {
+    ...snapshot.elements[0]!,
+    ref: "actions-menu",
+    role: "menu",
+    domId: "actions-menu",
+    fingerprint: "actions-menu-1",
+    layerId: "popup:actions-menu",
+  };
+  const menuitem = {
+    ...snapshot.elements[0]!,
+    ref: "archive",
+    role: "menuitem",
+    fingerprint: "archive-1",
+    ownerId: "actions-menu",
+    layerId: "popup:actions-menu",
+  };
+  const request = findPopupHousekeepingRequest({
+    action: "click",
+    targetFingerprint: "archive-1",
+    reason: "Archive",
+  }, [], {
+    ...snapshot,
+    elements: [menu, menuitem],
+  });
+  assert.equal(request?.targetFingerprint, "actions-menu-1");
 });
