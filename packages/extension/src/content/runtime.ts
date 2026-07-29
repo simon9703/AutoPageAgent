@@ -9,7 +9,7 @@ import type {
   RecordedBrowserAction,
   PageSnapshotDiff,
 } from "@auto-page-agent/shared";
-import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer } from "./agent-activity.js";
+import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer, showAiPointerAtPoint } from "./agent-activity.js";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "./action-settle.js";
 import { getPageTransitionState, hasObservableActionEffect, hasVerifiedDismissal, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
 import { clickSafePopupExterior, dispatchEscapeKey, isPopupDismissTargetOpen } from "./dismiss.js";
@@ -514,7 +514,7 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   element.scrollIntoView({ block: "center", behavior: "smooth" });
   await delay(220);
   if (!isTopLayerElement(element)) throw new Error("Target is covered by another page element.");
-  await showAiPointer(element, `AI · ${step.action}`);
+  if (step.action !== "dismiss") await showAiPointer(element, `AI · ${step.action}`);
   if (step.action === "click") await simulateClick(element);
   if (step.action === "dismiss") await dismissElement(element, step.allowDialogDismiss === true);
   if (step.action === "focus") element.focus();
@@ -545,7 +545,11 @@ async function dismissElement(element: HTMLElement, allowFilledDialog: boolean):
     dispatchEscapeKey(element);
     await delay(250);
     if (!isPopupDismissTargetOpen(element)) return;
-    if (clickSafePopupExterior(element)) {
+    if (await clickSafePopupExterior(
+      element,
+      (_target, point) => showAiPointerAtPoint(point.x, point.y, "AI · dismiss"),
+      requestTrustedDismissClick,
+    )) {
       await delay(250);
       if (!isPopupDismissTargetOpen(element)) return;
     }
@@ -563,6 +567,17 @@ async function dismissElement(element: HTMLElement, allowFilledDialog: boolean):
   }
 
   if (role === "dialog") dispatchEscapeKey(element);
+}
+
+async function requestTrustedDismissClick(point: { x: number; y: number }): Promise<void> {
+  const response = await chrome.runtime.sendMessage({
+    type: "page.dismiss.trusted-click",
+    x: point.x,
+    y: point.y,
+  }) as { ok?: boolean; error?: string };
+  if (!response?.ok) {
+    throw new Error(response?.error || "The browser could not perform the trusted popup dismissal click.");
+  }
 }
 
 function getTopmostVisibleDialog(): HTMLElement | undefined {

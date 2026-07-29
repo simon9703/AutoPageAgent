@@ -4,14 +4,6 @@ export interface DismissKeyboardTarget {
 }
 
 type KeyboardEventFactory = (type: "keydown" | "keyup", init: KeyboardEventInit) => Event;
-type PointerEventFactory = (type: "pointerdown" | "pointerup", init: PointerEventInit) => Event;
-type MouseEventFactory = (type: "mousedown" | "mouseup" | "click", init: MouseEventInit) => Event;
-
-export interface DismissPointerTarget {
-  dispatchEvent(event: Event): boolean;
-  click?: () => void;
-}
-
 const ESCAPE_KEY_CODE = 27;
 const SAFE_POINT_INSET = 12;
 const POPUP_EDGE_PADDING = 6;
@@ -77,7 +69,11 @@ export function dispatchEscapeKey(
   }
 }
 
-export function clickSafePopupExterior(origin: HTMLElement): boolean {
+export async function clickSafePopupExterior(
+  origin: HTMLElement,
+  beforeActivation?: (target: HTMLElement, point: DismissPoint) => void | Promise<void>,
+  activatePoint?: (point: DismissPoint) => Promise<void>,
+): Promise<boolean> {
   const popupRoots = resolvePopupRoots(origin);
   if (!popupRoots.length) return false;
   const dialog = resolveDismissDialog(origin);
@@ -92,7 +88,11 @@ export function clickSafePopupExterior(origin: HTMLElement): boolean {
   const resolved = findSafeDismissPoint(searchRect, popupRects, (point) =>
     resolveSafeExteriorTarget(point, popupRoots, dialog));
   if (!resolved) return false;
-  dispatchElementClick(resolved.target, resolved.point);
+  await beforeActivation?.(resolved.target, resolved.point);
+  const currentTarget = resolveSafeExteriorTarget(resolved.point, popupRoots, dialog);
+  if (!currentTarget) return false;
+  if (!activatePoint) return false;
+  await activatePoint(resolved.point);
   return true;
 }
 
@@ -103,29 +103,6 @@ export function isPopupDismissTargetOpen(origin: HTMLElement): boolean {
   const popupRoots = resolvePopupRoots(origin);
   if (!popupRoots.length) return role === "combobox";
   return popupRoots.some((root) => root.isConnected && hasVisibleArea(root));
-}
-
-export function dispatchElementClick(
-  target: DismissPointerTarget,
-  point: DismissPoint,
-  createPointerEvent: PointerEventFactory = (type, init) => new PointerEvent(type, init),
-  createMouseEvent: MouseEventFactory = (type, init) => new MouseEvent(type, init),
-): void {
-  const mouseInit: MouseEventInit = {
-    bubbles: true,
-    cancelable: true,
-    composed: true,
-    clientX: point.x,
-    clientY: point.y,
-    button: 0,
-  };
-  const pointerInit: PointerEventInit = { ...mouseInit, pointerType: "mouse", isPrimary: true };
-  target.dispatchEvent(createPointerEvent("pointerdown", pointerInit));
-  target.dispatchEvent(createMouseEvent("mousedown", mouseInit));
-  target.dispatchEvent(createPointerEvent("pointerup", pointerInit));
-  target.dispatchEvent(createMouseEvent("mouseup", mouseInit));
-  if (target.click) target.click();
-  else target.dispatchEvent(createMouseEvent("click", mouseInit));
 }
 
 export function findSafeDismissPoint<T>(
@@ -228,9 +205,10 @@ function resolveSafeExteriorTarget(
   point: DismissPoint,
   popupRoots: HTMLElement[],
   dialog?: HTMLElement,
-): Element | undefined {
+): HTMLElement | undefined {
   const target = document.elementsFromPoint(point.x, point.y)
-    .find((candidate) => !candidate.closest("[data-auto-page-agent-overlay]"));
+    .find((candidate): candidate is HTMLElement =>
+      candidate instanceof HTMLElement && !candidate.closest("[data-auto-page-agent-overlay]"));
   if (!target) return undefined;
   if (dialog && !dialog.contains(target)) return undefined;
   if (popupRoots.some((root) => root === target || root.contains(target))) return undefined;

@@ -14,9 +14,7 @@ export function setAgentActivity(active: boolean) {
 
 export async function showAiPointer(element: HTMLElement, label: string) {
   ensureAgentStyles();
-  if (!aiPointer) {
-    aiPointer = createPointer("auto-page-agent-pointer");
-  }
+  aiPointer ??= createPointer("auto-page-agent-pointer");
   actionOutline ??= createElementOutline("action");
   const rect = element.getBoundingClientRect();
   aiPointer.querySelector<HTMLElement>(".auto-page-agent-pointer-label")!.textContent = label;
@@ -24,12 +22,26 @@ export async function showAiPointer(element: HTMLElement, label: string) {
   actionOutline.classList.add("visible");
   aiPointer.classList.add("visible");
   positionPointer(aiPointer, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  await animatePointerClick();
+}
+
+export async function showAiPointerAtPoint(x: number, y: number, label: string) {
+  ensureAgentStyles();
+  aiPointer ??= createPointer("auto-page-agent-pointer");
+  aiPointer.querySelector<HTMLElement>(".auto-page-agent-pointer-label")!.textContent = label;
+  actionOutline?.classList.remove("visible");
+  aiPointer.classList.add("visible");
+  positionPointer(aiPointer, x, y);
+  await animatePointerClick();
+}
+
+async function animatePointerClick() {
   await delay(520);
-  aiPointer.classList.add("clicking");
-  actionOutline.classList.add("acting");
+  aiPointer?.classList.add("clicking");
+  actionOutline?.classList.add("acting");
   await delay(180);
-  aiPointer.classList.remove("clicking");
-  actionOutline.classList.remove("acting");
+  aiPointer?.classList.remove("clicking");
+  actionOutline?.classList.remove("acting");
   setTimeout(() => {
     aiPointer?.classList.remove("visible");
     actionOutline?.classList.remove("visible");

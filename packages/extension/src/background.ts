@@ -35,6 +35,7 @@ import {
   createPopupDismissStepAfterOptionSelection,
   rebindQueuedStep,
 } from "./background/step-queue.js";
+import { dispatchTrustedViewportClick } from "./background/trusted-click.js";
 import {
   activateTargetTab,
   getTargetTab,
@@ -88,6 +89,27 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "page.dismiss.trusted-click") {
+    const tabId = _sender.tab?.id;
+    if (
+      typeof tabId !== "number"
+      || _sender.frameId !== 0
+      || activeAgentRun?.tabId !== tabId
+    ) {
+      sendResponse({ ok: false, error: "Trusted popup dismissal is available only to the active top-frame agent run." });
+      return false;
+    }
+    void dispatchTrustedViewportClick(tabId, {
+      x: Number(message.x),
+      y: Number(message.y),
+    }).then(() => sendResponse({ ok: true })).catch((error) => {
+      sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    return true;
+  }
   if (message?.type === "page.element.selected") {
     void handleElementSelected(message, _sender).then(sendResponse).catch(toErrorResponse(sendResponse));
     return true;
