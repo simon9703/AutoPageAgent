@@ -92,7 +92,7 @@ planned only and must not be described as available.
 
 ### Skill Marketplace and Local Registry
 
-- [x] Current Page, My Skills, and Marketplace views
+- [x] Merged My Skills view with page-relevance ordering, plus Marketplace
 - [x] Daily report, release, translation, and page-assistant templates
 - [x] Record and confirmation-gated replay on the current page
 - [x] Generate declarative `SKILL.md` and parameterized `workflow.json`
@@ -101,7 +101,7 @@ planned only and must not be described as available.
 - [x] Install and explicitly update Marketplace templates
 - [x] Store user Skills outside the repository under `~/.auto-page-agent/skills`
 - [x] Preserve installed and custom Skills across repository/extension upgrades
-- [x] Match by origin/path prefix and configurable path wildcards
+- [x] Treat origin/path patterns as recommendation hints, never cross-page or cross-environment execution gates
 - [x] Show page-scoped Skills and explicit match reasons
 - [x] Run Skills through the same constrained Agent Runtime
 - [x] Redact sensitive recorded values and use manual-input checkpoints

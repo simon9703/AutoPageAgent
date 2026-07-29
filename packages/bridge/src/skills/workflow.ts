@@ -21,7 +21,7 @@ export function renderSkillMarkdown(
     ...(draft.instructions?.trim()
       ? ["## Instructions", "", draft.instructions.trim().slice(0, 20_000), ""]
       : []),
-    "Use this Skill only when the active page matches the configured start URL. Inspect the page again if a selector is missing.",
+    "This Skill may start from any page, route, domain, or deployment environment. Treat recorded URLs and selectors only as navigation and matching hints; inspect the current page before every action and navigate through the workflow as needed.",
     "",
     "## Safety",
     "",

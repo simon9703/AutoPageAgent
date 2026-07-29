@@ -15,7 +15,7 @@ export function selectSkills(task: string, skills: LoadedSkill[], pageUrl?: stri
 }
 
 export function selectSkillContext(task: string, skills: LoadedSkill[], pageUrl?: string): SkillSelection[] {
-  const eligible = pageUrl ? skills.filter((skill) => skillMatchesPage(skill, pageUrl)) : skills.filter((skill) => skill.workflow?.enabled !== false);
+  const eligible = skills.filter((skill) => skill.workflow?.enabled !== false);
   const normalizedTask = normalizeSearchText(task);
   const taskTokens = tokenize(normalizedTask);
   const ranked = eligible.map((skill) => {
@@ -24,19 +24,20 @@ export function selectSkillContext(task: string, skills: LoadedSkill[], pageUrl?
     const tokenHits = skillTokens.filter((token) => taskTokens.some((candidate) => candidate.includes(token) || token.includes(candidate))).length;
     const phraseHit = normalizedTask.includes(normalizeSearchText(skill.name));
     const pageScoped = Boolean(skill.workflow?.startUrl);
-    const score = tokenHits * 2 + (phraseHit ? 6 : 0) + (pageScoped ? 3 : 0);
-    return { skill, score, tokenHits, pageScoped };
-  }).sort((a, b) => b.score - a.score || Number(b.pageScoped) - Number(a.pageScoped));
-  let matched = ranked.filter((item) => item.score > (item.pageScoped ? 2 : 0)).slice(0, 3);
+    const pageAffinity = Boolean(pageUrl && configuredPageAffinity(skill, pageUrl));
+    const score = tokenHits * 2 + (phraseHit ? 6 : 0) + (pageAffinity ? 3 : 0);
+    return { skill, score, tokenHits, pageScoped, pageAffinity };
+  }).sort((a, b) => b.score - a.score || Number(b.pageAffinity) - Number(a.pageAffinity));
+  let matched = ranked.filter((item) => item.score > 0).slice(0, 3);
   if (!matched.length) matched = ranked.filter((item) => item.skill.slug === "analyze-page").slice(0, 1);
-  return matched.map(({ skill, score, tokenHits, pageScoped }) => ({
+  return matched.map(({ skill, score, tokenHits, pageScoped, pageAffinity }) => ({
     name: skill.name,
     slug: skill.slug,
     description: skill.description,
     body: skill.body.slice(0, 24_000),
     score,
     scope: pageScoped ? "page" : "global",
-    reason: pageScoped
+    reason: pageAffinity
       ? `Matched the current page${tokenHits ? ` and ${tokenHits} task keyword(s)` : ""}.`
       : `Matched ${Math.max(1, tokenHits)} task keyword(s).`,
   }));
@@ -46,17 +47,21 @@ export function listSkillsForPage(pageUrl: string, skills: LoadedSkill[]): PageS
   const page = safeParseHttpUrl(pageUrl);
   if (!page) return [];
   return skills
-    .filter((skill) => skillMatchesPage(skill, page.href, true))
     .map((skill) => summarizeSkill(skill, page))
-    .sort((a, b) => Number(b.scope === "page") - Number(a.scope === "page") || a.name.localeCompare(b.name));
+    .sort((a, b) => Number(configuredPageAffinityBySummary(b, page)) - Number(configuredPageAffinityBySummary(a, page))
+      || Number(b.enabled) - Number(a.enabled)
+      || a.name.localeCompare(b.name));
 }
 
-export function skillMatchesPage(skill: LoadedSkill, pageUrl: string, includeDisabled = false): boolean {
-  if (skill.workflow?.enabled === false && !includeDisabled) return false;
-  if (!skill.workflow?.startUrl) return true;
+function configuredPageAffinity(skill: LoadedSkill, pageUrl: string): boolean {
+  if (!skill.workflow?.startUrl) return false;
   const page = safeParseHttpUrl(pageUrl);
   if (!page) return false;
   return getPagePatterns(skill.workflow).some((pattern) => matchesPagePattern(page, pattern));
+}
+
+function configuredPageAffinityBySummary(skill: PageSkillSummary, page: URL): boolean {
+  return skill.pagePatterns.some((pattern) => matchesPagePattern(page, pattern));
 }
 
 function summarizeSkill(skill: LoadedSkill, page: URL): PageSkillSummary {

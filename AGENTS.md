@@ -125,7 +125,7 @@ If a requested feature conflicts with these rules, preserve the boundary and doc
 - Preserve explicit create-versus-update behavior. Duplicate names must not silently overwrite; updates must increment the patch version.
 - Keep imported/exported Skill bundles declarative and validated. Imports must not overwrite an existing slug, and deleting an installed Marketplace template must not delete the bundled source.
 - Validate Skill slugs, HTTP(S) page patterns, workflow size, actions, variables, and recorded values at the bridge boundary.
-- Page-scoped and enabled Skills rank ahead of global Skills. Keep match reasons visible and keep selected Skill context across loop turns.
+- Enabled Skills may run across routes, domains, and deployment environments. Page metadata may improve recommendation order but must never gate explicit selection; keep selected Skill context across loop turns.
 - Marketplace updates may replace the installed template copy only after explicit user confirmation.
 - A generated workflow remains declarative (`SKILL.md` plus `workflow.json`) and uses the same constrained agent loop as manual tasks.
 - Recorder screenshots are bounded session-only context. Never write screenshot data URLs into `SKILL.md`, `workflow.json`, exports, or Agent conversation history.

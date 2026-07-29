@@ -10,7 +10,7 @@ import { getDataSubdirectory } from "./data-paths.js";
 
 export type { LoadedSkill } from "./skills/model.js";
 export { renderSkillMarkdown } from "./skills/workflow.js";
-export { listSkillsForPage, selectSkillContext, selectSkills, skillMatchesPage } from "./skills/selection.js";
+export { listSkillsForPage, selectSkillContext, selectSkills } from "./skills/selection.js";
 
 const REGISTRY_SCHEMA_VERSION = 1;
 

@@ -1,5 +1,5 @@
 import type { AgentDecision, AgentEvent, AgentRuntimeStatus, CodexRuntimeStatus, PageSnapshot, SkillSelection } from "@auto-page-agent/shared";
-import { loadSkills, selectSkillContext, skillMatchesPage } from "../skills.js";
+import { loadSkills, selectSkillContext } from "../skills.js";
 import { CodexProvider } from "./providers/codex.js";
 import { OpenAIResponsesProvider } from "./providers/openai.js";
 import type { AgentEventSink, AgentRunContext } from "./types.js";
@@ -39,8 +39,8 @@ export class AgentRouter {
     const requested = context.selectedSkillSlug
       ? loadedSkills.find((skill) => skill.slug === context.selectedSkillSlug)
       : undefined;
-    if (context.selectedSkillSlug && (!requested || requested.workflow?.enabled === false || (!context.loop && !skillMatchesPage(requested, snapshot.url)))) {
-      throw new Error("The selected Skill is unavailable or does not match the current page.");
+    if (context.selectedSkillSlug && (!requested || requested.workflow?.enabled === false)) {
+      throw new Error("The selected Skill is unavailable or disabled.");
     }
     const selectedSkills = requested
       ? [{

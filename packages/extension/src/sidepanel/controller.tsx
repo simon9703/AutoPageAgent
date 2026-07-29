@@ -50,9 +50,8 @@ export function SidePanelController() {
   const [selectionMode, setSelectionMode] = useState<"element" | "image" | null>(null);
   const [screenshot, setScreenshot] = useState<{ dataUrl: string; title: string; url: string } | null>(null);
   const [modal, setModal] = useState<Modal>(null);
-  const [skillView, setSkillView] = useState<SkillView>("page");
+  const [skillView, setSkillView] = useState<SkillView>("mine");
   const [pageSkills, setPageSkills] = useState<PageSkillSummary[]>([]);
-  const [skillScope, setSkillScope] = useState(() => t("skills.currentPage"));
   const [catalog, setCatalog] = useState<{ installed: SkillCatalogItem[]; marketplace: SkillCatalogItem[] }>({ installed: [], marketplace: [] });
   const [recording, setRecording] = useState(false);
   const [recordedActions, setRecordedActions] = useState<RecordedBrowserAction[]>([]);
@@ -362,8 +361,6 @@ export function SidePanelController() {
     ]).catch(() => [] as unknown as [ServerMessage | undefined, ServerMessage]);
     if (pageResponse?.type === "skill.list.result") {
       setPageSkills(pageResponse.skills);
-      try { setSkillScope(`${new URL(pageResponse.pageUrl).hostname} · ${t("skills.available", { count: pageResponse.skills.length })}`); }
-      catch { setSkillScope(t("skills.available", { count: pageResponse.skills.length })); }
     }
     if (catalogResponse?.type === "skill.catalog.result") setCatalog({ installed: catalogResponse.installed, marketplace: catalogResponse.marketplace });
   }
@@ -916,7 +913,7 @@ export function SidePanelController() {
     setNotice(t("notice.skillSaved", { name: response.skill.name, version: response.skill.version }));
   }
 
-  const activeSkills = skillView === "page" ? pageSkills : skillView === "installed" ? catalog.installed : catalog.marketplace;
+  const activeSkills = skillView === "mine" ? pageSkills : catalog.marketplace;
   const contextLabel = selected ? selected.element.label || selected.element.text || `<${selected.element.tagName}>` : screenshot ? screenshot.title : "";
 
   return (
@@ -984,7 +981,7 @@ export function SidePanelController() {
         <p className="mt-1.5 truncate px-2 text-center text-[10px] text-slate-400">{notice}</p>
       </div>
 
-      {modal === "skills" ? <SkillsModal view={skillView} setView={setSkillView} scope={skillScope} items={activeSkills} selectedSlug={selectedSkill?.slug ?? ""} onClose={() => setModal(null)} onRefresh={() => void refreshSkills()} onAdd={addSkill} onImport={(bundle) => void importSkill(bundle)} onUse={chooseSkill} onInstall={(slug, update) => void installSkill(slug, update)} onToggle={(slug, enabled) => void configureSkill(slug, enabled)} onEdit={(slug) => void editSkill(slug)} onDelete={(slug, name) => void deleteSkill(slug, name)} onExport={(slug) => void exportSkill(slug)} /> : null}
+      {modal === "skills" ? <SkillsModal view={skillView} setView={setSkillView} items={activeSkills} selectedSlug={selectedSkill?.slug ?? ""} onClose={() => setModal(null)} onRefresh={() => void refreshSkills()} onAdd={addSkill} onImport={(bundle) => void importSkill(bundle)} onUse={chooseSkill} onInstall={(slug, update) => void installSkill(slug, update)} onToggle={(slug, enabled) => void configureSkill(slug, enabled)} onEdit={(slug) => void editSkill(slug)} onDelete={(slug, name) => void deleteSkill(slug, name)} onExport={(slug) => void exportSkill(slug)} /> : null}
       {modal === "history" ? <HistoryModal logs={historyLogs} currentConversationId={conversationIdRef.current} onClose={() => setModal(null)} onChoose={(log) => void switchHistory(log)} onDelete={(conversationId) => void deleteHistory(conversationId)} /> : null}
       {modal === "recording" ? <RecordingModal active={recording} actions={recordedActions} screenshots={recordedScreenshots} name={skillName} description={skillDescription} instructions={skillInstructions} editing={Boolean(editingSkillSlug)} onName={setSkillName} onDescription={setSkillDescription} onInstructions={setSkillInstructions} onClose={() => setModal(null)} onToggle={() => void toggleRecording()} onCapture={() => void captureRecordingScreenshot()} onReplay={() => void replayRecording()} onSave={() => void saveSkill()} /> : null}
     </main>

@@ -29,7 +29,7 @@ A lightweight Chrome side-panel agent that understands a conversation-bound targ
 - Keep plan summaries in the approval card and runtime step counts in status/timeline UI instead of duplicating them in assistant messages.
 - Track stable element fingerprints, occlusion, viewport, read-only, checked, expanded, and busy state.
 - Rank page Skills with explicit match reasons and keep their context active across loop iterations.
-- Browse Current page, My Skills, and Marketplace views in one local Skill Registry.
+- Browse My Skills and Marketplace views in one local Skill Registry.
 - Install only the built-in `analyze-page` template by default.
 - Debug a selected Skill through the same observable agent loop, then save a new Skill or explicitly update an existing version.
 - Explicitly select one Skill for a conversation, or add, import, download, and delete local Skills.
@@ -123,11 +123,11 @@ The bridge stores user Skills in `~/.auto-page-agent/skills/<name>/` by default.
 
 Conversation history is stored beside Skills in `~/.auto-page-agent/logs/<conversation-id>.json`. Each bounded log contains compact messages, page metadata, pending continuation state, and real Action/Verify/Complete/Error events. Screenshot data URLs, ephemeral DOM refs, and recorded form values are not written to logs.
 
-Generated Skills are page-scoped by origin and recorded start-path prefix. The **Skills** modal provides **Current page**, **My Skills**, and **Skills Marketplace** views. Its header creates or imports Skills; each installed Skill can be selected, downloaded, edited, enabled/disabled, or deleted. **Debug** asks the agent to explain and verify each Skill step. Neither selection nor debug bypasses the normal plan and confirmation flow.
+Generated Skills are reusable across routes, domains, and deployment environments. The recorded start URL, step URLs, selectors, and optional page patterns are navigation and recommendation hints rather than execution gates. The **Skills** modal provides **My Skills** and **Skills Marketplace** views. My Skills contains every local Skill, with current-page relevance used only for ordering. Its header creates or imports Skills; each installed Skill can be selected, downloaded, edited, enabled/disabled, or deleted. **Debug** asks the agent to explain and verify each Skill step. Neither selection nor debug bypasses the normal plan and confirmation flow.
 
 The **Summarize as Skill** action below the conversation combines the bound page, recent user/Agent messages, runtime action/verification notes, and any current recording into an editable Skill draft. Screenshot binaries remain session-only and are not written into `workflow.json`.
 
-Recorded Skills can be enabled, disabled, or assigned custom page patterns from the same card. Patterns require a fixed HTTP(S) origin and accept `*` for one path segment or `**` for multiple segments. Disabled Skills remain visible on matching pages for management but are excluded from Codex selection and cannot be run.
+Recorded Skills can be enabled or disabled from the same card. Existing page patterns are retained for compatibility and may improve recommendation order, but never prevent a Skill from appearing or running on another page or environment. Disabled Skills remain visible for management but are excluded from Codex selection and cannot be run.
 
 ## Development
 

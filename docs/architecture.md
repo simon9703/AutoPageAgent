@@ -251,9 +251,9 @@ When saved, the bridge validates every URL and action, bounds the workflow to 10
 
 The Registry supports explicit Skill selection, create/update/delete, portable JSON import/export, and Marketplace reinstall after deletion. The conversation summary flow generates an editable page-scoped draft from recent chat messages, Agent action/verification notes, and recorded steps; it still uses the same validated save boundary.
 
-The Skill discovery endpoint classifies hand-written Skills without workflow metadata as global. Recorded Skills match only pages with the same HTTP(S) origin and the recorded start-path prefix. Page-scoped Skills sort before global capabilities in the side panel, and unrelated page workflows are excluded from the Codex prompt as well as the visible function list.
+The Skill discovery endpoint returns every installed Skill on every HTTP(S) page. Recorded start URLs and page patterns are recommendation metadata only: same-page matches sort first, but cross-route, cross-domain, and cross-environment workflows remain visible and executable. Explicit Skill selection checks only that the Skill exists and is enabled; runtime observation, fresh refs, action validation, confirmation, and verification decide whether each step can continue safely.
 
-Workflow schema v2 adds persistent `enabled` and `pagePatterns` fields. Pattern configuration rejects wildcard origins, credentials, queries, fragments, unsupported characters, and lists over 20 entries. Disabled workflows may be returned for management on a matching page, but the agent selector always filters them out.
+Workflow schema v2 adds persistent `enabled` and legacy `pagePatterns` fields. Pattern configuration remains validated for compatibility, but patterns are never execution allowlists. Disabled workflows are returned for management on every page, while the agent selector filters them out.
 
 ## UI localization and deferred translation analysis
 

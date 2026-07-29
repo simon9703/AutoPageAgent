@@ -51,7 +51,7 @@ test("recorded Skills reject non-http start URLs", async () => {
   }
 });
 
-test("page Skill discovery matches origin and path prefix without leaking to unrelated pages", async () => {
+test("recorded Skills remain available across routes, domains, and deployment environments", async () => {
   const root = await mkdtemp(join(tmpdir(), "auto-page-agent-skills-"));
   try {
     await saveAutomationSkill({
@@ -71,15 +71,17 @@ test("page Skill discovery matches origin and path prefix without leaking to unr
     assert.equal(matching[0]!.match, "path-prefix");
     assert.equal(matching[0]!.stepCount, 1);
     const unrelated = listSkillsForPage("https://example.com/settings", loaded);
-    assert.deepEqual(unrelated.map((skill) => skill.name), ["analyze-page"]);
+    assert.deepEqual(unrelated.map((skill) => skill.name), ["analyze-page", "Release draft"]);
+    const anotherEnvironment = listSkillsForPage("https://test.example.net/releases/new", loaded);
+    assert.deepEqual(anotherEnvironment.map((skill) => skill.name), ["analyze-page", "Release draft"]);
     const selected = selectSkills("release draft", loaded, "https://other.example/releases/new");
-    assert.deepEqual(selected.map((skill) => skill.name), ["analyze-page"]);
+    assert.deepEqual(selected.map((skill) => skill.name), ["Release draft"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("recorded Skill configuration supports path wildcards and enabled state", async () => {
+test("legacy path patterns affect recommendation metadata while enabled state remains an execution gate", async () => {
   const root = await mkdtemp(join(tmpdir(), "auto-page-agent-skills-"));
   try {
     const saved = await saveAutomationSkill({
@@ -93,10 +95,11 @@ test("recorded Skill configuration supports path wildcards and enabled state", a
     await configureAutomationSkill(saved.slug, { pagePatterns: ["https://example.com/releases/*/edit"] }, root);
     let loaded = await loadSkills(root);
     assert.equal(listSkillsForPage("https://example.com/releases/42/edit", loaded)[0]!.match, "wildcard");
-    assert.equal(listSkillsForPage("https://example.com/releases/42/view", loaded).length, 0);
+    assert.equal(listSkillsForPage("https://example.com/releases/42/view", loaded)[0]!.name, "Edit release");
+    assert.equal(selectSkills("edit release", loaded, "https://test.example.net/releases/42/edit")[0]!.name, "Edit release");
     await configureAutomationSkill(saved.slug, { enabled: false }, root);
     loaded = await loadSkills(root);
-    const visible = listSkillsForPage("https://example.com/releases/42/edit", loaded);
+    const visible = listSkillsForPage("https://another.example/releases/42/view", loaded);
     assert.equal(visible[0]!.enabled, false);
     assert.equal(selectSkills("edit release", loaded, "https://example.com/releases/42/edit").length, 0);
     await assert.rejects(() => configureAutomationSkill(saved.slug, { pagePatterns: ["https://*.example.com/**"] }, root), /fixed http\(s\) origin/u);
