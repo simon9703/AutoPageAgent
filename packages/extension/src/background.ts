@@ -25,7 +25,6 @@ import {
 import {
   classifyReobserveError,
   classifyReobserveExecution,
-  consumeReobserveStep,
   type ReobserveSignal,
 } from "./background/reobserve.js";
 import {
@@ -57,6 +56,9 @@ function selectionStorageKey(tabId: number): string {
   return `selectedElement:${tabId}`;
 }
 const pendingAgentRuns = new PendingAgentRunStore(chrome.storage.session);
+const MAX_TASK_ACTIONS = 50;
+const TASK_TIMEOUT_MS = 30 * 60_000;
+const MAX_CONSECUTIVE_VERIFICATION_FAILURES = 3;
 type ActiveAgentRun = { conversationId: string; tabId: number; windowId: number; bridgeRequestId?: string; cancelled: boolean };
 let activeAgentRun: ActiveAgentRun | null = null;
 type EventWithoutMeta<T> = T extends unknown ? Omit<T, "id" | "timestamp"> : never;
@@ -560,8 +562,8 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
     await sendPageMessage(pendingRun.tabId, { type: "page.agent.activity", active: true }).catch(() => undefined);
     const runId = crypto.randomUUID();
     const startedAt = Date.now();
-    const maxSteps = 8;
-    const timeoutMs = 90_000;
+    const maxSteps = MAX_TASK_ACTIONS;
+    const timeoutMs = TASK_TIMEOUT_MS;
     let iteration = 0;
     let failures = 0;
     const recoveryState = {
@@ -593,7 +595,9 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       plan = decision;
       pendingSteps = [...decision.steps];
     }
-    while (iteration < maxSteps && Date.now() - startedAt < timeoutMs) {
+    while (true) {
+      if (iteration >= maxSteps) return taskBudgetContinuation("step", iteration);
+      if (Date.now() - startedAt >= timeoutMs) return taskBudgetContinuation("time", iteration);
       assertAgentRunActive(run);
       const step = pendingSteps[0];
       if (!step) throw new Error("The agent returned an empty action plan.");
@@ -602,8 +606,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       assertAgentRunActive(run);
       if (outcome.kind === "reobserve") {
         failures = 0;
-        iteration = consumeReobserveStep(iteration, outcome.signal);
-        const displayStep = outcome.signal.actionMayHaveExecuted ? iteration : iteration + 1;
+        const displayStep = iteration + 1;
         emitUiEvent(createEvent({
           type: "action",
           action: step.action,
@@ -623,7 +626,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
         if (terminal) return terminal;
         if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
         if (iteration >= maxSteps || Date.now() - startedAt >= timeoutMs) {
-          throw new Error(`The agent stopped at its ${iteration >= maxSteps ? "step" : "time"} budget.`);
+          return taskBudgetContinuation(iteration >= maxSteps ? "step" : "time", iteration);
         }
         plan = decision;
         pendingSteps = [...decision.steps];
@@ -638,7 +641,9 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       if (!execution.ok) failures += 1;
       else failures = 0;
       iteration += 1;
-      if (failures >= 2) throw new Error("The agent stopped after two consecutive verification failures.");
+      if (failures >= MAX_CONSECUTIVE_VERIFICATION_FAILURES) {
+        throw new Error("The agent stopped after three consecutive verification failures.");
+      }
       const baseLoop: AgentLoopContext = {
         runId, iteration, maxSteps, timeoutMs, startedAt,
         lastAction: step,
@@ -687,11 +692,12 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       const terminal = terminalAgentResult(decision, iteration);
       if (terminal) return terminal;
       if (decision.kind !== "action_plan") throw new Error("Unexpected agent continuation.");
-      if (iteration >= maxSteps || Date.now() - startedAt >= timeoutMs) throw new Error(`The agent stopped at its ${iteration >= maxSteps ? "step" : "time"} budget.`);
+      if (iteration >= maxSteps || Date.now() - startedAt >= timeoutMs) {
+        return taskBudgetContinuation(iteration >= maxSteps ? "step" : "time", iteration);
+      }
       plan = decision;
       pendingSteps = [...decision.steps];
     }
-    throw new Error("The agent stopped at its time budget.");
   } finally {
     finishAgentRun(run);
     await sendPageMessage(pendingRun.tabId, { type: "page.agent.activity", active: false }).catch(() => undefined);
@@ -794,6 +800,18 @@ type AgentLoopResult =
   | { ok: true; status: "completed"; answer: string; evidence: string[]; steps: number }
   | { ok: true; status: "needs_user"; question: string; options?: string[]; recommendedOption?: string; steps: number }
   | { ok: false; status: "blocked"; error: string; recoverable: boolean; steps: number };
+
+function taskBudgetContinuation(budget: "step" | "time", steps: number): AgentLoopResult {
+  const limit = budget === "step" ? `${MAX_TASK_ACTIONS} 个动作` : "30 分钟";
+  return {
+    ok: true,
+    status: "needs_user",
+    question: `本轮已达到 ${limit}的运行上限，当前页面状态已保留。是否从当前页面继续执行原任务？`,
+    options: ["继续执行", "停止任务"],
+    recommendedOption: "继续执行",
+    steps,
+  };
+}
 
 function terminalAgentResult(decision: AgentDecision, steps: number): AgentLoopResult | null {
   if (decision.kind === "complete") {
