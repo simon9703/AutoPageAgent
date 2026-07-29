@@ -74,3 +74,32 @@ export async function dispatchTrustedViewportClick(
     if (attached) await debuggerApi.detach(target).catch(() => undefined);
   }
 }
+
+export async function dispatchTrustedEscape(
+  tabId: number,
+  debuggerApi: DebuggerApi = chrome.debugger,
+): Promise<void> {
+  if (!Number.isInteger(tabId) || tabId < 0) throw new Error("The target tab is unavailable.");
+  const target = { tabId };
+  let attached = false;
+  try {
+    await debuggerApi.attach(target, "1.3");
+    attached = true;
+    const keyParams = {
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+      nativeVirtualKeyCode: 27,
+    };
+    await debuggerApi.sendCommand(target, "Input.dispatchKeyEvent", {
+      type: "rawKeyDown",
+      ...keyParams,
+    });
+    await debuggerApi.sendCommand(target, "Input.dispatchKeyEvent", {
+      type: "keyUp",
+      ...keyParams,
+    });
+  } finally {
+    if (attached) await debuggerApi.detach(target).catch(() => undefined);
+  }
+}

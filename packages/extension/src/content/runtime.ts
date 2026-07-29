@@ -12,7 +12,7 @@ import type {
 import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer, showAiPointerAtPoint } from "./agent-activity.js";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "./action-settle.js";
 import { getPageTransitionState, hasObservableActionEffect, hasVerifiedDismissal, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
-import { clickSafePopupExterior, dispatchEscapeKey, isPopupDismissTargetOpen } from "./dismiss.js";
+import { clickSafePopupExterior, dismissPopupWithFallbacks, dispatchEscapeKey, isPopupDismissTargetOpen } from "./dismiss.js";
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
 import { buildSelector, buildSimplifiedDom, cleanText, collectPageInfo, createElementFingerprint, delay, getAccessibleLabel, getSelectedValues, inferRole, isAvailableOption, isComboboxLike, isDisabledElement, isHiddenInput, isNearViewport, isReadonlyElement, isSensitiveElement, isTopLayerElement, isVisible, round, setElementValue, shouldExposeValue, simulateClick } from "./dom.js";
@@ -542,17 +542,18 @@ async function dismissElement(element: HTMLElement, allowFilledDialog: boolean):
         throw new Error("Only a selected option can anchor popup dismissal.");
       }
     }
-    dispatchEscapeKey(element);
-    await delay(250);
-    if (!isPopupDismissTargetOpen(element)) return;
-    if (await clickSafePopupExterior(
-      element,
-      (_target, point) => showAiPointerAtPoint(point.x, point.y, "AI · dismiss"),
-      requestTrustedDismissClick,
-      async () => { await delay(250); },
-    )) {
-      return;
-    }
+    if (await dismissPopupWithFallbacks({
+      dispatchSyntheticEscape: () => dispatchEscapeKey(element),
+      dispatchTrustedEscape: requestTrustedDismissEscape,
+      clickSafeExterior: () => clickSafePopupExterior(
+        element,
+        (_target, point) => showAiPointerAtPoint(point.x, point.y, "AI · dismiss"),
+        requestTrustedDismissClick,
+        async () => { await delay(250); },
+      ),
+      isOpen: () => isPopupDismissTargetOpen(element),
+      afterKeyboardAttempt: async () => { await delay(250); },
+    })) return;
   } else if (role === "dialog") {
     const innerPopupOpen = Array.from(document.querySelectorAll(
       '[role="combobox"][aria-expanded="true"],[role="listbox"],[role="menu"]',
@@ -567,6 +568,15 @@ async function dismissElement(element: HTMLElement, allowFilledDialog: boolean):
   }
 
   if (role === "dialog") dispatchEscapeKey(element);
+}
+
+async function requestTrustedDismissEscape(): Promise<void> {
+  const response = await chrome.runtime.sendMessage({
+    type: "page.dismiss.trusted-escape",
+  }) as { ok?: boolean; error?: string };
+  if (!response?.ok) {
+    throw new Error(response?.error || "The browser could not perform the trusted popup dismissal Escape.");
+  }
 }
 
 async function requestTrustedDismissClick(point: { x: number; y: number }): Promise<void> {

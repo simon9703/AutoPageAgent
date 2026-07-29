@@ -48,6 +48,28 @@ export interface DismissRect {
   height: number;
 }
 
+interface PopupDismissFallbacks {
+  dispatchSyntheticEscape(): void | Promise<void>;
+  dispatchTrustedEscape(): void | Promise<void>;
+  clickSafeExterior(): boolean | Promise<boolean>;
+  isOpen(): boolean;
+  afterKeyboardAttempt(): void | Promise<void>;
+}
+
+export async function dismissPopupWithFallbacks(
+  fallbacks: PopupDismissFallbacks,
+): Promise<boolean> {
+  await fallbacks.dispatchSyntheticEscape();
+  await fallbacks.afterKeyboardAttempt();
+  if (!fallbacks.isOpen()) return true;
+
+  await fallbacks.dispatchTrustedEscape();
+  await fallbacks.afterKeyboardAttempt();
+  if (!fallbacks.isOpen()) return true;
+
+  return fallbacks.clickSafeExterior();
+}
+
 export function dispatchEscapeKey(
   recipient: DismissKeyboardTarget,
   createEvent: KeyboardEventFactory = (type, init) => new KeyboardEvent(type, init),

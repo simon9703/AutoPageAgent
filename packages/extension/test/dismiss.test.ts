@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   clickSafePopupExterior,
+  dismissPopupWithFallbacks,
   dispatchEscapeKey,
   findSafeDismissPoint,
   type DismissKeyboardTarget,
@@ -47,6 +48,59 @@ test("dismiss focuses before sending complete Escape keydown and keyup events", 
     assert.equal(event.bubbles, true);
     assert.equal(event.cancelable, true);
   }
+});
+
+test("popup dismiss tries synthetic Escape, trusted Escape, then safe exterior click", async () => {
+  const calls: string[] = [];
+  let open = true;
+
+  const dismissed = await dismissPopupWithFallbacks({
+    dispatchSyntheticEscape: () => { calls.push("synthetic Escape"); },
+    dispatchTrustedEscape: () => { calls.push("trusted Escape"); },
+    clickSafeExterior: () => {
+      calls.push("safe exterior click");
+      open = false;
+      return true;
+    },
+    isOpen: () => {
+      calls.push("check open");
+      return open;
+    },
+    afterKeyboardAttempt: () => { calls.push("wait"); },
+  });
+
+  assert.equal(dismissed, true);
+  assert.deepEqual(calls, [
+    "synthetic Escape",
+    "wait",
+    "check open",
+    "trusted Escape",
+    "wait",
+    "check open",
+    "safe exterior click",
+  ]);
+});
+
+test("popup dismiss stops after trusted Escape closes the popup", async () => {
+  const calls: string[] = [];
+  let checks = 0;
+
+  const dismissed = await dismissPopupWithFallbacks({
+    dispatchSyntheticEscape: () => { calls.push("synthetic Escape"); },
+    dispatchTrustedEscape: () => { calls.push("trusted Escape"); },
+    clickSafeExterior: () => {
+      calls.push("safe exterior click");
+      return false;
+    },
+    isOpen: () => {
+      checks += 1;
+      return checks === 1;
+    },
+    afterKeyboardAttempt: () => undefined,
+  });
+
+  assert.equal(dismissed, true);
+  assert.deepEqual(calls, ["synthetic Escape", "trusted Escape"]);
 });
 
 test("safe exterior point is selected outside the popup boundary", () => {
@@ -207,13 +261,14 @@ test("popup dismiss rejects a proxy wrapper and retries until the popup actually
   }
 });
 
-test("popup dismiss tries Escape before resolving a safe exterior click", async () => {
+test("popup dismiss runtime wires synthetic and trusted Escape before safe exterior click", async () => {
   const runtime = await readFile(new URL("../src/content/runtime.ts", import.meta.url), "utf8");
   const dismissBody = /function dismissElement[\s\S]+?\n\}\n\nfunction getTopmostVisibleDialog/u.exec(runtime)?.[0] ?? "";
 
   assert.match(dismissBody, /function dismissElement\(element: HTMLElement, allowFilledDialog: boolean\): Promise<void>/u);
   assert.match(dismissBody, /role === "combobox" \|\| role === "listbox" \|\| role === "menu" \|\| role === "option"/u);
-  assert.match(dismissBody, /dispatchEscapeKey\(element\)[\s\S]+isPopupDismissTargetOpen\(element\)[\s\S]+await clickSafePopupExterior\(/u);
+  assert.match(dismissBody, /dismissPopupWithFallbacks\(\{[\s\S]+dispatchSyntheticEscape: \(\) => dispatchEscapeKey\(element\)[\s\S]+dispatchTrustedEscape: requestTrustedDismissEscape[\s\S]+clickSafeExterior: \(\) => clickSafePopupExterior\(/u);
   assert.match(dismissBody, /showAiPointerAtPoint\(point\.x, point\.y, "AI · dismiss"\)[\s\S]+requestTrustedDismissClick[\s\S]+await delay\(250\)/u);
-  assert.ok(dismissBody.indexOf("dispatchEscapeKey(element)") < dismissBody.indexOf("clickSafePopupExterior"));
+  assert.ok(dismissBody.indexOf("dispatchEscapeKey(element)") < dismissBody.indexOf("requestTrustedDismissEscape"));
+  assert.ok(dismissBody.indexOf("requestTrustedDismissEscape") < dismissBody.indexOf("clickSafePopupExterior"));
 });
