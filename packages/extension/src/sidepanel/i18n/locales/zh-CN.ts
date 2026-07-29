@@ -97,7 +97,7 @@ export const zhCN = {
     scroll: "滚动",
     focus: "聚焦",
     submit: "提交",
-    dismiss: "关闭浮层",
+    popup_housekeeping: "关闭浮层",
     navigate: "页面跳转",
     screenshot: "页面截图",
   },

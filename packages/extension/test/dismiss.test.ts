@@ -128,7 +128,7 @@ test("unsafe exterior candidates are skipped without inventing a fallback coordi
   assert.equal(result, undefined);
 });
 
-test("popup dismiss rejects a proxy wrapper and retries until the popup actually closes", async () => {
+test("popup dismiss rejects a proxy wrapper and performs only one safe outside click", async () => {
   class FakeElement {
     readonly children: FakeElement[] = [];
     readonly style = { cursor: "default", display: "block", visibility: "visible", position: "static", zIndex: "auto" };
@@ -245,17 +245,13 @@ test("popup dismiss rejects a proxy wrapper and retries until the popup actually
       undefined,
       async (point) => {
         activated.push(point);
-        if (point.x === 300) {
-          combobox.setAttribute("aria-expanded", "false");
-          popup.isConnected = false;
-        }
       },
     );
 
-    assert.equal(dismissed, true);
-    assert.deepEqual(activated, [{ x: 100, y: 12 }, { x: 300, y: 12 }]);
-    assert.equal(combobox.getAttribute("aria-expanded"), "false");
-    assert.equal(popup.isConnected, false);
+    assert.equal(dismissed, false);
+    assert.deepEqual(activated, [{ x: 100, y: 12 }]);
+    assert.equal(combobox.getAttribute("aria-expanded"), "true");
+    assert.equal(popup.isConnected, true);
   } finally {
     Object.assign(globalThis, originalGlobals);
   }
@@ -263,12 +259,13 @@ test("popup dismiss rejects a proxy wrapper and retries until the popup actually
 
 test("popup dismiss runtime wires synthetic and trusted Escape before safe exterior click", async () => {
   const runtime = await readFile(new URL("../src/content/runtime.ts", import.meta.url), "utf8");
-  const dismissBody = /function dismissElement[\s\S]+?\n\}\n\nfunction getTopmostVisibleDialog/u.exec(runtime)?.[0] ?? "";
+  const dismissBody = /function dismissElement[\s\S]+?\n\}\n\nasync function requestTrustedDismissEscape/u.exec(runtime)?.[0] ?? "";
 
-  assert.match(dismissBody, /function dismissElement\(element: HTMLElement, allowFilledDialog: boolean\): Promise<void>/u);
+  assert.match(dismissBody, /function dismissElement\(element: HTMLElement\): Promise<void>/u);
   assert.match(dismissBody, /role === "combobox" \|\| role === "listbox" \|\| role === "menu" \|\| role === "option"/u);
   assert.match(dismissBody, /dismissPopupWithFallbacks\(\{[\s\S]+dispatchSyntheticEscape: \(\) => dispatchEscapeKey\(element\)[\s\S]+dispatchTrustedEscape: requestTrustedDismissEscape[\s\S]+clickSafeExterior: \(\) => clickSafePopupExterior\(/u);
   assert.match(dismissBody, /showAiPointerAtPoint\(point\.x, point\.y, "AI · dismiss"\)[\s\S]+requestTrustedDismissClick[\s\S]+await delay\(250\)/u);
   assert.ok(dismissBody.indexOf("dispatchEscapeKey(element)") < dismissBody.indexOf("requestTrustedDismissEscape"));
   assert.ok(dismissBody.indexOf("requestTrustedDismissEscape") < dismissBody.indexOf("clickSafePopupExterior"));
+  assert.doesNotMatch(dismissBody, /role === "dialog"|allowDialogDismiss/u);
 });

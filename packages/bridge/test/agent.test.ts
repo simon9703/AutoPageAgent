@@ -60,105 +60,76 @@ test("readonly combobox can be clicked but cannot be filled or selected", () => 
   }
 });
 
-test("dismiss accepts only an expanded combobox or visible popup target", () => {
-  const comboboxSnapshot = {
+test("dismiss is not exposed as a provider-authored browser action", () => {
+  const result = normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "dismiss", targetRef: "element-1" }],
+  }, snapshot);
+  assert.equal(result.kind, "blocked");
+});
+
+test("observe is normalized independently of browser actions and capped at 30 seconds", () => {
+  assert.deepEqual(normalizeDecision({
+    kind: "observe",
+    reason: "Packaging is still in progress",
+    timeoutMs: 90_000,
+  }, snapshot), {
+    kind: "observe",
+    reason: "Packaging is still in progress",
+    timeoutMs: 30_000,
+  });
+});
+
+test("pagination accepts one enabled branch click and rejects queued or disabled Next", () => {
+  const paginationSnapshot = {
     ...snapshot,
     elements: [{
       ...snapshot.elements[0],
-      tagName: "input",
-      role: "combobox",
-      expanded: true,
+      relation: "next" as const,
+      label: "Next page",
     }],
   };
   assert.equal(normalizeDecision({
     kind: "action_plan",
-    steps: [{ action: "dismiss", targetRef: "element-1" }],
-  }, comboboxSnapshot).kind, "action_plan");
+    steps: [{ action: "click", targetRef: "element-1" }],
+  }, paginationSnapshot).kind, "action_plan");
   assert.equal(normalizeDecision({
     kind: "action_plan",
-    steps: [{ action: "dismiss", targetRef: "element-1" }],
+    steps: [
+      { action: "click", targetRef: "element-1" },
+      { action: "click", targetRef: "element-1" },
+    ],
+  }, paginationSnapshot).kind, "blocked");
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "click", targetRef: "element-1" }],
   }, {
-    ...comboboxSnapshot,
-    elements: [{ ...comboboxSnapshot.elements[0], expanded: false }],
+    ...paginationSnapshot,
+    elements: [{ ...paginationSnapshot.elements[0], disabled: true }],
   }).kind, "blocked");
-  assert.equal(normalizeDecision({
-    kind: "action_plan",
-    steps: [{ action: "dismiss", targetRef: "element-1" }],
-  }, snapshot).kind, "blocked");
 });
 
-test("dismiss accepts a selected option as a popup anchor but rejects an unselected option", () => {
-  const selectedOption = {
-    ...snapshot.elements[0],
-    role: "option",
-    selected: true,
-    ownerId: "site-list",
+test("scroll containers require a current trusted scrollable ref", () => {
+  const scrollSnapshot = {
+    ...snapshot,
+    elements: [{
+      ...snapshot.elements[0],
+      scrollable: true,
+      scrollPosition: { x: 0, y: 0, maxX: 0, maxY: 500 },
+    }],
   };
-  assert.equal(normalizeDecision({
+  const result = normalizeDecision({
     kind: "action_plan",
-    steps: [{ action: "dismiss", targetRef: "element-1" }],
-  }, { ...snapshot, elements: [selectedOption] }).kind, "action_plan");
-  assert.equal(normalizeDecision({
-    kind: "action_plan",
-    steps: [{ action: "dismiss", targetRef: "element-1" }],
-  }, { ...snapshot, elements: [{ ...selectedOption, selected: false }] }).kind, "blocked");
-});
-
-test("dismiss rejects an outer dialog while an inner popup remains open", () => {
-  const dialog = {
-    ...snapshot.elements[0],
-    ref: "dialog",
-    role: "dialog",
-    fingerprint: "dialog-1",
-    viewportRect: { x: 10, y: 10, width: 500, height: 500 },
-  };
-  const popup = {
-    ...snapshot.elements[0],
-    ref: "popup",
-    role: "listbox",
-    fingerprint: "popup-1",
-    viewportRect: { x: 40, y: 80, width: 200, height: 200 },
-  };
-  const popupSnapshot = { ...snapshot, elements: [dialog, popup] };
-  assert.equal(normalizeDecision({
-    kind: "action_plan",
-    steps: [{ action: "dismiss", targetRef: "dialog" }],
-  }, popupSnapshot).kind, "blocked");
-  assert.equal(normalizeDecision({
-    kind: "action_plan",
-    steps: [{ action: "dismiss", targetRef: "popup" }],
-  }, popupSnapshot).kind, "action_plan");
-});
-
-test("dismiss rejects a dialog containing filled state", () => {
-  const dialog = {
-    ...snapshot.elements[0],
-    ref: "dialog",
-    role: "dialog",
-    fingerprint: "dialog-1",
-    viewportRect: { x: 10, y: 10, width: 500, height: 500 },
-  };
-  const filledInput = {
-    ...snapshot.elements[0],
-    ref: "name",
-    tagName: "input",
-    role: "textbox",
-    fingerprint: "name-1",
-    value: "Alice",
-    viewportRect: { x: 40, y: 80, width: 200, height: 32 },
-  };
-  assert.equal(normalizeDecision({
-    kind: "action_plan",
-    steps: [{ action: "dismiss", targetRef: "dialog" }],
-  }, { ...snapshot, elements: [filledInput, dialog] }).kind, "blocked");
-  const explicitlyRequested = normalizeDecision({
-    kind: "action_plan",
-    steps: [{ action: "dismiss", targetRef: "dialog", allowDialogDismiss: true }],
-  }, { ...snapshot, elements: [filledInput, dialog] }, "关闭这个弹窗");
-  assert.equal(explicitlyRequested.kind, "action_plan");
-  if (explicitlyRequested.kind === "action_plan") {
-    assert.equal(explicitlyRequested.steps[0]?.allowDialogDismiss, true);
+    steps: [{ action: "scroll", targetRef: "element-1", direction: "down" }],
+  }, scrollSnapshot);
+  assert.equal(result.kind, "action_plan");
+  if (result.kind === "action_plan") {
+    assert.equal(result.steps[0]?.targetFingerprint, "save-button-1");
   }
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "scroll", targetRef: "element-1", direction: "down" }],
+  }, snapshot).kind, "blocked");
 });
 
 test("readonly ordinary input remains observable but cannot be filled", () => {
@@ -386,10 +357,11 @@ test("agent prompt authorizes the requested test flow while preserving runtime b
   assert.match(prompt, /Use submit only when targetRef is the native form element itself/u);
   assert.match(prompt, /final combobox value or selected label\/tag/u);
   assert.match(prompt, /aria-selected state is already true/u);
-  assert.match(prompt, /use dismiss on the expanded combobox/u);
-  assert.match(prompt, /sends Escape[\s\S]+clicks a verified non-interactive exterior point/u);
-  assert.match(prompt, /Never plan coordinates, click the combobox itself to close it/u);
-  assert.match(prompt, /never invent a backdrop, blank-area coordinate, selector, or ref/u);
+  assert.match(prompt, /Popup closing is executor-owned and must not appear as an action/u);
+  assert.match(prompt, /explicit current-snapshot Close or Cancel control/u);
+  assert.match(prompt, /Never invent a backdrop, blank area, coordinate, selector, or ref/u);
+  assert.match(prompt, /"kind":"observe"/u);
+  assert.match(prompt, /Plan at most one such click and no later queued step/u);
   assert.match(prompt, /MUST return every stable, deterministic same-page action/u);
   assert.match(prompt, /Returning only the first action is incorrect/u);
   assert.match(prompt, /may be the final step of the current plan/u);

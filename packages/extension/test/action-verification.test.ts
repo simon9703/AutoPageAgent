@@ -5,6 +5,7 @@ import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "../src
 import {
   getPageTransitionState,
   hasObservableActionEffect,
+  hasVerifiedPaginationChange,
   hasVerifiedDismissal,
   hasVerifiedOptionSelection,
 } from "../src/content/action-verification.js";
@@ -217,6 +218,46 @@ test("scroll verification requires the viewport to move", () => {
   assert.equal(hasObservableActionEffect(scroll, snapshot, after, noDiff), true);
 });
 
+test("scroll verification supports a trusted scroll container", () => {
+  const container = {
+    ...snapshot.elements[0]!,
+    fingerprint: "results-list",
+    scrollable: true,
+    scrollPosition: { x: 0, y: 0, maxX: 0, maxY: 1_000 },
+  };
+  const targetScroll: BrowserActionStep = {
+    action: "scroll",
+    targetFingerprint: "results-list",
+    direction: "down",
+    reason: "Continue results",
+  };
+  assert.equal(hasObservableActionEffect(
+    targetScroll,
+    { ...snapshot, elements: [container] },
+    { ...snapshot, elements: [{ ...container, scrollPosition: { ...container.scrollPosition, y: 400 } }] },
+    noDiff,
+    "results-list",
+  ), true);
+});
+
+test("pagination verifies current page, URL, or collection signature changes", () => {
+  const next = { ...snapshot.elements[0]!, fingerprint: "next-1", relation: "next" as const };
+  const pageOne = { ...snapshot.elements[0]!, fingerprint: "page-1", current: true, label: "1" };
+  const before = { ...snapshot, collectionSignature: "10:first", elements: [pageOne, next] };
+  assert.equal(hasVerifiedPaginationChange(before, {
+    ...before,
+    collectionSignature: "10:second",
+  }, "next-1"), true);
+  assert.equal(hasVerifiedPaginationChange(before, before, "next-1"), false);
+  assert.equal(hasVerifiedPaginationChange({
+    ...before,
+    elements: [pageOne, { ...next, disabled: true }],
+  }, {
+    ...before,
+    url: "https://example.com?page=2",
+  }, "next-1"), false);
+});
+
 test("settle policy keeps direct state updates short and async actions bounded", () => {
   assert.deepEqual(getActionSettlePolicy("fill"), { maxWaitMs: 160, quietMs: 80 });
   assert.deepEqual(getActionSettlePolicy("click", { comboboxClick: true }), {
@@ -228,17 +269,15 @@ test("settle policy keeps direct state updates short and async actions bounded",
   });
   assert.deepEqual(getActionSettlePolicy("focus"), { maxWaitMs: 160, quietMs: 80 });
   assert.deepEqual(getActionSettlePolicy("select"), { maxWaitMs: 900, quietMs: 180 });
-  assert.deepEqual(getActionSettlePolicy("dismiss"), { maxWaitMs: 900, quietMs: 180 });
   assert.deepEqual(getActionSettlePolicy("scroll"), { maxWaitMs: 700, quietMs: 160 });
   assert.deepEqual(getActionSettlePolicy("click"), { maxWaitMs: 1_800, quietMs: 250 });
   assert.deepEqual(getActionSettlePolicy("submit"), { maxWaitMs: 1_800, quietMs: 250 });
 });
 
-test("click, submit, and dismiss receive a bounded delayed observation", () => {
+test("click and submit receive a bounded delayed observation", () => {
   const expected = { maxWaitMs: 2_500, quietMs: 250, pollMs: 100 };
   assert.deepEqual(getDelayedActionObservationPolicy("click"), expected);
   assert.deepEqual(getDelayedActionObservationPolicy("submit"), expected);
-  assert.deepEqual(getDelayedActionObservationPolicy("dismiss"), expected);
   assert.equal(getDelayedActionObservationPolicy("fill"), undefined);
   assert.equal(getDelayedActionObservationPolicy("select"), undefined);
   assert.equal(getDelayedActionObservationPolicy("focus"), undefined);

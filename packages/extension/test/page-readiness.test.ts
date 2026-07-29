@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentLoopContext, PageElementSnapshot, PageSnapshot } from "@auto-page-agent/shared";
 import {
+  boundedObserveTimeout,
   getBlockedRecoveryBoundary,
   hasVisibleBusyState,
   semanticSnapshotSignature,
@@ -133,6 +134,28 @@ test("aria busy and progress indicators delay an early decision", async () => {
   assert.ok(reads >= 5);
 });
 
+test("explicit observe times out instead of continuing from a still-busy changed state", async () => {
+  let time = 0;
+  const busy = {
+    ...baseSnapshot,
+    snapshotId: "snapshot-busy",
+    mainText: "Packaging",
+    elements: [{ ...btcButton, role: "progressbar", busy: true }],
+  };
+  const result = await waitForPageDecisionReadiness(
+    baseSnapshot,
+    async () => busy,
+    {
+      timeoutMs: 1_000,
+      pollIntervalMs: 250,
+      requireStable: true,
+      now: () => time,
+      wait: async (delayMs) => { time += delayMs; },
+    },
+  );
+  assert.equal(result, undefined);
+});
+
 test("returns no recovery snapshot when the blocked page never changes", async () => {
   let time = 0;
   const result = await waitForPageDecisionReadiness(
@@ -146,6 +169,13 @@ test("returns no recovery snapshot when the blocked page never changes", async (
     },
   );
   assert.equal(result, undefined);
+});
+
+test("observe timeout is capped and cannot exceed the remaining global budget", () => {
+  assert.equal(boundedObserveTimeout(90_000, 120_000), 30_000);
+  assert.equal(boundedObserveTimeout(20_000, 5_000), 5_000);
+  assert.equal(boundedObserveTimeout(undefined, 20_000), 10_000);
+  assert.equal(boundedObserveTimeout(10_000, 0), 0);
 });
 
 test("allows one blocked recovery per executed action boundary", () => {

@@ -91,8 +91,9 @@ test("agent loop executes a verified queue locally and replans only at a branch 
   assert.match(background, /let pendingSteps = \[\.\.\.initialPlan\.steps\];/u);
   assert.match(background, /verification\?\.routeTransitioned === true/u);
   assert.match(background, /reason: "page_context_changed"/u);
-  assert.match(background, /createPopupDismissStepAfterOptionSelection\(step, pendingSteps, observedSnapshot\)/u);
-  assert.match(background, /if \(popupDismissStep\) pendingSteps = \[popupDismissStep, \.\.\.pendingSteps\];/u);
+  assert.match(background, /findPopupHousekeepingRequest\(step, pendingSteps, observedSnapshot\)/u);
+  assert.match(background, /executePopupHousekeeping\(popupHousekeeping, pendingRun\.tabId\)/u);
+  assert.match(background, /verification\?\.pageContentChanged === true/u);
   assert.match(background, /const rebound = rebindQueuedStep\(pendingSteps\[0\]!, observedSnapshot\);/u);
   assert.match(background, /plan = \{ \.\.\.plan, snapshotId: observedSnapshot\.snapshotId, steps: pendingSteps \};\s*continue;/u);
   assert.match(background, /The next queued target could not be uniquely rebound/u);
@@ -119,6 +120,16 @@ test("an initially blocked async boundary waits for meaningful change and replan
   assert.match(background, /blockedBoundaries\.has\(boundary\)/u);
   assert.match(background, /reason: "page_content_changed"/u);
   assert.match(background, /requestContinuation\(readySnapshot/u);
+});
+
+test("observe waits for a stable semantic change without consuming the action counter", async () => {
+  const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
+
+  assert.match(background, /response\.decision\.kind === "observe"/u);
+  assert.match(background, /boundedObserveTimeout\(response\.decision\.timeoutMs, remainingMs\)/u);
+  assert.match(background, /timeoutMs: observeTimeoutMs, requireStable: true/u);
+  assert.match(background, /Observe detected a stable semantic page change/u);
+  assert.doesNotMatch(background, /response\.decision\.kind === "observe"[\s\S]{0,500}iteration \+= 1/u);
 });
 
 test("blocked recovery captures at most one active viewport per action boundary", async () => {

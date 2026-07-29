@@ -8,6 +8,13 @@ export function hasObservableActionEffect(
   targetFingerprint?: string,
 ): boolean {
   if (step.action === "scroll") {
+    if (targetFingerprint) {
+      const beforeTarget = before.elements.find((element) => element.fingerprint === targetFingerprint);
+      const afterTarget = after.elements.find((element) => element.fingerprint === targetFingerprint);
+      return Boolean(beforeTarget?.scrollPosition && afterTarget?.scrollPosition
+        && (beforeTarget.scrollPosition.x !== afterTarget.scrollPosition.x
+          || beforeTarget.scrollPosition.y !== afterTarget.scrollPosition.y));
+    }
     return before.pageInfo.scrollX !== after.pageInfo.scrollX
       || before.pageInfo.scrollY !== after.pageInfo.scrollY;
   }
@@ -31,6 +38,30 @@ export function hasObservableActionEffect(
     diff.addedFingerprints.includes(element.fingerprint)
     && resultRoles.has(element.role)
     && hasMeaningfulSnapshotContent(element));
+}
+
+export function hasVerifiedPaginationChange(
+  before: PageSnapshot,
+  after: PageSnapshot,
+  targetFingerprint: string,
+): boolean {
+  const target = before.elements.find((element) => element.fingerprint === targetFingerprint);
+  if (!target?.relation || target.disabled) return false;
+  if (before.url !== after.url) return true;
+  const currentBefore = before.elements
+    .filter((element) => element.current)
+    .map((element) => `${element.fingerprint}:${normalizeValue(element.label || element.text)}`)
+    .sort();
+  const currentAfter = after.elements
+    .filter((element) => element.current)
+    .map((element) => `${element.fingerprint}:${normalizeValue(element.label || element.text)}`)
+    .sort();
+  if (JSON.stringify(currentBefore) !== JSON.stringify(currentAfter)) return true;
+  return Boolean(
+    before.collectionSignature
+    && after.collectionSignature
+    && before.collectionSignature !== after.collectionSignature,
+  );
 }
 
 function isSelectionLikeControl(element: PageElementSnapshot | undefined): boolean {

@@ -269,6 +269,9 @@ function simplifyElement(element: PageElementSnapshot, index: number): string {
     !element.inViewport ? 'data-offscreen="true"' : "",
     typeof element.checked === "boolean" ? `aria-checked="${element.checked}"` : "",
     typeof element.selected === "boolean" ? `aria-selected="${element.selected}"` : "",
+    element.multiple ? 'aria-multiselectable="true"' : "",
+    element.current ? 'aria-current="page"' : "",
+    element.relation ? `rel="${element.relation === "previous" ? "prev" : "next"}"` : "",
     typeof element.expanded === "boolean" ? `aria-expanded="${element.expanded}"` : "",
     element.busy ? 'aria-busy="true"' : "",
     element.domId ? `id="${escapeDomText(element.domId)}"` : "",
@@ -276,6 +279,12 @@ function simplifyElement(element: PageElementSnapshot, index: number): string {
     element.owns ? `aria-owns="${escapeDomText(element.owns)}"` : "",
     element.activeDescendant ? `aria-activedescendant="${escapeDomText(element.activeDescendant)}"` : "",
     element.ownerId ? `data-ai-owner="${escapeDomText(element.ownerId)}"` : "",
+    element.layerId ? `data-ai-layer="${escapeDomText(element.layerId)}"` : "",
+    element.parentLayerId ? `data-ai-parent-layer="${escapeDomText(element.parentLayerId)}"` : "",
+    element.scrollable ? 'data-scrollable="true"' : "",
+    element.scrollPosition
+      ? `data-scroll-position="${element.scrollPosition.x},${element.scrollPosition.y}/${element.scrollPosition.maxX},${element.scrollPosition.maxY}"`
+      : "",
     element.sensitive ? 'data-sensitive="true"' : "",
     element.displayValue ? `data-display-value="${escapeDomText(element.displayValue)}"` : "",
     element.selectedValues?.length ? `data-selected-values="${escapeDomText(element.selectedValues.join(" | "))}"` : "",

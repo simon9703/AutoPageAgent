@@ -2,13 +2,22 @@ import type { AgentLoopContext, PageElementSnapshot, PageSnapshot } from "@auto-
 
 const DEFAULT_POLL_INTERVAL_MS = 250;
 const DEFAULT_QUIET_WINDOW_MS = 500;
+export const MAX_OBSERVE_TIMEOUT_MS = 30_000;
 
 export interface PageReadinessOptions {
   timeoutMs: number;
+  requireStable?: boolean;
   pollIntervalMs?: number;
   quietWindowMs?: number;
   now?: () => number;
   wait?: (delayMs: number) => Promise<void>;
+}
+
+export function boundedObserveTimeout(requested: number | undefined, remainingMs: number): number {
+  const timeoutMs = typeof requested === "number" && Number.isFinite(requested)
+    ? Math.max(0, Math.round(requested))
+    : 10_000;
+  return Math.max(0, Math.min(timeoutMs, MAX_OBSERVE_TIMEOUT_MS, remainingMs));
 }
 
 export function getBlockedRecoveryBoundary(loop: AgentLoopContext): string | undefined {
@@ -25,6 +34,7 @@ export function semanticSnapshotSignature(snapshot: PageSnapshot): string {
     title: normalizeText(snapshot.title),
     headings: snapshot.headings.map(({ level, text }) => [level, normalizeText(text)]),
     mainText: normalizeText(snapshot.mainText).slice(0, 12_000),
+    collectionSignature: snapshot.collectionSignature,
     visualSignals: snapshot.visualSignals,
     elements: snapshot.elements.map(semanticElement),
   });
@@ -70,7 +80,7 @@ export async function waitForPageDecisionReadiness(
     }
     if (!hasVisibleBusyState(snapshot) && now() - changedAt >= quietWindowMs) return snapshot;
   }
-  return latestChanged;
+  return options.requireStable ? undefined : latestChanged;
 }
 
 function semanticElement(element: PageElementSnapshot) {
@@ -83,6 +93,9 @@ function semanticElement(element: PageElementSnapshot) {
     value: normalizeText(element.value ?? ""),
     displayValue: normalizeText(element.displayValue ?? ""),
     selectedValues: element.selectedValues?.map(normalizeText) ?? [],
+    multiple: element.multiple,
+    current: element.current,
+    relation: element.relation,
     href: element.href ?? "",
     disabled: element.disabled,
     readonly: element.readonly,
@@ -90,6 +103,9 @@ function semanticElement(element: PageElementSnapshot) {
     selected: element.selected,
     expanded: element.expanded,
     busy: element.busy,
+    layerId: element.layerId,
+    parentLayerId: element.parentLayerId,
+    scrollPosition: element.scrollPosition,
   };
 }
 

@@ -1,6 +1,6 @@
 # 产品状态与 Roadmap
 
-当前版本：0.12.x。
+当前版本：0.13.x。
 
 ## 已完成
 
@@ -10,7 +10,9 @@
 - [x] 本地步骤队列、可信 fingerprint 和 fresh-ref 重绑
 - [x] URL/SPA/context/stale reobserve
 - [x] 同时分类 thrown error 与 `{ ok:false,error }`
-- [x] 动态 combobox、option 最终值与多选 dismiss
+- [x] 动态 combobox、option 最终值与 executor-owned popup housekeeping
+- [x] ARIA 分页验证、旧队列丢弃与可信滚动容器
+- [x] observe 决策、stable semantic readiness 与 busy/progress 超时
 - [x] action-specific settle 和 bounded delayed observation
 - [x] 精确 completion evidence 与一次恢复 turn
 - [x] bounded DOM Snapshot 和按需视觉恢复

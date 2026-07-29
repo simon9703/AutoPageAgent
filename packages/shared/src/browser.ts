@@ -1,4 +1,4 @@
-export type BrowserActionKind = "click" | "fill" | "select" | "scroll" | "focus" | "submit" | "dismiss";
+export type BrowserActionKind = "click" | "fill" | "select" | "scroll" | "focus" | "submit";
 
 export interface ViewportRect {
   x: number;
@@ -22,6 +22,9 @@ export interface PageElementSnapshot {
   value?: string;
   displayValue?: string;
   selectedValues?: string[];
+  multiple?: boolean;
+  current?: boolean;
+  relation?: "next" | "previous";
   href?: string;
   placeholder?: string;
   inputType?: string;
@@ -41,6 +44,15 @@ export interface PageElementSnapshot {
   owns?: string;
   activeDescendant?: string;
   ownerId?: string;
+  layerId?: string;
+  parentLayerId?: string;
+  scrollable?: boolean;
+  scrollPosition?: {
+    x: number;
+    y: number;
+    maxX: number;
+    maxY: number;
+  };
   viewportRect: ViewportRect;
 }
 
@@ -136,6 +148,7 @@ export interface PageSnapshot {
     canvasCount: number;
     videoCount: number;
   };
+  collectionSignature?: string;
   context?: {
     selectedElement?: InspectedElement;
     screenshot?: {
@@ -169,11 +182,6 @@ export interface BrowserActionStep {
    * bind a queued step to the target's latest ephemeral ref.
    */
   targetFingerprint?: string;
-  /**
-   * Trusted bridge authorization attached only when the original user task
-   * explicitly asks to close or cancel a dialog. Providers cannot author it.
-   */
-  allowDialogDismiss?: boolean;
   value?: string;
   direction?: "up" | "down" | "left" | "right" | "top" | "bottom";
   amountPx?: number;
@@ -186,6 +194,20 @@ export interface ActionVerification {
   changes: string[];
   diff: PageSnapshotDiff;
   routeTransitioned?: boolean;
+  pageContentChanged?: boolean;
+}
+
+export interface PopupHousekeepingRequest {
+  snapshotId: string;
+  targetRef: string;
+  targetFingerprint: string;
+}
+
+export interface PopupHousekeepingResult {
+  ok: boolean;
+  snapshot: PageSnapshot;
+  verification: ActionVerification;
+  error?: string;
 }
 
 export interface ActionExecutionResult {

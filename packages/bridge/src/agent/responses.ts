@@ -1,11 +1,12 @@
 export const responsesDecisionSchema = {
   type: "object",
   properties: {
-    kind: { type: "string", enum: ["answer", "action_plan", "complete", "blocked", "needs_user"] },
+    kind: { type: "string", enum: ["answer", "action_plan", "complete", "blocked", "needs_user", "observe"] },
     content: { type: "string" },
     summary: { type: "string" },
     evidence: { type: "array", items: { type: "string" } },
     reason: { type: "string" },
+    timeoutMs: { type: "number" },
     recoverable: { type: "boolean" },
     question: { type: "string" },
     options: { type: "array", items: { type: "string" } },

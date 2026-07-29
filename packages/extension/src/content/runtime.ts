@@ -6,17 +6,19 @@ import type {
   PageElementSnapshot,
   PageSnapshot,
   PerformanceSnapshot,
+  PopupHousekeepingRequest,
+  PopupHousekeepingResult,
   RecordedBrowserAction,
   PageSnapshotDiff,
 } from "@auto-page-agent/shared";
 import { hideAgentFrame, setAgentActivity, showAgentFrame, showAiPointer, showAiPointerAtPoint } from "./agent-activity.js";
 import { getActionSettlePolicy, getDelayedActionObservationPolicy } from "./action-settle.js";
-import { getPageTransitionState, hasObservableActionEffect, hasVerifiedDismissal, hasVerifiedOptionSelection, isOptionSnapshot } from "./action-verification.js";
+import { getPageTransitionState, hasObservableActionEffect, hasVerifiedDismissal, hasVerifiedOptionSelection, hasVerifiedPaginationChange, isOptionSnapshot } from "./action-verification.js";
 import { clickSafePopupExterior, dismissPopupWithFallbacks, dispatchEscapeKey, isPopupDismissTargetOpen } from "./dismiss.js";
 import { replayRecordedActions, setRecordingActive } from "./recording.js";
 import { clearElementSelection, startElementSelection } from "./selection.js";
 import { buildSelector, buildSimplifiedDom, cleanText, collectPageInfo, createElementFingerprint, delay, getAccessibleLabel, getSelectedValues, inferRole, isAvailableOption, isComboboxLike, isDisabledElement, isHiddenInput, isNearViewport, isReadonlyElement, isSensitiveElement, isTopLayerElement, isVisible, round, setElementValue, shouldExposeValue, simulateClick } from "./dom.js";
-import { getSnapshotCandidatePriority, parseAriaIdRefs, resolveSnapshotRole, shouldIncludeSnapshotCandidate, SNAPSHOT_CANDIDATE_SELECTOR } from "./snapshot-policy.js";
+import { getSnapshotCandidatePriority, parseAriaIdRefs, resolveCurrentState, resolveMultipleState, resolvePaginationRelation, resolveSnapshotRole, shouldIncludeSnapshotCandidate, SNAPSHOT_CANDIDATE_SELECTOR } from "./snapshot-policy.js";
 import { collectVisualSignals } from "./visual-signals.js";
 
 const elementRefs = new Map<string, Element>();
@@ -45,6 +47,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "page.actions.execute") {
     void executePlan(message.plan as BrowserActionPlan).then(sendResponse).catch((error) => {
+      sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    });
+    return true;
+  }
+  if (message?.type === "page.popup.dismiss") {
+    void executePopupHousekeeping(message.request as PopupHousekeepingRequest).then(sendResponse).catch((error) => {
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
     });
     return true;
@@ -93,14 +101,29 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
   currentSnapshotId = `${Date.now()}-${crypto.randomUUID()}`;
   currentSnapshotUrl = location.href;
   elementRefs.clear();
-  const candidates = Array.from(document.querySelectorAll(SNAPSHOT_CANDIDATE_SELECTOR));
+  const candidates = collectSnapshotCandidates();
   const elements: PageElementSnapshot[] = [];
   const fingerprintCounts = new Map<string, number>();
   const previousByFingerprint = new Map(currentSnapshot?.elements.map((element) => [element.fingerprint, element]) ?? []);
   const expandedControls = candidates.filter((element) =>
     isComboboxLike(element) && element.getAttribute("aria-expanded") === "true");
   const relatedElements = collectRelatedElements(expandedControls);
+  const popupSemanticKeys = new Set([...relatedElements]
+    .filter((element) => ["option", "menuitem"].includes(
+      resolveSnapshotRole(element.getAttribute("role"), inferRole(element), element.hasAttribute("aria-selected")),
+    ))
+    .map((element) => semanticCandidateKey(element))
+    .filter(Boolean));
+  const topmostDialog = candidates.filter((element) =>
+    element.getAttribute("role") === "dialog" && isVisible(element) && isTopLayerElement(element)).at(-1);
   const rankedCandidates = candidates.flatMap((element, domOrder) => {
+    if (topmostDialog
+      && element !== topmostDialog
+      && !topmostDialog.contains(element)
+      && !relatedElements.has(element)) return [];
+    if (expandedControls.length
+      && !relatedElements.has(element)
+      && popupSemanticKeys.has(semanticCandidateKey(element))) return [];
     if (!shouldIncludeSnapshotCandidate({
       visible: isVisible(element),
       nearViewport: isNearViewport(element, 700),
@@ -116,6 +139,10 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
     const role = resolveSnapshotRole(element.getAttribute("role"), inferRole(element), element.hasAttribute("aria-selected"));
     const previous = previousByFingerprint.get(stableFingerprint);
     const changedOrAdded = !previous || snapshotStateChanged(previous, element);
+    const scrollOnlyCandidate = Boolean(
+      getScrollablePosition(element)
+      && !element.matches(SNAPSHOT_CANDIDATE_SELECTOR),
+    );
     return [{
       element,
       domOrder,
@@ -128,7 +155,7 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
         inViewport: isNearViewport(element, 0),
         changedOrAdded,
         nearViewport: true,
-      }),
+      }) + (scrollOnlyCandidate ? 2 : 0),
     }];
   }).sort((left, right) => left.priority - right.priority || left.domOrder - right.domOrder).slice(0, 200);
 
@@ -141,6 +168,17 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
     const input = element as HTMLInputElement;
     const rect = element.getBoundingClientRect();
     const selectedValues = getSelectedValues(element);
+    const owner = element.closest('[role="listbox"],[role="menu"]');
+    const controlledRoots = isComboboxLike(element) ? resolveControlledRoots(element) : [];
+    const scrollPosition = getScrollablePosition(element);
+    const layer = resolveLayerMetadata(element, role, expandedControls);
+    const relation = resolvePaginationRelation({
+      rel: element.getAttribute("rel"),
+      ariaLabel: element.getAttribute("aria-label"),
+      title: element.getAttribute("title"),
+      text: element.textContent,
+      withinNavigation: Boolean(element.closest("nav,[role='navigation']")),
+    });
     elements.push({
       ref,
       tagName: element.tagName.toLowerCase(),
@@ -153,6 +191,14 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
         selectedValues,
         displayValue: cleanText(selectedValues.join(", "), 500),
       } : {}),
+      ...resolveMultipleState({
+        multiple: element instanceof HTMLSelectElement ? element.multiple : false,
+        ariaMultiselectable: element.getAttribute("aria-multiselectable"),
+        ownerAriaMultiselectable: owner?.getAttribute("aria-multiselectable")
+          ?? controlledRoots.find((root) => root.getAttribute("aria-multiselectable"))?.getAttribute("aria-multiselectable"),
+      }) ? { multiple: true } : {},
+      ...resolveCurrentState(element.getAttribute("aria-current")) ? { current: true } : {},
+      ...(relation ? { relation } : {}),
       href: element instanceof HTMLAnchorElement ? element.href : undefined,
       placeholder: input.placeholder || undefined,
       inputType: input.type || undefined,
@@ -172,6 +218,8 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
       ...(element.getAttribute("aria-owns") ? { owns: element.getAttribute("aria-owns") ?? undefined } : {}),
       ...(element.getAttribute("aria-activedescendant") ? { activeDescendant: element.getAttribute("aria-activedescendant") ?? undefined } : {}),
       ...resolveSemanticOwnerId(element),
+      ...layer,
+      ...(scrollPosition ? { scrollable: true, scrollPosition } : {}),
       viewportRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
     });
   }
@@ -192,6 +240,7 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
     simplifiedDom,
     pageInfo,
     visualSignals: collectVisualSignals(),
+    collectionSignature: collectCollectionSignature(),
     elements,
     ...(includePerformance ? { performance: collectPerformance() } : {}),
     capturedAt: new Date().toISOString(),
@@ -199,6 +248,97 @@ function createPageSnapshot(includePerformance = false): PageSnapshot {
   };
   currentSnapshot = snapshot;
   return snapshot;
+}
+
+function semanticCandidateKey(element: Element): string {
+  const role = resolveSnapshotRole(
+    element.getAttribute("role"),
+    inferRole(element),
+    element.hasAttribute("aria-selected"),
+  );
+  const name = cleanText(getAccessibleLabel(element) || element.textContent || "", 300)
+    .normalize("NFKC")
+    .toLocaleLowerCase();
+  return name ? `${role}:${name}` : "";
+}
+
+function collectSnapshotCandidates(): Element[] {
+  const candidates = new Set(document.querySelectorAll(SNAPSHOT_CANDIDATE_SELECTOR));
+  const potentialScrollContainers = document.querySelectorAll(
+    "main,section,div,ul,ol,table,tbody,[role='region'],[role='listbox'],[role='grid']",
+  );
+  for (const element of Array.from(potentialScrollContainers).slice(0, 2_000)) {
+    if (getScrollablePosition(element)) candidates.add(element);
+  }
+  return [...candidates];
+}
+
+function getScrollablePosition(element: Element): PageElementSnapshot["scrollPosition"] {
+  if (!(element instanceof HTMLElement)) return undefined;
+  const maxX = Math.max(0, element.scrollWidth - element.clientWidth);
+  const maxY = Math.max(0, element.scrollHeight - element.clientHeight);
+  const style = getComputedStyle(element);
+  const allowsX = maxX > 1 && /auto|scroll/u.test(style.overflowX);
+  const allowsY = maxY > 1 && /auto|scroll/u.test(style.overflowY);
+  if (!allowsX && !allowsY) return undefined;
+  return {
+    x: Math.round(element.scrollLeft),
+    y: Math.round(element.scrollTop),
+    maxX: Math.round(maxX),
+    maxY: Math.round(maxY),
+  };
+}
+
+function resolveLayerMetadata(
+  element: Element,
+  role: string,
+  expandedControls: Element[],
+): Pick<PageElementSnapshot, "layerId" | "parentLayerId"> {
+  const ownDialog = role === "dialog" ? element : element.closest('[role="dialog"]');
+  const popup = role === "listbox" || role === "menu"
+    ? element
+    : element.closest('[role="listbox"],[role="menu"]');
+  const controllingElement = popup
+    ? expandedControls.find((control) => resolveControlledRoots(control).some((root) => root === popup || root.contains(popup)))
+    : undefined;
+  const parentDialog = controllingElement?.closest('[role="dialog"]')
+    ?? (popup ? popup.closest('[role="dialog"]') : ownDialog?.parentElement?.closest('[role="dialog"]'));
+  const dialogId = ownDialog
+    ? `dialog:${ownDialog.id || createElementFingerprint(ownDialog)}`
+    : undefined;
+  const parentDialogId = parentDialog
+    ? `dialog:${parentDialog.id || createElementFingerprint(parentDialog)}`
+    : undefined;
+  if (popup) {
+    return {
+      layerId: `popup:${popup.id || createElementFingerprint(popup)}`,
+      ...(parentDialogId ? { parentLayerId: parentDialogId } : {}),
+    };
+  }
+  if (role === "dialog") {
+    return {
+      layerId: `dialog:${element.id || createElementFingerprint(element)}`,
+      ...(parentDialogId ? { parentLayerId: parentDialogId } : {}),
+    };
+  }
+  return dialogId ? { layerId: dialogId } : {};
+}
+
+function collectCollectionSignature(): string | undefined {
+  const rows = Array.from(document.querySelectorAll(
+    "[role='row'],[role='listitem'],tbody > tr,ol > li,ul > li",
+  ))
+    .filter(isVisible)
+    .slice(0, 120)
+    .map((element) => cleanText(element.textContent ?? "", 500))
+    .filter(Boolean);
+  if (!rows.length) return undefined;
+  let hash = 2166136261;
+  const value = rows.join("\n");
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  }
+  return `${rows.length}:${(hash >>> 0).toString(36)}`;
 }
 
 function collectPerformance(): PerformanceSnapshot {
@@ -272,6 +412,52 @@ async function executePlan(plan: BrowserActionPlan): Promise<ActionExecutionResu
   } finally {
     hideAgentFrame(650);
   }
+}
+
+async function executePopupHousekeeping(
+  request: PopupHousekeepingRequest,
+): Promise<PopupHousekeepingResult> {
+  if (request.snapshotId !== currentSnapshotId || location.href !== currentSnapshotUrl) {
+    throw new Error("Popup housekeeping requires the latest page snapshot.");
+  }
+  const before = currentSnapshot;
+  if (!before) throw new Error("No current page snapshot is available.");
+  const target = before.elements.find((element) =>
+    element.ref === request.targetRef && element.fingerprint === request.targetFingerprint);
+  const element = elementRefs.get(request.targetRef);
+  if (!target || !(element instanceof HTMLElement) || target.role === "dialog") {
+    throw new Error("The popup housekeeping target is stale or invalid.");
+  }
+  try {
+    await dismissElement(element);
+  } catch (error) {
+    const snapshot = createPageSnapshot();
+    const diff = diffSnapshots(before, snapshot);
+    const verification = {
+      success: false,
+      summary: error instanceof Error ? error.message : String(error),
+      changes: diff.summary,
+      diff,
+    };
+    return { ok: false, snapshot, verification, error: verification.summary };
+  }
+  const snapshot = createPageSnapshot();
+  const diff = diffSnapshots(before, snapshot);
+  const success = hasVerifiedDismissal(before, snapshot, request.targetFingerprint);
+  const verification = {
+    success,
+    summary: success
+      ? "The inner popup was closed while its outer dialog and filled values were preserved."
+      : "Trusted Escape and the single safe outside click did not close the popup.",
+    changes: diff.summary,
+    diff,
+  };
+  return {
+    ok: success,
+    snapshot,
+    verification,
+    ...(!success ? { error: verification.summary } : {}),
+  };
 }
 
 async function observeDelayedActionEffect(
@@ -427,16 +613,34 @@ function snapshotStateChanged(previous: PageElementSnapshot, element: Element): 
     previous.selectedValues,
     previous.checked,
     previous.selected,
+    previous.multiple,
+    previous.current,
+    previous.relation,
     previous.expanded,
     previous.busy,
+    previous.scrollPosition,
   ]) !== JSON.stringify([
     shouldExposeValue(input) ? cleanText(String(input.value ?? ""), 500) : undefined,
     selectedValues.length ? cleanText(selectedValues.join(", "), 500) : undefined,
     selectedValues.length ? selectedValues : undefined,
     element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type) ? element.checked : undefined,
     element.hasAttribute("aria-selected") ? element.getAttribute("aria-selected") === "true" : undefined,
+    resolveMultipleState({
+      multiple: element instanceof HTMLSelectElement ? element.multiple : false,
+      ariaMultiselectable: element.getAttribute("aria-multiselectable"),
+      ownerAriaMultiselectable: element.closest('[role="listbox"],[role="menu"]')?.getAttribute("aria-multiselectable"),
+    }),
+    resolveCurrentState(element.getAttribute("aria-current")),
+    resolvePaginationRelation({
+      rel: element.getAttribute("rel"),
+      ariaLabel: element.getAttribute("aria-label"),
+      title: element.getAttribute("title"),
+      text: element.textContent,
+      withinNavigation: Boolean(element.closest("nav,[role='navigation']")),
+    }),
     element.hasAttribute("aria-expanded") ? element.getAttribute("aria-expanded") === "true" : undefined,
     element.hasAttribute("aria-busy") ? element.getAttribute("aria-busy") === "true" : undefined,
+    getScrollablePosition(element),
   ]);
 }
 
@@ -448,7 +652,17 @@ export function diffSnapshots(before: PageSnapshot, after: PageSnapshot): PageSn
   const changedFingerprints = [...afterById.keys()].filter((key) => {
     const previous = beforeById.get(key);
     const next = afterById.get(key);
-    return previous && next && JSON.stringify([previous.value, previous.displayValue, previous.selectedValues, previous.disabled, previous.checked, previous.selected, previous.expanded, previous.busy, previous.occluded]) !== JSON.stringify([next.value, next.displayValue, next.selectedValues, next.disabled, next.checked, next.selected, next.expanded, next.busy, next.occluded]);
+    return previous && next && JSON.stringify([
+      previous.value, previous.displayValue, previous.selectedValues, previous.disabled,
+      previous.checked, previous.selected, previous.multiple, previous.current, previous.relation,
+      previous.expanded, previous.busy, previous.occluded, previous.layerId,
+      previous.parentLayerId, previous.scrollPosition,
+    ]) !== JSON.stringify([
+      next.value, next.displayValue, next.selectedValues, next.disabled,
+      next.checked, next.selected, next.multiple, next.current, next.relation,
+      next.expanded, next.busy, next.occluded, next.layerId,
+      next.parentLayerId, next.scrollPosition,
+    ]);
   });
   const summary = [
     before.url !== after.url ? `URL changed to ${after.url}` : "",
@@ -462,6 +676,7 @@ export function diffSnapshots(before: PageSnapshot, after: PageSnapshot): PageSn
 
 function verifyAction(step: BrowserActionStep, before: PageSnapshot, snapshot: PageSnapshot, diff: PageSnapshotDiff, targetFingerprint?: string): ActionVerification {
   const target = targetFingerprint ? snapshot.elements.find((element) => element.fingerprint === targetFingerprint) : undefined;
+  const targetBefore = targetFingerprint ? before.elements.find((element) => element.fingerprint === targetFingerprint) : undefined;
   let success = true;
   let summary = "Action dispatched and page observation completed.";
   if (step.action === "fill" || step.action === "select") {
@@ -470,37 +685,48 @@ function verifyAction(step: BrowserActionStep, before: PageSnapshot, snapshot: P
   } else if (step.action === "click" && isOptionSnapshot(before.elements.find((element) => element.fingerprint === targetFingerprint))) {
     success = Boolean(targetFingerprint && hasVerifiedOptionSelection(before, snapshot, targetFingerprint));
     summary = success ? "The option selection changed the combobox state." : "The option click did not produce a verified selection state.";
-  } else if (step.action === "dismiss") {
-    success = Boolean(targetFingerprint && hasVerifiedDismissal(before, snapshot, targetFingerprint));
-    summary = success ? "The inner popup was verified as dismissed." : "The dismiss action did not produce a verified collapsed or hidden state.";
+  } else if (step.action === "click" && targetBefore?.relation) {
+    success = Boolean(targetFingerprint && hasVerifiedPaginationChange(before, snapshot, targetFingerprint));
+    summary = success
+      ? "Pagination changed the current page or collection content."
+      : "The pagination control did not change the current page, URL, or collection.";
   } else if (step.action === "focus") {
     const active = document.activeElement;
     success = Boolean(active && createElementFingerprint(active) === targetFingerprint?.split("-")[0]);
     summary = success ? "The target received focus." : "The target did not retain focus.";
   } else if (step.action === "scroll") {
     success = hasObservableActionEffect(step, before, snapshot, diff, targetFingerprint);
-    summary = success ? "The viewport position changed after scrolling." : "The viewport did not move after the scroll action.";
+    summary = success ? "The page or target scroll position changed." : "The requested scroll position did not move.";
   } else {
     success = hasObservableActionEffect(step, before, snapshot, diff, targetFingerprint);
     summary = success ? diff.summary.join("; ") : "The action produced no observable page change.";
   }
-  return { success, summary, changes: diff.summary, diff };
+  const pageContentChanged = Boolean(success && step.action === "click" && targetBefore?.relation);
+  return { success, summary, changes: diff.summary, diff, ...(pageContentChanged ? { pageContentChanged: true } : {}) };
 }
 
 async function executeStep(step: BrowserActionStep): Promise<{ action: string; ok: true }> {
-  if (!["click", "fill", "select", "scroll", "focus", "submit", "dismiss"].includes(step.action)) throw new Error("Unsupported browser action.");
+  if (!["click", "fill", "select", "scroll", "focus", "submit"].includes(step.action)) throw new Error("Unsupported browser action.");
   if (step.action === "scroll") {
     const amount = Math.min(Math.max(step.amountPx ?? 600, 0), 2_000);
+    const target = step.targetRef ? elementRefs.get(step.targetRef) : undefined;
+    if (step.targetRef && (!(target instanceof HTMLElement) || !getScrollablePosition(target))) {
+      throw new Error("The trusted scroll container is unavailable or no longer scrollable.");
+    }
+    const recipient = target instanceof HTMLElement ? target : window;
     if (step.direction === "top") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      recipient.scrollTo({ top: 0, behavior: "smooth" });
       return { action: step.action, ok: true };
     }
     if (step.direction === "bottom") {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+      recipient.scrollTo({
+        top: target instanceof HTMLElement ? target.scrollHeight : document.documentElement.scrollHeight,
+        behavior: "smooth",
+      });
       return { action: step.action, ok: true };
     }
     const sign = step.direction === "up" || step.direction === "left" ? -1 : 1;
-    window.scrollBy({ top: step.direction === "left" || step.direction === "right" ? 0 : amount * sign, left: step.direction === "left" || step.direction === "right" ? amount * sign : 0, behavior: "smooth" });
+    recipient.scrollBy({ top: step.direction === "left" || step.direction === "right" ? 0 : amount * sign, left: step.direction === "left" || step.direction === "right" ? amount * sign : 0, behavior: "smooth" });
     return { action: step.action, ok: true };
   }
   const element = step.targetRef ? elementRefs.get(step.targetRef) : undefined;
@@ -514,9 +740,8 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   element.scrollIntoView({ block: "center", behavior: "smooth" });
   await delay(120);
   if (!isTopLayerElement(element)) throw new Error("Target is covered by another page element.");
-  if (step.action !== "dismiss") await showAiPointer(element, `AI · ${step.action}`);
+  await showAiPointer(element, `AI · ${step.action}`);
   if (step.action === "click") await simulateClick(element);
-  if (step.action === "dismiss") await dismissElement(element, step.allowDialogDismiss === true);
   if (step.action === "focus") element.focus();
   if (step.action === "submit") {
     const form = element.closest("form");
@@ -533,7 +758,7 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   return { action: step.action, ok: true };
 }
 
-async function dismissElement(element: HTMLElement, allowFilledDialog: boolean): Promise<void> {
+async function dismissElement(element: HTMLElement): Promise<void> {
   const role = element.getAttribute("role") || inferRole(element);
   if (role === "combobox" || role === "listbox" || role === "menu" || role === "option") {
     if (element.getAttribute("aria-expanded") !== "true") {
@@ -549,25 +774,20 @@ async function dismissElement(element: HTMLElement, allowFilledDialog: boolean):
         element,
         (_target, point) => showAiPointerAtPoint(point.x, point.y, "AI · dismiss"),
         requestTrustedDismissClick,
-        async () => { await delay(250); },
+        async () => {
+          await delay(250);
+          createPageSnapshot();
+        },
       ),
       isOpen: () => isPopupDismissTargetOpen(element),
-      afterKeyboardAttempt: async () => { await delay(250); },
+      afterKeyboardAttempt: async () => {
+        await delay(250);
+        createPageSnapshot();
+      },
     })) return;
-  } else if (role === "dialog") {
-    const innerPopupOpen = Array.from(document.querySelectorAll(
-      '[role="combobox"][aria-expanded="true"],[role="listbox"],[role="menu"]',
-    )).some((candidate) => candidate !== element && isVisible(candidate) && isTopLayerElement(candidate));
-    if (innerPopupOpen) throw new Error("Dismiss the innermost popup before the outer dialog.");
-    if (getTopmostVisibleDialog() !== element) throw new Error("Only the topmost dialog can be dismissed.");
-    if (dialogContainsFilledContent(element) && !allowFilledDialog) {
-      throw new Error("A dialog with filled content cannot be automatically dismissed. Use its explicit close control.");
-    }
   } else {
-    throw new Error("Dismiss only supports an expanded combobox, visible listbox/menu, selected popup option, or topmost dialog.");
+    throw new Error("Popup housekeeping only supports an expanded combobox, visible listbox/menu, or selected option.");
   }
-
-  if (role === "dialog") dispatchEscapeKey(element);
 }
 
 async function requestTrustedDismissEscape(): Promise<void> {
@@ -588,43 +808,4 @@ async function requestTrustedDismissClick(point: { x: number; y: number }): Prom
   if (!response?.ok) {
     throw new Error(response?.error || "The browser could not perform the trusted popup dismissal click.");
   }
-}
-
-function getTopmostVisibleDialog(): HTMLElement | undefined {
-  return Array.from(document.querySelectorAll('[role="dialog"]'))
-    .filter((element): element is HTMLElement =>
-      element instanceof HTMLElement && isVisible(element) && isTopLayerElement(element))
-    .sort((left, right) => {
-      const depthDifference = elementDepth(left) - elementDepth(right);
-      if (depthDifference) return depthDifference;
-      const zDifference = numericZIndex(left) - numericZIndex(right);
-      if (zDifference) return zDifference;
-      return left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
-    })
-    .at(-1);
-}
-
-function elementDepth(element: Element): number {
-  let depth = 0;
-  for (let current = element.parentElement; current; current = current.parentElement) depth += 1;
-  return depth;
-}
-
-function numericZIndex(element: Element): number {
-  const value = Number.parseInt(getComputedStyle(element).zIndex, 10);
-  return Number.isFinite(value) ? value : 0;
-}
-
-function dialogContainsFilledContent(dialog: HTMLElement): boolean {
-  return Array.from(dialog.querySelectorAll('input,textarea,select,[contenteditable="true"]'))
-    .some((candidate) => {
-      if (candidate instanceof HTMLInputElement) {
-        if (["checkbox", "radio"].includes(candidate.type)) return candidate.checked;
-        return Boolean(candidate.value.trim());
-      }
-      if (candidate instanceof HTMLTextAreaElement || candidate instanceof HTMLSelectElement) {
-        return Boolean(candidate.value.trim());
-      }
-      return Boolean(candidate.textContent?.trim());
-    });
 }

@@ -1,4 +1,4 @@
-import type { ActionExecutionResult, AgentDecision, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ConversationLog, ElementSelectionGeometry, InspectedElement, PageSnapshot, PerformanceSnapshot, RecordedBrowserAction, ServerMessage, SkillExportBundle, SkillSummaryRequest } from "@auto-page-agent/shared";
+import type { ActionExecutionResult, AgentDecision, AgentEvent, AgentLoopContext, AutomationSkillDraft, BrowserActionPlan, ChatMessage, ConversationLog, ElementSelectionGeometry, InspectedElement, PageSnapshot, PerformanceSnapshot, PopupHousekeepingRequest, PopupHousekeepingResult, RecordedBrowserAction, ServerMessage, SkillExportBundle, SkillSummaryRequest } from "@auto-page-agent/shared";
 import { reconnectBridge, requestBridge } from "./background/bridge-client.js";
 import { PendingAgentRunStore, type PendingAgentRun } from "./background/pending-agent-run.js";
 import {
@@ -28,11 +28,12 @@ import {
   type ReobserveSignal,
 } from "./background/reobserve.js";
 import {
+  boundedObserveTimeout,
   getBlockedRecoveryBoundary,
   waitForPageDecisionReadiness,
 } from "./background/page-readiness.js";
 import {
-  createPopupDismissStepAfterOptionSelection,
+  findPopupHousekeepingRequest,
   rebindQueuedStep,
 } from "./background/step-queue.js";
 import { dispatchTrustedEscape, dispatchTrustedViewportClick } from "./background/trusted-click.js";
@@ -483,7 +484,8 @@ async function runTask(
     };
     await pendingAgentRuns.save(pendingRun);
     try {
-      const requestDecision = async (currentSnapshot: PageSnapshot) => {
+      const initialStartedAt = Date.now();
+      const requestDecision = async (currentSnapshot: PageSnapshot, loop?: AgentLoopContext) => {
         const requestId = crypto.randomUUID();
         run.bridgeRequestId = requestId;
         return requestBridge({
@@ -493,11 +495,53 @@ async function runTask(
           snapshot: currentSnapshot,
           conversationId: pendingRun.conversationId,
           history: pendingRun.history,
+          ...(loop ? { loop } : {}),
           ...(pendingRun.selectedSkillSlug ? { selectedSkillSlug: pendingRun.selectedSkillSlug } : {}),
         }, (event) => emitUiEvent(event, pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId));
       };
       let response = await requestDecision(snapshot);
       assertAgentRunActive(run);
+      while (response.type === "agent.result" && response.decision.kind === "observe") {
+        const remainingMs = TASK_TIMEOUT_MS - (Date.now() - initialStartedAt);
+        const observeTimeoutMs = boundedObserveTimeout(response.decision.timeoutMs, remainingMs);
+        if (observeTimeoutMs <= 0) {
+          response = {
+            ...response,
+            decision: { kind: "blocked", reason: "The global task time budget expired while observing the page.", recoverable: true },
+          };
+          break;
+        }
+        const readySnapshot = await waitForPageDecisionReadiness(
+          snapshot,
+          () => readSnapshot(tab.id),
+          { timeoutMs: observeTimeoutMs, requireStable: true },
+        );
+        assertAgentRunActive(run);
+        if (!readySnapshot) {
+          response = {
+            ...response,
+            decision: { kind: "blocked", reason: "The page did not produce a meaningful semantic change before the observe timeout.", recoverable: true },
+          };
+          break;
+        }
+        snapshot = readySnapshot;
+        pendingRun.snapshotId = snapshot.snapshotId;
+        pendingRun.pageUrl = snapshot.url;
+        await pendingAgentRuns.save(pendingRun);
+        response = await requestDecision(snapshot, {
+          runId: `initial-${pendingRun.conversationId}`,
+          iteration: 0,
+          maxSteps: MAX_TASK_ACTIONS,
+          timeoutMs: TASK_TIMEOUT_MS,
+          startedAt: initialStartedAt,
+          reobserve: {
+            reason: "page_content_changed",
+            summary: "Observe detected a stable semantic page change, so the decision continues from fresh refs.",
+            actionMayHaveExecuted: false,
+          },
+        });
+        assertAgentRunActive(run);
+      }
       if (response.type === "agent.result" && response.decision.kind === "blocked") {
         const readySnapshot = await waitForPageDecisionReadiness(
           snapshot,
@@ -564,6 +608,10 @@ async function analyzeRepository(element: InspectedElement, pageUrl: string, tar
 
 async function executePlan(plan: BrowserActionPlan, tabId: number) {
   return sendPageMessage(tabId, { type: "page.actions.execute", plan });
+}
+
+async function executePopupHousekeeping(request: PopupHousekeepingRequest, tabId: number) {
+  return sendPageMessage<PopupHousekeepingResult>(tabId, { type: "page.popup.dismiss", request });
 }
 
 async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: string, targetTabId: number, windowId: number) {
@@ -652,7 +700,7 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       }
       let execution = outcome.execution;
       if (!execution.snapshot) execution = { ...execution, snapshot: await readSnapshot(pendingRun.tabId) };
-      const observedSnapshot = execution.snapshot!;
+      let observedSnapshot = execution.snapshot!;
       emitUiEvent(createEvent({ type: "action", action: step.action, targetRef: step.targetRef, status: execution.ok ? "success" : "failed", step: iteration + 1, detail: execution.error }), pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId);
       const verification = execution.verification;
       emitUiEvent(createEvent({ type: "verify", success: Boolean(verification?.success ?? execution.ok), summary: verification?.summary ?? execution.error ?? "Action observation completed.", changes: verification?.changes, changedRefs: verification?.diff.changedFingerprints, step: iteration + 1 }), pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId);
@@ -669,12 +717,41 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       };
       const verified = execution.ok && (verification?.success ?? true);
       const pageBranched = verification?.diff.urlChanged === true
-        || verification?.routeTransitioned === true;
+        || verification?.routeTransitioned === true
+        || verification?.pageContentChanged === true;
       pendingSteps = pendingSteps.slice(1);
-      const popupDismissStep = verified && !pageBranched
-        ? createPopupDismissStepAfterOptionSelection(step, pendingSteps, observedSnapshot)
+      const popupHousekeeping = verified && !pageBranched
+        ? findPopupHousekeepingRequest(step, pendingSteps, observedSnapshot)
         : undefined;
-      if (popupDismissStep) pendingSteps = [popupDismissStep, ...pendingSteps];
+      if (popupHousekeeping) {
+        emitUiEvent(createEvent({
+          type: "action",
+          action: "popup_housekeeping",
+          targetRef: popupHousekeeping.targetRef,
+          status: "running",
+          step: iteration,
+          detail: "Closing the completed popup before continuing outside its layer.",
+        }), pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId);
+        const housekeeping = await executePopupHousekeeping(popupHousekeeping, pendingRun.tabId);
+        observedSnapshot = housekeeping.snapshot;
+        emitUiEvent(createEvent({
+          type: "action",
+          action: "popup_housekeeping",
+          targetRef: popupHousekeeping.targetRef,
+          status: housekeeping.ok ? "success" : "failed",
+          step: iteration,
+          detail: housekeeping.error,
+        }), pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId);
+        emitUiEvent(createEvent({
+          type: "verify",
+          success: housekeeping.verification.success,
+          summary: housekeeping.verification.summary,
+          changes: housekeeping.verification.changes,
+          changedRefs: housekeeping.verification.diff.changedFingerprints,
+          step: iteration,
+        }), pendingRun.conversationId, pendingRun.tabId, pendingRun.windowId);
+        if (!housekeeping.ok) throw new Error(housekeeping.error || "Popup housekeeping failed.");
+      }
       baseLoop.remainingPlan = summarizePendingSteps(pendingSteps);
       if (verified && !pageBranched && pendingSteps.length) {
         const rebound = rebindQueuedStep(pendingSteps[0]!, observedSnapshot);
@@ -685,7 +762,13 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
         }
       }
       const reobserve = pageBranched
-        ? verification?.diff.urlChanged
+        ? verification?.pageContentChanged
+          ? {
+              reason: "page_content_changed" as const,
+              summary: "Pagination changed the current page or collection, so the remaining queued targets were discarded.",
+              actionMayHaveExecuted: true,
+            }
+          : verification?.diff.urlChanged
           ? {
               reason: "page_url_changed" as const,
               summary: "The page navigated after the action, so the remaining queued targets were discarded.",
@@ -753,6 +836,38 @@ async function requestContinuation(
   assertAgentRunActive(run);
   if (response.type === "agent.error") throw new Error(response.error);
   if (response.type !== "agent.result") throw new Error("Unexpected agent loop response.");
+  if (response.decision.kind === "observe") {
+    const remainingMs = loop.timeoutMs - (Date.now() - loop.startedAt);
+    const observeTimeoutMs = boundedObserveTimeout(response.decision.timeoutMs, remainingMs);
+    if (observeTimeoutMs <= 0) {
+      return {
+        kind: "blocked",
+        reason: "The global task time budget expired while observing the page.",
+        recoverable: true,
+      };
+    }
+    const readySnapshot = await waitForPageDecisionReadiness(
+      snapshot,
+      () => readSnapshot(pendingRun.tabId),
+      { timeoutMs: observeTimeoutMs, requireStable: true },
+    );
+    assertAgentRunActive(run);
+    if (!readySnapshot) {
+      return {
+        kind: "blocked",
+        reason: "The page did not produce a meaningful semantic change before the observe timeout.",
+        recoverable: true,
+      };
+    }
+    return requestContinuation(readySnapshot, {
+      ...loop,
+      reobserve: {
+        reason: "page_content_changed",
+        summary: "Observe detected a stable semantic page change, so continuation uses fresh refs.",
+        actionMayHaveExecuted: false,
+      },
+    }, pendingRun, run, recoveryState);
+  }
   if (response.decision.kind === "blocked") {
     const boundary = getBlockedRecoveryBoundary(loop);
     const remainingMs = loop.timeoutMs - (Date.now() - loop.startedAt);

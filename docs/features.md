@@ -23,6 +23,8 @@
 
 两者共用相同 Prompt、AgentDecision、动作白名单和 Bridge 归一化规则。
 
+`AgentDecision` 还包含不执行页面动作的 `observe`：用于等待 busy/progress 或动态列表形成稳定语义变化，单次最多 30 秒且计入全局时间预算。
+
 ## 3. Skills
 
 Skills 是声明式工作流上下文，不是新的执行器：
