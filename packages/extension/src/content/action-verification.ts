@@ -134,6 +134,19 @@ export function hasVerifiedDismissal(
   if (targetBefore.role === "listbox" || targetBefore.role === "menu" || targetBefore.role === "dialog") {
     return !after.elements.some((element) => isSameSemanticControl(targetBefore, element));
   }
+  if (targetBefore.role === "option" && targetBefore.selected === true && targetBefore.ownerId) {
+    const popupWasVisible = before.elements.some((element) =>
+      (element.role === "listbox" || element.role === "menu")
+      && element.domId === targetBefore.ownerId);
+    const popupStillVisible = after.elements.some((element) =>
+      (element.role === "listbox" || element.role === "menu")
+      && element.domId === targetBefore.ownerId);
+    const ownerCollapsed = after.elements.some((element) =>
+      element.role === "combobox"
+      && [...parseIdRefs(element.controls), ...parseIdRefs(element.owns)].includes(targetBefore.ownerId!)
+      && element.expanded === false);
+    return ownerCollapsed || (popupWasVisible && !popupStillVisible);
+  }
   return false;
 }
 

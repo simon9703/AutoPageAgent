@@ -92,12 +92,12 @@ test("safe exterior activation uses the resolved element's click method", () => 
   assert.deepEqual(calls, ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]);
 });
 
-test("popup dismiss verifies the exterior click before falling back to Escape", async () => {
+test("popup dismiss tries Escape before resolving a safe exterior click", async () => {
   const runtime = await readFile(new URL("../src/content/runtime.ts", import.meta.url), "utf8");
   const dismissBody = /function dismissElement[\s\S]+?\n\}\n\nfunction getTopmostVisibleDialog/u.exec(runtime)?.[0] ?? "";
 
   assert.match(dismissBody, /function dismissElement\(element: HTMLElement, allowFilledDialog: boolean\): Promise<void>/u);
-  assert.match(dismissBody, /role === "combobox"[\s\S]+clickSafePopupExterior\(element\)[\s\S]+isPopupDismissTargetOpen\(element\)\) return;/u);
-  assert.match(dismissBody, /role === "listbox" \|\| role === "menu"[\s\S]+clickSafePopupExterior\(element\)[\s\S]+isPopupDismissTargetOpen\(element\)\) return;/u);
-  assert.ok(dismissBody.indexOf("clickSafePopupExterior(element)") < dismissBody.lastIndexOf("dispatchEscapeKey(element)"));
+  assert.match(dismissBody, /role === "combobox" \|\| role === "listbox" \|\| role === "menu" \|\| role === "option"/u);
+  assert.match(dismissBody, /dispatchEscapeKey\(element\)[\s\S]+isPopupDismissTargetOpen\(element\)[\s\S]+clickSafePopupExterior\(element\)/u);
+  assert.ok(dismissBody.indexOf("dispatchEscapeKey(element)") < dismissBody.indexOf("clickSafePopupExterior(element)"));
 });

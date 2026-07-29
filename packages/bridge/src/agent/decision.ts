@@ -134,6 +134,7 @@ function isSafeDismissTarget(
   if (target.occluded || target.disabled) return false;
   if (target.role === "combobox") return target.expanded === true;
   if (target.role === "listbox" || target.role === "menu") return true;
+  if (target.role === "option") return target.selected === true && Boolean(target.ownerId);
   if (target.role !== "dialog") return false;
 
   const openInnerLayer = snapshot.elements.some((element) =>

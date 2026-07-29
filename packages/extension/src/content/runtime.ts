@@ -535,15 +535,16 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
 
 async function dismissElement(element: HTMLElement, allowFilledDialog: boolean): Promise<void> {
   const role = element.getAttribute("role") || inferRole(element);
-  if (role === "combobox") {
+  if (role === "combobox" || role === "listbox" || role === "menu" || role === "option") {
     if (element.getAttribute("aria-expanded") !== "true") {
-      throw new Error("Only an expanded combobox can be dismissed.");
+      if (role === "combobox") throw new Error("Only an expanded combobox can be dismissed.");
+      if (role === "option" && element.getAttribute("aria-selected") !== "true") {
+        throw new Error("Only a selected option can anchor popup dismissal.");
+      }
     }
-    if (clickSafePopupExterior(element)) {
-      await delay(250);
-      if (!isPopupDismissTargetOpen(element)) return;
-    }
-  } else if (role === "listbox" || role === "menu") {
+    dispatchEscapeKey(element);
+    await delay(250);
+    if (!isPopupDismissTargetOpen(element)) return;
     if (clickSafePopupExterior(element)) {
       await delay(250);
       if (!isPopupDismissTargetOpen(element)) return;
@@ -558,10 +559,10 @@ async function dismissElement(element: HTMLElement, allowFilledDialog: boolean):
       throw new Error("A dialog with filled content cannot be automatically dismissed. Use its explicit close control.");
     }
   } else {
-    throw new Error("Dismiss only supports an expanded combobox, visible listbox/menu, or topmost dialog.");
+    throw new Error("Dismiss only supports an expanded combobox, visible listbox/menu, selected popup option, or topmost dialog.");
   }
 
-  dispatchEscapeKey(element);
+  if (role === "dialog") dispatchEscapeKey(element);
 }
 
 function getTopmostVisibleDialog(): HTMLElement | undefined {

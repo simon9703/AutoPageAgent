@@ -361,6 +361,18 @@ test("dismiss verifies popup removal while preserving the outer dialog", () => {
   }, listbox.fingerprint), false);
 });
 
+test("dismiss can verify popup removal from a selected option anchor", () => {
+  const dialog = { ...option, ref: "dialog", role: "dialog", fingerprint: "dialog-1", domId: undefined, ownerId: undefined };
+  const listbox = { ...option, ref: "listbox", role: "listbox", fingerprint: "site-list-1", domId: "site-list", ownerId: undefined };
+  const selectedOption = { ...option, selected: true, ownerId: "site-list" };
+  const before = { ...snapshot, elements: [dialog, listbox, selectedOption] };
+  assert.equal(hasVerifiedDismissal(before, {
+    ...snapshot,
+    elements: [dialog],
+  }, selectedOption.fingerprint), true);
+  assert.equal(hasVerifiedDismissal(before, before, selectedOption.fingerprint), false);
+});
+
 test("Escape dispatch without a collapsed or hidden state is not dismissal success", () => {
   const before = { ...snapshot, elements: [combobox(true)] };
   assert.equal(hasVerifiedDismissal(before, { ...before, snapshotId: "snapshot-2" }, "project-1"), false);

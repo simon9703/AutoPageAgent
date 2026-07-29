@@ -19,6 +19,7 @@ function isValidQueuedTarget(step: BrowserActionStep, element: PageElementSnapsh
     && !((element.role === "combobox" && element.expanded === true)
       || element.role === "listbox"
       || element.role === "menu"
+      || (element.role === "option" && element.selected === true && Boolean(element.ownerId))
       || element.role === "dialog")) return false;
   return true;
 }

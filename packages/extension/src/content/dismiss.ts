@@ -159,6 +159,10 @@ function exposeLegacyEscapeCodes(event: Event): void {
 function resolvePopupRoots(origin: HTMLElement): HTMLElement[] {
   const role = origin.getAttribute("role");
   if (role === "listbox" || role === "menu") return [resolveVisiblePopupRegion(origin)];
+  if (role === "option") {
+    const owner = origin.closest('[role="listbox"],[role="menu"]');
+    return owner instanceof HTMLElement ? [resolveVisiblePopupRegion(owner)] : [];
+  }
   if (role !== "combobox") return [];
   const ids = [
     origin.getAttribute("aria-controls"),
@@ -173,18 +177,21 @@ function resolvePopupRoots(origin: HTMLElement): HTMLElement[] {
 }
 
 function resolveVisiblePopupRegion(root: HTMLElement): HTMLElement {
-  let resolved = hasVisibleArea(root) ? root : undefined;
+  if (hasVisibleArea(root)) return root;
+  let closestVisible: HTMLElement | undefined;
   let candidate = root.parentElement;
   while (candidate && candidate !== document.body && candidate !== document.documentElement) {
     if (candidate.getAttribute("role") === "dialog") break;
     if (hasVisibleArea(candidate)) {
-      const rect = candidate.getBoundingClientRect();
-      if (rect.width * rect.height > innerWidth * innerHeight * 0.7) break;
-      resolved = candidate;
+      closestVisible ??= candidate;
+      const style = getComputedStyle(candidate);
+      if (style.position === "absolute" || style.position === "fixed" || style.zIndex !== "auto") {
+        return candidate;
+      }
     }
     candidate = candidate.parentElement;
   }
-  return resolved ?? root;
+  return closestVisible ?? root;
 }
 
 function hasVisibleArea(element: HTMLElement): boolean {
