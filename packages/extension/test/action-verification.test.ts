@@ -64,6 +64,47 @@ test("click verification rejects an unrelated DOM mutation", () => {
   assert.equal(hasObservableActionEffect(click, snapshot, snapshot, diff, "save-1"), false);
 });
 
+test("selection-like clicks accept a newly available next control", () => {
+  const duration = {
+    ...option,
+    ref: "duration-7",
+    role: "radio",
+    label: "7 days",
+    text: "7 days",
+    fingerprint: "duration-7-1",
+    selected: undefined,
+    checked: false,
+  };
+  const next = {
+    ...option,
+    ref: "next",
+    role: "button",
+    label: "Next",
+    text: "Next",
+    fingerprint: "next-1",
+    selected: undefined,
+  };
+  const before = { ...snapshot, elements: [duration] };
+  const after = { ...snapshot, elements: [duration, next] };
+  assert.equal(hasObservableActionEffect(click, before, after, {
+    ...noDiff,
+    addedFingerprints: ["next-1"],
+    summary: ["1 interactive element added"],
+  }, duration.fingerprint), true);
+});
+
+test("ordinary button clicks do not treat an unrelated new control as success", () => {
+  const save = { ...option, role: "button", fingerprint: "save-1", selected: undefined };
+  const next = { ...option, role: "button", fingerprint: "next-1", selected: undefined };
+  const before = { ...snapshot, elements: [save] };
+  const after = { ...snapshot, elements: [save, next] };
+  assert.equal(hasObservableActionEffect(click, before, after, {
+    ...noDiff,
+    addedFingerprints: ["next-1"],
+    summary: ["1 interactive element added"],
+  }, save.fingerprint), false);
+});
+
 test("click verification accepts target state changes and semantic result regions", () => {
   assert.equal(hasObservableActionEffect(click, snapshot, snapshot, {
     ...noDiff,

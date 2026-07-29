@@ -1,188 +1,82 @@
-# Product Status and Roadmap
+# 产品状态与 Roadmap
 
-This document is the single checklist for shipped capabilities and future scope.
-Checked items are implemented in the current repository. Unchecked items are
-planned only and must not be described as available.
+当前版本：0.12.x。
 
-## Current release — 0.11.0
+## 已完成
 
-### Internal architecture
+### Runtime 与页面执行
 
-- [x] Split shared contracts by browser, Agent, chat, repository, Skill, event, and transport domains
-- [x] Keep stable package barrels while making cross-domain dependencies explicit
-- [x] Split bridge routing, providers, prompts, Responses streaming, decision validation, Skill selection, page matching, and workflow generation
+- [x] Observe → multi-step Plan → confirm once → Act → Verify
+- [x] 本地步骤队列、可信 fingerprint 和 fresh-ref 重绑
+- [x] URL/SPA/context/stale reobserve
+- [x] 同时分类 thrown error 与 `{ ok:false,error }`
+- [x] 动态 combobox、option 最终值与多选 dismiss
+- [x] action-specific settle 和 bounded delayed observation
+- [x] 精确 completion evidence 与一次恢复 turn
+- [x] bounded DOM Snapshot 和按需视觉恢复
+- [x] 截图 Set-of-Mark 与 ref 映射
 
-### Agent Runtime
+### Side Panel 与对话
 
-- [x] Constrained `Observe → Plan → Confirm → Act → Verify` loop
-- [x] Separate `answer`, `action_plan`, `complete`, `blocked`, and `needs_user` decisions
-- [x] Refresh the page snapshot after every action or navigation
-- [x] Validate completion evidence against exact text or a URL in the latest snapshot
-- [x] Require observable effects for click, submit, and scroll verification
-- [x] Bound each run to 8 actions, 90 seconds, and 2 consecutive verification failures
-- [x] Re-plan after recoverable failures and re-observe after navigation
-- [x] Use action-specific settle budgets instead of one fixed wait
-- [x] Keep one global active Agent Run to prevent concurrent browser mutations
+- [x] window + conversation + target Tab 隔离
+- [x] New、Stop、History、Reconnect
+- [x] 初始计划确认卡与真实运行时间线
+- [x] needs_user 推荐选项确认与原任务续接
+- [x] 一次性元素/截图上下文
 
-### Conversation and Tab Isolation
+### Skills 与工具
 
-- [x] Keep one current conversation per browser window
-- [x] Bind a new conversation to that window's active HTTP(S) tab
-- [x] Keep the target fixed when the user views another tab
-- [x] Treat navigation inside the bound tab as the same conversation
-- [x] Scope events and results by `windowId + conversationId + targetTabId`
-- [x] Ignore stopped, stale, late, or different-conversation events and results
-- [x] Keep **New** unavailable until the active run has stopped
-- [x] Stop safely when the bound tab closes and require **New** to continue
-- [x] Persist `needs_user` and combine the next reply with the original task
-- [x] Render bounded `needs_user` choices with a recommended preselection and one-click **Start**
-- [x] Keep local Codex thread and Responses `previous_response_id` continuity
+- [x] 本地 Registry 与 Marketplace
+- [x] 明确选择的 Skill 跨页面/域名/环境继续运行
+- [x] 安装、更新、启停、删除、导入和导出
+- [x] 表单、检查控件、滚动、导航和关键帧录制
+- [x] 从当前对话和操作生成 Skill 草稿
+- [x] bounded 本地仓库 `rg` 证据检索
+- [x] 按需 Navigation/Resource Timing
 
-### Message Context and Attachments
+## P0：运行可靠性与诊断
 
-- [x] Select page text, elements, public images, and visible-page captures
-- [x] Use selected-element and screenshot context for one model request
-- [x] Clear consumed context from the composer after a successful send
-- [x] Retain a compact attachment summary on the original user message
-- [x] Exclude attachment summaries and screenshot binary data from later model history
-- [x] Isolate pending selected-element context by target tab
-- [x] Send supported visual input through the Responses provider
-- [x] Send session-only screenshot/binary image input to local Codex
-- [x] Add bounded adaptive screenshot recovery for visual pages and unresolved blocked boundaries
-- [x] Draw snapshot-aligned Set-of-Mark numbers on automatic visual screenshots and map each number back to the current DOM ref
+- [ ] 持久化 `providerMs/executeMs/settleMs/snapshotMs/runMs`
+- [ ] 记录 `planStepCount/rebindResult/continuationReason`
+- [ ] Skill debug 展示失败步骤与验证证据
+- [ ] 浏览器集成测试：导航、Tab 关闭、Stop、late event、content reload
+- [ ] 使用结构化 readiness 信号继续降低固定等待
 
-### Page Understanding and Performance
+## P1：Skill 编辑
 
-- [x] Build a compact indexed DOM with visible interactive elements and viewport pruning
-- [x] Capture page text, selected text, headings, geometry, and interaction state
-- [x] Track stable fingerprints, occlusion, loading, disabled, read-only, checked, and expanded state
-- [x] Compute snapshot diffs and element-state changes between actions
-- [x] Support dynamic searchable combobox options with lightweight ARIA refs and fresh observation
-- [x] Collect Navigation and Resource Timing only for explicit performance/network/API tasks
-- [x] Avoid duplicate Snapshot payloads in continuation requests
-- [x] Correlate fetch/XHR Resource Timing URLs with bounded repository search
+- [ ] 单步编辑、排序、启停和删除
+- [ ] 使用新 Snapshot 重新生成失效定位提示
+- [ ] workflow 成功率和失败步骤指标
+- [ ] 声明所需工具与权限，但不绕过全局确认
 
-### Side-panel Experience
+## P1：源码关联
 
-- [x] Chrome MV3 Side Panel with a fixed conversation composer
-- [x] Simplified Chinese UI through semantic `i18next` resource keys
-- [x] **New** starts a genuinely fresh provider conversation
-- [x] Bound-page summary returns the user to the target tab without rebinding it
-- [x] Stop control with real cancellation/busy state
-- [x] Approval card for the initial action plan
-- [x] Multi-step planning with one approval and a background-owned pending queue
-- [x] Rebind queued targets to fresh refs through bridge-attached fingerprints
-- [x] Auto-dismiss a still-open option popup before continuing to another field
-- [x] Replan only at queue boundaries, verification failures, navigation, or ambiguous targets
-- [x] Use compact continuation prompts without repeating full Skill bodies
-- [x] Choice confirmation card that resumes the original task without requiring typed input
-- [x] Timeline containing real Action, Verify, Complete, and Error events only
-- [x] Keep plan summaries out of chat and internal step counts out of assistant replies
-- [x] AI pointer, target ring, and action-status label
-- [x] Restore messages, attachment summaries, and pending follow-up state after side-panel reload
-- [x] Follow the active tab until the first message, then lock the conversation target
-- [x] Normalize `submit` on button-like controls to `click` while preserving native form submission
-- [x] Reobserve unavailable stale targets and retry unsupported completion evidence once
-- [x] Persist compact conversation and operation history under `~/.auto-page-agent/logs`
-- [x] Switch or delete saved history from the side-panel header
-- [x] Preserve original page binding when restoring history and never silently rebind it
-- [x] Show Reconnect when the native bridge is unavailable
-- [x] Disable message sending until the bridge is connected and local Codex is authenticated
-- [ ] Step-by-step execution replay
+- [ ] bounded `repo.read_file`
+- [ ] TypeScript symbol/reference 查询
+- [ ] API pathname → client/hook/response type
+- [ ] DOM → component → prop/hook → API 证据链
+- [ ] Git revision 与 branch 上下文
 
-### Skill Marketplace and Local Registry
+## P2：团队化
 
-- [x] Merged My Skills view with page-relevance ordering, plus Marketplace
-- [x] Daily report, release, translation, and page-assistant templates
-- [x] Record and confirmation-gated replay on the current page
-- [x] Generate declarative `SKILL.md` and parameterized `workflow.json`
-- [x] Save new Skills without silently overwriting an existing Skill
-- [x] Update an existing Skill with a patch-version increment
-- [x] Install and explicitly update Marketplace templates
-- [x] Store user Skills outside the repository under `~/.auto-page-agent/skills`
-- [x] Preserve installed and custom Skills across repository/extension upgrades
-- [x] Treat origin/path patterns as recommendation hints, never cross-page or cross-environment execution gates
-- [x] Show page-scoped Skills and explicit match reasons
-- [x] Run Skills through the same constrained Agent Runtime
-- [x] Redact sensitive recorded values and use manual-input checkpoints
-- [x] Enable or disable installed Skills
-- [x] Explicitly select one Skill and retain it across Agent loop turns
-- [x] Add, delete, download, and import Skills from the side-panel Registry
-- [x] Record live forms, checkable controls, container scrolling, navigation, and bounded key-frame screenshots
-- [x] Summarize the current page conversation and operations into an editable Skill draft
+- [ ] DOM/page fingerprint 推荐
+- [ ] 显式确认的跨 Tab workflow
+- [ ] 签名的团队 Skill Registry
+- [ ] Marketplace 自定义修改的三方合并
+- [ ] 远程 Agent Server 的用户、仓库和工具授权
 
-### Local Repository Intelligence
+## 暂不实现
 
-- [x] Configure one or more local repository roots
-- [x] Run bounded fixed-string `rg` evidence searches
-- [x] Classify source, symbol, text, and API evidence with confidence levels
-- [x] Discover the Codex executable and read cached account status
-- [x] Retry app-server overloads and return structured provider errors
-- [x] Register a Chrome Native Messaging host once and start the bridge on demand
-- [ ] Add bounded `repo.read_file` and TypeScript-aware `repo.find_references`
-- [ ] Read Git revision and current branch context
-- [ ] Resolve TypeScript symbols through the language service
-- [ ] Correlate DOM element → component → hook → API request
+- 多窗口并发 Agent run
+- 对话开始后的自动目标 Tab 重绑
+- 模型生成 JavaScript、XPath、selector 或坐标动作
+- 默认采集完整网络内容
+- 无确认的发布、审批、发送、删除或真实交易
 
-## Next priorities
+## 不变量
 
-These items extend the current local-first product without changing its safety
-model or introducing a full multi-conversation system.
-
-### P0 — Reliability and diagnostics
-
-- [ ] Persist per-run duration, action count, verification failures, and final status
-- [ ] Show failed-step diagnostics in Skill debug results
-- [ ] Add browser integration tests for stop, target-tab close, navigation, and late-event races
-- [ ] Add compact Snapshot/token-size diagnostics without sending them to the model
-- [ ] Improve event-driven page settling for asynchronous DOM and network changes
-
-### P1 — Skill authoring
-
-- [ ] Edit, reorder, disable, and delete individual recorded steps
-- [ ] Regenerate stale refs/selectors through a fresh page observation
-- [ ] Add step-specific confirmation policies without bypassing the global safety boundary
-- [ ] Declare required browser tools and permissions in Skill metadata
-- [x] Export and import a portable Skill bundle
-- [ ] Show workflow success rate and failed-step metrics
-
-### P1 — Source-to-page analysis
-
-- [ ] Add `repo.read_file` with root, size, and line-count bounds
-- [ ] Add TypeScript-aware symbol and reference lookup
-- [ ] Correlate request URLs with API clients, hooks, and response types
-- [ ] Support optional build metadata for component/source mapping
-- [ ] Prove selected element → component → prop/hook → API relationship
-
-### P2 — Registry and workflow expansion
-
-- [ ] Match Skills with a DOM/page fingerprint
-- [ ] Discover target tabs automatically by URL, title, and page fingerprint
-- [ ] Support explicit, confirmation-gated cross-tab workflows
-- [ ] Add a signed team Skill registry with versioned update channels
-- [ ] Resolve customized Marketplace updates with conflict-aware three-way merging
-
-## Explicitly deferred
-
-These are not part of the current local MVP:
-
-- [ ] Conversation search, rename, and pinning
-- [ ] Multiple concurrent Agent Runs across tabs or windows
-- [ ] Automatic rebinding of a conversation after its first message
-- [ ] Authenticated remote Agent Server
-- [ ] GitHub, GitLab, or internal remote repository providers
-- [ ] Repository mirrors and revision-aware remote indexes
-- [ ] Private source-map/build-artifact providers
-- [ ] Per-user remote tool authorization and audit infrastructure
-- [ ] Translation/i18n intelligence beyond declarative workflow Skills
-
-## Product invariants
-
-- A model can act only through the constrained browser action protocol and refs
-  from the latest Snapshot.
-- Skills never grant permissions or bypass approval, budgets, validation, or
-  verification.
-- Performance/API evidence is on demand and is not part of ordinary Agent
-  observations.
-- **New** starts one fresh conversation that follows the active tab until its
-  first message; started and restored conversations keep their original target.
+- 模型只使用最新 Snapshot ref。
+- Skills 不增加浏览器权限。
+- 每个 mutating action 必须有验证规则。
+- 导航只证明页面变化，不证明任务完成。
+- 普通循环不重复采集 Resource Timing。

@@ -390,7 +390,11 @@ test("agent prompt authorizes the requested test flow while preserving runtime b
   assert.match(prompt, /sends Escape[\s\S]+clicks a verified non-interactive exterior point/u);
   assert.match(prompt, /Never plan coordinates, click the combobox itself to close it/u);
   assert.match(prompt, /never invent a backdrop, blank-area coordinate, selector, or ref/u);
-  assert.match(prompt, /complete ordered action sequence/u);
+  assert.match(prompt, /MUST return every stable, deterministic same-page action/u);
+  assert.match(prompt, /Returning only the first action is incorrect/u);
+  assert.match(prompt, /may be the final step of the current plan/u);
+  assert.match(prompt, /MUST NOT have later queued steps/u);
+  assert.match(prompt, /"steps":\[\{"action":"fill"[\s\S]+\{"action":"click"[\s\S]+\{"action":"click"/u);
   assert.match(prompt, /one confirmation card/u);
   assert.match(prompt, /completionEvidenceFailure/u);
   assert.match(prompt, /never repeat unsupported completion evidence/u);

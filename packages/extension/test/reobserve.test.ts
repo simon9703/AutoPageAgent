@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   classifyReobserveError,
+  classifyReobserveExecution,
   consumeReobserveStep,
 } from "../src/background/reobserve.js";
 
@@ -40,12 +41,24 @@ test("unrelated action errors still fail closed", () => {
   assert.equal(classifyReobserveError(new Error("Target is disabled.")), undefined);
 });
 
+test("classifies wrapped content-script execution errors as reobserve signals", () => {
+  const stale = classifyReobserveExecution({
+    ok: false,
+    error: "Page URL changed after the snapshot. Read the page again.",
+  });
+  assert.equal(stale?.reason, "page_url_changed");
+  assert.equal(stale?.actionMayHaveExecuted, false);
+  assert.equal(classifyReobserveExecution({ ok: true }), undefined);
+  assert.equal(classifyReobserveExecution({ ok: false, error: "Target is disabled." }), undefined);
+});
+
 test("agent loop replans with a fresh snapshot before continuing", async () => {
   const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
 
   assert.match(background, /outcome\.kind === "reobserve"/u);
   assert.match(background, /outcome\.kind === "reobserve"\) \{\s*failures = 0;/u);
   assert.match(background, /snapshot: await reobservePage\(tabId\)/u);
+  assert.match(background, /classifyReobserveExecution\(execution\)/u);
   assert.match(background, /for \(let attempt = 0; attempt < 4; attempt \+= 1\)/u);
   assert.match(background, /if \(!classifyReobserveError\(error\)\) throw error;/u);
   assert.match(background, /requestContinuation\(outcome\.snapshot, loop/u);

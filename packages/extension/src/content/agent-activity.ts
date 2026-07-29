@@ -36,10 +36,10 @@ export async function showAiPointerAtPoint(x: number, y: number, label: string) 
 }
 
 async function animatePointerClick() {
-  await delay(520);
+  await delay(180);
   aiPointer?.classList.add("clicking");
   actionOutline?.classList.add("acting");
-  await delay(180);
+  await delay(80);
   aiPointer?.classList.remove("clicking");
   actionOutline?.classList.remove("acting");
   setTimeout(() => {
@@ -179,7 +179,7 @@ function ensureAgentStyles() {
     html.auto-page-agent-picking, html.auto-page-agent-picking * { cursor: none !important; }
     .auto-page-agent-notice { position: fixed; z-index: 2147483647; top: 18px; left: 50%; transform: translateX(-50%); padding: 9px 15px; border: 1px solid #ffffff38; border-radius: 999px; color: white; background: linear-gradient(135deg,#5b31d2eF,#8b5cf6eF 55%,#2563ebeF); backdrop-filter: blur(14px); box-shadow: 0 10px 35px #4c1d9560, inset 0 1px #ffffff40; font: 650 12px/1.2 system-ui,-apple-system,sans-serif; letter-spacing: .01em; pointer-events: none; }
     .auto-page-agent-pointer, .auto-page-agent-picker-pointer { position: fixed; z-index: 2147483647; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; will-change: transform; }
-    .auto-page-agent-pointer { transition: transform .52s cubic-bezier(.16,1,.3,1), opacity .16s ease; }
+    .auto-page-agent-pointer { transition: transform .18s cubic-bezier(.16,1,.3,1), opacity .12s ease; }
     .auto-page-agent-picker-pointer { transition: opacity .1s ease; }
     .auto-page-agent-pointer.visible, .auto-page-agent-picker-pointer.visible { opacity: 1; }
     .auto-page-agent-pointer-arrow { position: absolute; left: -4px; top: -4px; width: 38px; height: 46px; overflow: visible; filter: drop-shadow(0 5px 8px #312e8160); transform-origin: 5px 5px; }

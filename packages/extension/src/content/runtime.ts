@@ -512,7 +512,7 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
     throw new Error("Custom comboboxes must be clicked and selected from a fresh option snapshot.");
   }
   element.scrollIntoView({ block: "center", behavior: "smooth" });
-  await delay(220);
+  await delay(120);
   if (!isTopLayerElement(element)) throw new Error("Target is covered by another page element.");
   if (step.action !== "dismiss") await showAiPointer(element, `AI · ${step.action}`);
   if (step.action === "click") await simulateClick(element);

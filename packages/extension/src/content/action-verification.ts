@@ -16,11 +16,29 @@ export function hasObservableActionEffect(
   if (diff.changedFingerprints.includes(targetFingerprint) || diff.removedFingerprints.includes(targetFingerprint)) {
     return true;
   }
+  const targetBefore = before.elements.find((element) => element.fingerprint === targetFingerprint);
+  if (step.action === "click" && isSelectionLikeControl(targetBefore)) {
+    const actionableRoles = new Set(["button", "checkbox", "combobox", "link", "radio", "switch", "textbox"]);
+    const newlyAvailableControl = after.elements.some((element) =>
+      diff.addedFingerprints.includes(element.fingerprint)
+      && !element.disabled
+      && actionableRoles.has(element.role)
+      && hasMeaningfulSnapshotContent(element));
+    if (newlyAvailableControl) return true;
+  }
   const resultRoles = new Set(["alert", "dialog", "status"]);
   return after.elements.some((element) =>
     diff.addedFingerprints.includes(element.fingerprint)
     && resultRoles.has(element.role)
     && hasMeaningfulSnapshotContent(element));
+}
+
+function isSelectionLikeControl(element: PageElementSnapshot | undefined): boolean {
+  return Boolean(element && (
+    ["checkbox", "option", "radio", "switch"].includes(element.role)
+    || typeof element.checked === "boolean"
+    || typeof element.selected === "boolean"
+  ));
 }
 
 export type PageTransitionState = "none" | "pending" | "completed";

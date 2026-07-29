@@ -10,7 +10,7 @@ The product is intentionally split into three trust zones:
 2. `packages/bridge` owns provider access, agent prompting, repository search, Skill selection, and durable local Skill storage.
 3. `packages/shared` owns every message, snapshot, action, Skill, and event type shared across those processes.
 
-Read `README.md` for usage, `docs/architecture.md` for component boundaries, `docs/security.md` for invariants, and `docs/roadmap.md` before expanding scope.
+Read `README.md` for usage and `docs/README.md` for the engineering-document index. Read `docs/architecture.md` for component boundaries, `docs/agent-runtime.md` for queue/navigation/reobserve behavior, `docs/page-engine.md` for Snapshot/action/verification details, `docs/security.md` for invariants, and `docs/roadmap.md` before expanding scope.
 
 ## Repository map
 
@@ -46,6 +46,11 @@ Read `README.md` for usage, `docs/architecture.md` for component boundaries, `do
 - `docs/github/ego-lite-analysis.md`: source-backed Ego Lite semantic/visual/CDP browser-control, readiness, and learned-tool analysis.
 - `docs/github/browser-use-analysis.md`: source-backed Browser Use DOM/AX serialization, selector-map index, screenshot Set-of-Mark, and indexed-action analysis.
 - `docs/github/vimium-analysis.md`: source-backed Vimium Link Hints discovery, hint generation, cross-frame coordination, overlay, and activation analysis.
+- `docs/README.md`: documentation index and reading order.
+- `docs/agent-runtime.md`: multi-step queue, continuation, navigation, reobserve, readiness, and completion semantics.
+- `docs/page-engine.md`: Snapshot, ref, action, settle, diff, verification, dismiss, and visual-mark details.
+- `docs/features.md`: conversation, Provider, Skills, recording, repository analysis, and logs.
+- `docs/diagnostics.md`: performance model, error taxonomy, and planned phase-level metrics.
 
 ## Reference implementation analyses
 

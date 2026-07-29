@@ -24,6 +24,7 @@ import {
 } from "./background/visual-recovery.js";
 import {
   classifyReobserveError,
+  classifyReobserveExecution,
   consumeReobserveStep,
   type ReobserveSignal,
 } from "./background/reobserve.js";
@@ -869,7 +870,12 @@ type PlanExecutionOutcome =
 
 async function executePlanResilient(plan: BrowserActionPlan, tabId: number): Promise<PlanExecutionOutcome> {
   try {
-    return { kind: "executed", execution: await executePlan(plan, tabId) as ActionExecutionResult };
+    const execution = await executePlan(plan, tabId) as ActionExecutionResult;
+    const signal = classifyReobserveExecution(execution);
+    if (signal) {
+      return { kind: "reobserve", snapshot: await reobservePage(tabId), signal };
+    }
+    return { kind: "executed", execution };
   }
   catch (error) {
     const signal = classifyReobserveError(error);
