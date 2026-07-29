@@ -7,6 +7,7 @@ type KeyboardEventFactory = (type: "keydown" | "keyup", init: KeyboardEventInit)
 const ESCAPE_KEY_CODE = 27;
 const SAFE_POINT_INSET = 12;
 const POPUP_EDGE_PADDING = 6;
+const MAX_SAFE_CLICK_ATTEMPTS = 3;
 const INTERACTIVE_SELECTOR = [
   "button",
   "a[href]",
@@ -73,9 +74,11 @@ export async function clickSafePopupExterior(
   origin: HTMLElement,
   beforeActivation?: (target: HTMLElement, point: DismissPoint) => void | Promise<void>,
   activatePoint?: (point: DismissPoint) => Promise<void>,
+  afterActivation?: () => void | Promise<void>,
 ): Promise<boolean> {
   const popupRoots = resolvePopupRoots(origin);
   if (!popupRoots.length) return false;
+  if (!activatePoint) return false;
   const dialog = resolveDismissDialog(origin);
   const searchRect = dialog
     ? clipRectToViewport(dialog.getBoundingClientRect())
@@ -85,15 +88,23 @@ export async function clickSafePopupExterior(
   }
 
   const popupRects = popupRoots.map((root) => root.getBoundingClientRect());
-  const resolved = findSafeDismissPoint(searchRect, popupRects, (point) =>
-    resolveSafeExteriorTarget(point, popupRoots, dialog));
-  if (!resolved) return false;
-  await beforeActivation?.(resolved.target, resolved.point);
-  const currentTarget = resolveSafeExteriorTarget(resolved.point, popupRoots, dialog);
-  if (!currentTarget) return false;
-  if (!activatePoint) return false;
-  await activatePoint(resolved.point);
-  return true;
+  const attemptedTargets = new Set<HTMLElement>();
+  let attempts = 0;
+  for (const point of buildCandidatePoints(searchRect)) {
+    if (popupRects.some((popupRect) => containsPoint(popupRect, point, POPUP_EDGE_PADDING))) continue;
+    const target = resolveSafeExteriorTarget(point, popupRoots, dialog);
+    if (!target || attemptedTargets.has(target)) continue;
+    await beforeActivation?.(target, point);
+    const currentTarget = resolveSafeExteriorTarget(point, popupRoots, dialog);
+    if (!currentTarget || attemptedTargets.has(currentTarget)) continue;
+    attemptedTargets.add(currentTarget);
+    await activatePoint(point);
+    attempts += 1;
+    await afterActivation?.();
+    if (!isPopupDismissTargetOpen(origin)) return true;
+    if (attempts >= MAX_SAFE_CLICK_ATTEMPTS) break;
+  }
+  return false;
 }
 
 export function isPopupDismissTargetOpen(origin: HTMLElement): boolean {
@@ -212,18 +223,20 @@ function resolveSafeExteriorTarget(
   if (!target) return undefined;
   if (dialog && !dialog.contains(target)) return undefined;
   if (popupRoots.some((root) => root === target || root.contains(target))) return undefined;
+  if (target.matches(INTERACTIVE_SELECTOR)) return undefined;
   if (target.closest(INTERACTIVE_SELECTOR)) return undefined;
+  if (target.querySelector(INTERACTIVE_SELECTOR)) return undefined;
   if (getComputedStyle(target).cursor === "pointer") return undefined;
   return target;
 }
 
 function buildCandidatePoints(rect: DismissRect): DismissPoint[] {
   const xs = [
-    rect.left + SAFE_POINT_INSET,
-    rect.right - SAFE_POINT_INSET,
+    rect.left + rect.width * 0.5,
     rect.left + rect.width * 0.25,
     rect.left + rect.width * 0.75,
-    rect.left + rect.width * 0.5,
+    rect.left + SAFE_POINT_INSET,
+    rect.right - SAFE_POINT_INSET,
   ];
   const ys = [
     rect.top + SAFE_POINT_INSET,

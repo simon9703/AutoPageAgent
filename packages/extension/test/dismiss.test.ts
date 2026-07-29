@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  clickSafePopupExterior,
   dispatchEscapeKey,
   findSafeDismissPoint,
   type DismissKeyboardTarget,
+  type DismissRect,
 } from "../src/content/dismiss.js";
 
 function createTarget(role = "combobox") {
@@ -58,8 +60,8 @@ test("safe exterior point is selected outside the popup boundary", () => {
     },
   );
 
-  assert.deepEqual(result, { point: { x: 388, y: 12 }, target: "safe-target" });
-  assert.deepEqual(visited, [{ x: 388, y: 12 }]);
+  assert.deepEqual(result, { point: { x: 200, y: 12 }, target: "safe-target" });
+  assert.deepEqual(visited, [{ x: 200, y: 12 }]);
 });
 
 test("unsafe exterior candidates are skipped without inventing a fallback coordinate", () => {
@@ -72,6 +74,139 @@ test("unsafe exterior candidates are skipped without inventing a fallback coordi
   assert.equal(result, undefined);
 });
 
+test("popup dismiss rejects a proxy wrapper and retries until the popup actually closes", async () => {
+  class FakeElement {
+    readonly children: FakeElement[] = [];
+    readonly style = { cursor: "default", display: "block", visibility: "visible", position: "static", zIndex: "auto" };
+    parentElement: FakeElement | null = null;
+    isConnected = true;
+
+    constructor(
+      readonly tagName: string,
+      readonly attributes: Record<string, string> = {},
+      readonly rect: DismissRect = { left: 0, top: 0, right: 10, bottom: 10, width: 10, height: 10 },
+    ) {}
+
+    append(...children: FakeElement[]): void {
+      for (const child of children) {
+        child.parentElement = this;
+        this.children.push(child);
+      }
+    }
+
+    getAttribute(name: string): string | null {
+      return this.attributes[name] ?? null;
+    }
+
+    setAttribute(name: string, value: string): void {
+      this.attributes[name] = value;
+    }
+
+    getBoundingClientRect(): DismissRect {
+      return this.rect;
+    }
+
+    matches(selector: string): boolean {
+      return selector.split(",").some((part) => {
+        const candidate = part.trim();
+        if (/^[a-z]+$/u.test(candidate)) return this.tagName === candidate;
+        if (candidate === "a[href]") return this.tagName === "a" && "href" in this.attributes;
+        if (candidate === "[onclick]") return "onclick" in this.attributes;
+        if (candidate === "[data-auto-page-agent-overlay]") return "data-auto-page-agent-overlay" in this.attributes;
+        const role = /^\[role=(?:'|")([^'"]+)(?:'|")\]$/u.exec(candidate)?.[1];
+        return role ? this.attributes.role === role : false;
+      });
+    }
+
+    closest(selector: string): FakeElement | null {
+      for (let current: FakeElement | null = this; current; current = current.parentElement) {
+        if (current.matches(selector)) return current;
+      }
+      return null;
+    }
+
+    querySelector(selector: string): FakeElement | null {
+      for (const child of this.children) {
+        if (child.matches(selector)) return child;
+        const nested = child.querySelector(selector);
+        if (nested) return nested;
+      }
+      return null;
+    }
+
+    contains(candidate: FakeElement): boolean {
+      return candidate === this || this.children.some((child) => child.contains(candidate));
+    }
+  }
+
+  const viewport: DismissRect = { left: 0, top: 0, right: 400, bottom: 300, width: 400, height: 300 };
+  const dialog = new FakeElement("div", { role: "dialog" }, viewport);
+  const selectWrapper = new FakeElement("div");
+  const combobox = new FakeElement("input", {
+    role: "combobox",
+    "aria-expanded": "true",
+    "aria-controls": "site-options",
+  });
+  const popup = new FakeElement(
+    "div",
+    { id: "site-options", role: "listbox" },
+    { left: 120, top: 80, right: 320, bottom: 240, width: 200, height: 160 },
+  );
+  const passiveContent = new FakeElement("div");
+  const title = new FakeElement("h2");
+  selectWrapper.append(combobox);
+  dialog.append(selectWrapper, passiveContent, title, popup);
+
+  const activated: Array<{ x: number; y: number }> = [];
+  const originalGlobals = {
+    HTMLElement: globalThis.HTMLElement,
+    document: globalThis.document,
+    getComputedStyle: globalThis.getComputedStyle,
+    innerWidth: globalThis.innerWidth,
+    innerHeight: globalThis.innerHeight,
+  };
+  Object.assign(globalThis, {
+    HTMLElement: FakeElement,
+    innerWidth: 400,
+    innerHeight: 300,
+    getComputedStyle: (element: FakeElement) => element.style,
+    document: {
+      body: new FakeElement("body"),
+      documentElement: new FakeElement("html"),
+      getElementById: (id: string) => id === "site-options" ? popup : null,
+      querySelectorAll: (selector: string) => selector === '[role="dialog"]' ? [dialog] : [],
+      elementsFromPoint: (x: number, y: number) => {
+        if (y !== 12) return [];
+        if (x === 200) return [selectWrapper, dialog];
+        if (x === 100) return [passiveContent, dialog];
+        if (x === 300) return [title, dialog];
+        return [dialog];
+      },
+    },
+  });
+
+  try {
+    const dismissed = await clickSafePopupExterior(
+      combobox as unknown as HTMLElement,
+      undefined,
+      async (point) => {
+        activated.push(point);
+        if (point.x === 300) {
+          combobox.setAttribute("aria-expanded", "false");
+          popup.isConnected = false;
+        }
+      },
+    );
+
+    assert.equal(dismissed, true);
+    assert.deepEqual(activated, [{ x: 100, y: 12 }, { x: 300, y: 12 }]);
+    assert.equal(combobox.getAttribute("aria-expanded"), "false");
+    assert.equal(popup.isConnected, false);
+  } finally {
+    Object.assign(globalThis, originalGlobals);
+  }
+});
+
 test("popup dismiss tries Escape before resolving a safe exterior click", async () => {
   const runtime = await readFile(new URL("../src/content/runtime.ts", import.meta.url), "utf8");
   const dismissBody = /function dismissElement[\s\S]+?\n\}\n\nfunction getTopmostVisibleDialog/u.exec(runtime)?.[0] ?? "";
@@ -79,6 +214,6 @@ test("popup dismiss tries Escape before resolving a safe exterior click", async 
   assert.match(dismissBody, /function dismissElement\(element: HTMLElement, allowFilledDialog: boolean\): Promise<void>/u);
   assert.match(dismissBody, /role === "combobox" \|\| role === "listbox" \|\| role === "menu" \|\| role === "option"/u);
   assert.match(dismissBody, /dispatchEscapeKey\(element\)[\s\S]+isPopupDismissTargetOpen\(element\)[\s\S]+await clickSafePopupExterior\(/u);
-  assert.match(dismissBody, /showAiPointerAtPoint\(point\.x, point\.y, "AI · dismiss"\)[\s\S]+requestTrustedDismissClick/u);
+  assert.match(dismissBody, /showAiPointerAtPoint\(point\.x, point\.y, "AI · dismiss"\)[\s\S]+requestTrustedDismissClick[\s\S]+await delay\(250\)/u);
   assert.ok(dismissBody.indexOf("dispatchEscapeKey(element)") < dismissBody.indexOf("clickSafePopupExterior"));
 });

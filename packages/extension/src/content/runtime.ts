@@ -549,9 +549,9 @@ async function dismissElement(element: HTMLElement, allowFilledDialog: boolean):
       element,
       (_target, point) => showAiPointerAtPoint(point.x, point.y, "AI · dismiss"),
       requestTrustedDismissClick,
+      async () => { await delay(250); },
     )) {
-      await delay(250);
-      if (!isPopupDismissTargetOpen(element)) return;
+      return;
     }
   } else if (role === "dialog") {
     const innerPopupOpen = Array.from(document.querySelectorAll(
