@@ -104,9 +104,11 @@ Popup 流程：
 1. 发送 Escape；
 2. 检查是否已经关闭；
 3. 仍打开时，在 popup 外寻找非交互安全点；
-4. Modal 中搜索范围限制在 Modal 内容内；
-5. Background 仅为当前运行的 top-frame Tab 派发一次 trusted click；
-6. 重新 Snapshot 并验证关闭。
+4. 候选节点本身、祖先或后代包含交互控件时均拒绝，避免把代理 combobox 点击的普通 wrapper 误判为空白区域；
+5. Modal 中搜索范围限制在 Modal 内容内，并优先检查标题区等内部非交互区域，不点击 backdrop；
+6. Background 仅为当前运行的 top-frame Tab 派发 bounded trusted click；
+7. 每次点击后重新检查 expanded 状态和受控 popup；仍打开时排除该目标并尝试下一个候选，最多三次，整体仍计为一次 dismiss；
+8. 重新 Snapshot 并验证关闭。
 
 模型不能提供坐标、backdrop、父 trigger、selector 或空白区域 ref。若找不到安全点，dismiss 失败。
 
