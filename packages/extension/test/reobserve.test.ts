@@ -59,6 +59,8 @@ test("agent loop executes a verified queue locally and replans only at a branch 
   assert.match(background, /let pendingSteps = \[\.\.\.initialPlan\.steps\];/u);
   assert.match(background, /verification\?\.routeTransitioned === true/u);
   assert.match(background, /reason: "page_context_changed"/u);
+  assert.match(background, /createPopupDismissStepAfterOptionSelection\(step, pendingSteps, observedSnapshot\)/u);
+  assert.match(background, /if \(popupDismissStep\) pendingSteps = \[popupDismissStep, \.\.\.pendingSteps\];/u);
   assert.match(background, /const rebound = rebindQueuedStep\(pendingSteps\[0\]!, observedSnapshot\);/u);
   assert.match(background, /plan = \{ \.\.\.plan, snapshotId: observedSnapshot\.snapshotId, steps: pendingSteps \};\s*continue;/u);
   assert.match(background, /The next queued target could not be uniquely rebound/u);

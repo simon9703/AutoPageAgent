@@ -72,6 +72,7 @@ planned only and must not be described as available.
 - [x] Approval card for the initial action plan
 - [x] Multi-step planning with one approval and a background-owned pending queue
 - [x] Rebind queued targets to fresh refs through bridge-attached fingerprints
+- [x] Auto-dismiss a still-open option popup before continuing to another field
 - [x] Replan only at queue boundaries, verification failures, navigation, or ambiguous targets
 - [x] Use compact continuation prompts without repeating full Skill bodies
 - [x] Choice confirmation card that resumes the original task without requiring typed input

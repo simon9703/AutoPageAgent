@@ -31,7 +31,10 @@ import {
   getBlockedRecoveryBoundary,
   waitForPageDecisionReadiness,
 } from "./background/page-readiness.js";
-import { rebindQueuedStep } from "./background/step-queue.js";
+import {
+  createPopupDismissStepAfterOptionSelection,
+  rebindQueuedStep,
+} from "./background/step-queue.js";
 import {
   activateTargetTab,
   getTargetTab,
@@ -622,6 +625,10 @@ async function runAgentLoop(initialPlan: BrowserActionPlan, conversationId: stri
       const pageBranched = verification?.diff.urlChanged === true
         || verification?.routeTransitioned === true;
       pendingSteps = pendingSteps.slice(1);
+      const popupDismissStep = verified && !pageBranched
+        ? createPopupDismissStepAfterOptionSelection(step, pendingSteps, observedSnapshot)
+        : undefined;
+      if (popupDismissStep) pendingSteps = [popupDismissStep, ...pendingSteps];
       baseLoop.remainingPlan = summarizePendingSteps(pendingSteps);
       if (verified && !pageBranched && pendingSteps.length) {
         const rebound = rebindQueuedStep(pendingSteps[0]!, observedSnapshot);
