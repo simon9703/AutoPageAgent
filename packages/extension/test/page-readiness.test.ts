@@ -152,8 +152,8 @@ test("allows one blocked recovery per executed action boundary", () => {
   const loop = {
     runId: "run-1",
     iteration: 3,
-    maxSteps: 8,
-    timeoutMs: 90_000,
+    maxSteps: 50,
+    timeoutMs: 30 * 60_000,
     startedAt: 0,
     lastAction: { action: "click", targetRef: "pay", reason: "Pay" },
     reobserve: {

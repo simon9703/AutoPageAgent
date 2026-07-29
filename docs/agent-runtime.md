@@ -123,7 +123,7 @@ Content Script 的异步消息会把异常包装为 `{ ok:false,error }`。Backg
 - 当前 iteration、时间和步骤预算；
 - 可选 reobserve / visualRecovery / completionEvidenceFailure。
 
-连续两次执行/验证失败会停止。Stale/reobserve 不累计验证失败。
+连续三次执行/验证失败会停止。Stale/reobserve 不累计验证失败，也不消耗动作预算。
 
 Provider 首次在异步边界返回 blocked 时，Background 可在同一边界执行一次 bounded readiness：
 
@@ -146,7 +146,11 @@ DOM 恢复仍不可操作时，可在满足安全条件下附加一次当前活�
 
 ## 8. 预算与性能
 
-全局限制为 8 个已执行动作、90 秒、连续 2 次失败。主要耗时通常来自 Provider turn，而不是 DOM 方法本身。因此优化优先级是：
+单次 Provider Plan 仍限制为最多 8 步，避免动态页面中的 ref 在长计划内过期。整个 Agent 任务每轮限制为 50 个已执行动作、30 分钟、连续 3 次验证失败；stale/reobserve 不计入动作数。
+
+达到 50 步或 30 分钟上限时，Background 不抛出终止错误，而是保留当前页面并返回可恢复的 `needs_user` 选择。用户确认继续后，从当前页面重新采集 Snapshot，并以原任务和用户的继续指令开启下一轮；旧 ref 和未执行队列不会跨轮复用。
+
+主要耗时通常来自 Provider turn，而不是 DOM 方法本身。因此优化优先级是：
 
 1. 同页稳定目标批量规划；
 2. stale/context 错误直接 reobserve；

@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   classifyReobserveError,
   classifyReobserveExecution,
-  consumeReobserveStep,
 } from "../src/background/reobserve.js";
 
 test("classifies stale page validation as reobserve without consuming an action", () => {
@@ -16,7 +15,6 @@ test("classifies stale page validation as reobserve without consuming an action"
     const signal = classifyReobserveError(new Error(message));
     assert.ok(signal);
     assert.equal(signal.actionMayHaveExecuted, false);
-    assert.equal(consumeReobserveStep(3, signal), 3);
   }
 });
 
@@ -33,7 +31,6 @@ test("classifies replaced page contexts as reobserve without a verification fail
     assert.ok(signal);
     assert.equal(signal.reason, "page_context_invalidated");
     assert.equal(signal.actionMayHaveExecuted, true);
-    assert.equal(consumeReobserveStep(3, signal), 4);
   }
 });
 
@@ -57,6 +54,7 @@ test("agent loop replans with a fresh snapshot before continuing", async () => {
 
   assert.match(background, /outcome\.kind === "reobserve"/u);
   assert.match(background, /outcome\.kind === "reobserve"\) \{\s*failures = 0;/u);
+  assert.doesNotMatch(background, /iteration\s*=\s*consumeReobserveStep/u);
   assert.match(background, /snapshot: await reobservePage\(tabId\)/u);
   assert.match(background, /classifyReobserveExecution\(execution\)/u);
   assert.match(background, /for \(let attempt = 0; attempt < 4; attempt \+= 1\)/u);
@@ -64,6 +62,27 @@ test("agent loop replans with a fresh snapshot before continuing", async () => {
   assert.match(background, /requestContinuation\(outcome\.snapshot, loop/u);
   assert.match(background, /plan = decision;\s*pendingSteps = \[\.\.\.decision\.steps\];\s*continue;/u);
   assert.doesNotMatch(background, /The page navigated; the new page must be checked[\s\S]+failures \+= 1/u);
+});
+
+test("agent loop keeps per-plan and whole-task budgets separate", async () => {
+  const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
+  const decision = await readFile(new URL("../../bridge/src/agent/decision.ts", import.meta.url), "utf8");
+
+  assert.match(background, /const MAX_TASK_ACTIONS = 50;/u);
+  assert.match(background, /const TASK_TIMEOUT_MS = 30 \* 60_000;/u);
+  assert.match(background, /const MAX_CONSECUTIVE_VERIFICATION_FAILURES = 3;/u);
+  assert.match(decision, /const MAX_PLAN_STEPS = 8;/u);
+});
+
+test("task budget returns a resumable current-page choice instead of throwing", async () => {
+  const background = await readFile(new URL("../src/background.ts", import.meta.url), "utf8");
+
+  assert.match(background, /return taskBudgetContinuation\("step", iteration\)/u);
+  assert.match(background, /return taskBudgetContinuation\("time", iteration\)/u);
+  assert.match(background, /status: "needs_user"/u);
+  assert.match(background, /options: \["继续执行", "停止任务"\]/u);
+  assert.match(background, /当前页面状态已保留/u);
+  assert.doesNotMatch(background, /stopped at its \$\{iteration >= maxSteps \? "step" : "time"\} budget/u);
 });
 
 test("agent loop executes a verified queue locally and replans only at a branch or queue boundary", async () => {

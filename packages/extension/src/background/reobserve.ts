@@ -53,7 +53,3 @@ export function classifyReobserveExecution(
   if (execution.ok || !execution.error) return undefined;
   return classifyReobserveError(execution.error);
 }
-
-export function consumeReobserveStep(iteration: number, signal: ReobserveSignal): number {
-  return iteration + (signal.actionMayHaveExecuted ? 1 : 0);
-}
