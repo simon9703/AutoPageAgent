@@ -632,8 +632,9 @@ function isNavigationAction(step: BrowserActionStep): boolean {
 
 async function waitForActionSettled(step: BrowserActionStep, target?: Element): Promise<void> {
   const comboboxClick = step.action === "click" && Boolean(target && isComboboxLike(target));
+  const comboboxFill = step.action === "fill" && Boolean(target && isComboboxLike(target));
   const { maxWaitMs, minWaitMs = 0, pollMs = 80, quietMs, waitForOption = false } =
-    getActionSettlePolicy(step.action, { comboboxClick });
+    getActionSettlePolicy(step.action, { comboboxClick, comboboxFill });
   const start = Date.now();
   let lastVersion = domVersion;
   let quietSince = Date.now();
@@ -813,9 +814,6 @@ async function executeStep(step: BrowserActionStep): Promise<{ action: string; o
   if (isSensitiveElement(element) && (step.action === "fill" || step.action === "select")) throw new Error("Sensitive fields cannot be filled by the agent.");
   if (isDisabledElement(element)) throw new Error("Target is disabled.");
   if (isReadonlyElement(element) && (step.action === "fill" || step.action === "select")) throw new Error("Target is readonly.");
-  if (step.action === "fill" && isComboboxLike(element)) {
-    throw new Error("Custom comboboxes must be clicked and selected from a fresh option snapshot.");
-  }
   element.scrollIntoView({ block: "center", behavior: "smooth" });
   await delay(120);
   if (!isTopLayerElement(element)) throw new Error("Target is covered by another page element.");

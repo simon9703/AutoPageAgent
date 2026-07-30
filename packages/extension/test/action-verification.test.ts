@@ -260,6 +260,13 @@ test("pagination verifies current page, URL, or collection signature changes", (
 
 test("settle policy keeps direct state updates short and async actions bounded", () => {
   assert.deepEqual(getActionSettlePolicy("fill"), { maxWaitMs: 160, quietMs: 80 });
+  assert.deepEqual(getActionSettlePolicy("fill", { comboboxFill: true }), {
+    minWaitMs: 120,
+    maxWaitMs: 1_200,
+    quietMs: 150,
+    pollMs: 90,
+    waitForOption: true,
+  });
   assert.deepEqual(getActionSettlePolicy("click", { comboboxClick: true }), {
     minWaitMs: 250,
     maxWaitMs: 1_200,

@@ -42,7 +42,8 @@ Bridge 对完整计划执行 fail-closed 校验：
 - 带目标的 scroll 必须指向 Snapshot 标记为 scrollable 的可信 ref；
 - 任何一步无效都会拒绝整个计划，不做部分执行；
 - `fill/select` 不能作用于 readonly、敏感或不可写目标；
-- 自定义 combobox 不能直接 `fill/select`；
+- readonly combobox 不能 `fill/select`；可编辑的 input/textarea combobox 可用 `fill` 过滤选项；
+- combobox filter fill 每个计划最多一个且必须是最后一步，过滤后的 option 必须来自 fresh Snapshot；
 - 非原生 form 的 `submit` 归一化为 `click`；
 - 分页 Next/Previous 每个计划最多一个，且必须是计划最后一步；
 - 每个目标附加由 Bridge 生成的 `targetFingerprint`。
@@ -108,14 +109,15 @@ Content Script 的异步消息会把异常包装为 `{ ok:false,error }`。Backg
 
 自定义 combobox 是明确分支：
 
-1. 当前 Snapshot 只计划 click combobox；
+1. readonly 或尚未展开的 combobox 先只计划 click；
 2. Content Script 等待 `aria-controls/aria-owns` 对应 popup 的可见 option；
-3. 捕获新 Snapshot；
-4. Provider 使用新 option ref 规划选择；
-5. 验证 `aria-selected`、combobox `displayValue/selectedValues` 或 `activeDescendant`；
-6. 多选时，Provider 返回当前 Snapshot 中全部确定且未选择的目标 option；
-7. 同一 owner 仍有 queued option 时保持 popup 打开；
-8. 下一目标在 popup 外或最后一个 option 已选完时，由 executor 关闭 popup，再进入下一字段。
+3. 如果目标 option 尚未出现，Provider 可对当前 Snapshot 中非 readonly 的 input/textarea combobox 执行一次 `fill`，仅用于搜索过滤；
+4. click 或 filter fill 都是分支边界，必须位于计划末尾；
+5. 捕获 fresh Snapshot，Provider 只能使用过滤后新生成的 option ref；
+6. 验证 `aria-selected`、combobox `displayValue/selectedValues` 或 `activeDescendant`；
+7. 多选时，Provider 返回当前 Snapshot 中全部确定且未选择的目标 option；
+8. 同一 owner 仍有 queued option 时保持 popup 打开；
+9. 下一目标在 popup 外或最后一个 option 已选完时，由 executor 关闭 popup，再进入下一字段。
 
 旧 Snapshot 中不存在的 option 不能预排，也不能从截图生成坐标。
 

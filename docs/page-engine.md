@@ -47,7 +47,7 @@ Selector 保留在 Content Script 内部，只用于录制或本地定位提示�
 | 动作 | 用途 | 关键限制 |
 | --- | --- | --- |
 | `click` | 按钮、链接、option、类按钮控件 | 目标可见、未遮挡、未禁用 |
-| `fill` | 普通 input/textarea/contenteditable | 禁止敏感、readonly、自定义 combobox |
+| `fill` | 普通 input/textarea/contenteditable；可编辑 combobox 的选项过滤 | 禁止敏感、readonly；combobox fill 必须单独位于计划末尾 |
 | `select` | 原生 `<select>` | 不支持 ARIA combobox |
 | `scroll` | 页面或可信滚动容器 | 距离限制 0–2000px；容器必须有最新 targetRef |
 | `focus` | 聚焦控件 | 必须保留真实焦点 |
@@ -63,6 +63,7 @@ Selector 保留在 Content Script 内部，只用于录制或本地定位提示�
 | --- | --- |
 | fill / focus | 160ms |
 | combobox click | 1.2s，并等待关联 option |
+| combobox filter fill | 1.2s，并等待过滤后的关联 option |
 | select | 900ms |
 | scroll | 700ms |
 | 普通 click / submit | 1.8s |
@@ -87,7 +88,7 @@ Diff 以 fingerprint 比较：
 
 | 动作 | 成功证据 |
 | --- | --- |
-| fill/select | 目标值精确匹配 |
+| fill/select | 目标值精确匹配；combobox fill 后只从 fresh Snapshot 选择过滤结果 |
 | option click | option selected、关联 combobox 最终值或 activeDescendant |
 | checkbox/radio/switch | 目标状态变化；或出现有文字的下一可操作控件 |
 | focus | activeElement 与目标一致 |

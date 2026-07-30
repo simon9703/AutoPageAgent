@@ -101,7 +101,7 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot, _task 
     }
     const target = validElements.get(String(step.targetRef));
     if ((step.action === "fill" || step.action === "select") && !writableRefs.has(String(step.targetRef))) return [];
-    if (step.action === "fill" && target?.role === "combobox") return [];
+    if (step.action === "fill" && target && !isEditableTextTarget(target)) return [];
     if (step.action === "select" && target?.tagName !== "select") return [];
     const targetRef = String(step.targetRef);
     const action = String(step.action) === "submit" && validElements.get(targetRef)?.tagName !== "form"
@@ -141,6 +141,19 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot, _task 
       recoverable: true,
     };
   }
+  const comboboxFillSteps = steps.filter((step) => {
+    const target = step.targetFingerprint
+      ? snapshot.elements.find((element) => element.fingerprint === step.targetFingerprint)
+      : undefined;
+    return step.action === "fill" && target?.role === "combobox";
+  });
+  if (comboboxFillSteps.length > 1 || (comboboxFillSteps.length === 1 && steps.at(-1) !== comboboxFillSteps[0])) {
+    return {
+      kind: "blocked",
+      reason: "Filtering an editable combobox is a branch boundary. Plan only that fill, then use fresh option refs.",
+      recoverable: true,
+    };
+  }
   return {
     kind: "action_plan",
     summary: String(raw.summary || "Proposed browser actions."),
@@ -149,6 +162,12 @@ export function normalizeDecision(value: unknown, snapshot: PageSnapshot, _task 
     confidence: typeof raw.confidence === "number" ? Math.min(Math.max(raw.confidence, 0), 1) : 0,
     steps,
   };
+}
+
+function isEditableTextTarget(element: PageSnapshot["elements"][number]): boolean {
+  return element.tagName === "input"
+    || element.tagName === "textarea"
+    || element.contentEditable;
 }
 
 export function completionEvidenceMatchesSnapshot(evidence: string, snapshot: PageSnapshot): boolean {

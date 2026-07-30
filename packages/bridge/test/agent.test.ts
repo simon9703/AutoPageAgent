@@ -154,7 +154,7 @@ test("readonly ordinary input remains observable but cannot be filled", () => {
   }, readonlyInput).kind, "blocked");
 });
 
-test("custom combobox rejects fill/select while native select remains supported", () => {
+test("editable custom combobox accepts filtering fill but rejects select", () => {
   const customCombobox = {
     ...snapshot,
     elements: [{
@@ -168,11 +168,25 @@ test("custom combobox rejects fill/select while native select remains supported"
   assert.equal(normalizeDecision({
     kind: "action_plan",
     steps: [{ action: "fill", targetRef: "element-1", value: "cloud" }],
-  }, customCombobox).kind, "blocked");
+  }, customCombobox).kind, "action_plan");
   assert.equal(normalizeDecision({
     kind: "action_plan",
     steps: [{ action: "select", targetRef: "element-1", value: "cloud" }],
   }, customCombobox).kind, "blocked");
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [
+      { action: "fill", targetRef: "element-1", value: "cloud" },
+      { action: "click", targetRef: "element-1" },
+    ],
+  }, customCombobox).kind, "blocked");
+  assert.equal(normalizeDecision({
+    kind: "action_plan",
+    steps: [{ action: "fill", targetRef: "element-1", value: "cloud" }],
+  }, {
+    ...customCombobox,
+    elements: [{ ...customCombobox.elements[0], tagName: "div" }],
+  }).kind, "blocked");
 
   const nativeSelect = {
     ...snapshot,
@@ -349,8 +363,10 @@ test("agent prompt authorizes the requested test flow while preserving runtime b
   assert.match(prompt, /Do not refuse merely because/u);
   assert.match(prompt, /runtime confirmation card is the user's confirmation/u);
   assert.match(prompt, /latest-snapshot validation/u);
-  assert.match(prompt, /Readonly and custom role=combobox controls cannot use fill or select/u);
-  assert.match(prompt, /Click the combobox to expand it/u);
+  assert.match(prompt, /Readonly comboboxes cannot use fill or select/u);
+  assert.match(prompt, /editable input\/textarea role=combobox may use fill only to filter/u);
+  assert.match(prompt, /fill must be the final step/u);
+  assert.match(prompt, /Click a readonly or collapsed combobox to expand it/u);
   assert.match(prompt, /fresh snapshot/u);
   assert.match(prompt, /Use select only for a native select element/u);
   assert.match(prompt, /Use click for buttons and button-like controls/u);
