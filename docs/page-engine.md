@@ -24,6 +24,7 @@ Resource Timing 只在用户明确询问性能、网络、请求或 API 时采�
 - 敏感字段标记；
 - expanded control、关联 popup、变化元素优先级排序。
 - 最上层 dialog、expanded combobox、受控 listbox/menu 和 option 优先；
+- 虚拟列表把 ARIA option 放在零尺寸语义树时，可在同一受控 popup 层内将精确同名、唯一、可见且未遮挡的展示节点恢复为 option ref；不依赖组件 class，也不允许模糊文本或跨层匹配；
 - dialog 打开时抑制其外部背景控件，expanded popup 抑制背景同语义候选；
 - disabled 分页控件仍可观察，但不能执行。
 

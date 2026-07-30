@@ -261,8 +261,9 @@ test("popup dismiss runtime wires synthetic and trusted Escape before safe exter
   const runtime = await readFile(new URL("../src/content/runtime.ts", import.meta.url), "utf8");
   const dismissBody = /function dismissElement[\s\S]+?\n\}\n\nasync function requestTrustedDismissEscape/u.exec(runtime)?.[0] ?? "";
 
-  assert.match(dismissBody, /function dismissElement\(element: HTMLElement\): Promise<void>/u);
+  assert.match(dismissBody, /function dismissElement\([\s\S]+element: HTMLElement,[\s\S]+snapshotRole\?: string,[\s\S]+recoveredOption\?: RecoveredOption,[\s\S]+\): Promise<void>/u);
   assert.match(dismissBody, /role === "combobox" \|\| role === "listbox" \|\| role === "menu" \|\| role === "option"/u);
+  assert.match(dismissBody, /recoveredOption\?\.semanticElement\.getAttribute\("aria-selected"\)/u);
   assert.match(dismissBody, /dismissPopupWithFallbacks\(\{[\s\S]+dispatchSyntheticEscape: \(\) => dispatchEscapeKey\(element\)[\s\S]+dispatchTrustedEscape: requestTrustedDismissEscape[\s\S]+clickSafeExterior: \(\) => clickSafePopupExterior\(/u);
   assert.match(dismissBody, /showAiPointerAtPoint\(point\.x, point\.y, "AI · dismiss"\)[\s\S]+requestTrustedDismissClick[\s\S]+await delay\(250\)/u);
   assert.ok(dismissBody.indexOf("dispatchEscapeKey(element)") < dismissBody.indexOf("requestTrustedDismissEscape"));

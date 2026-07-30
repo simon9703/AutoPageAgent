@@ -1,6 +1,6 @@
 {
   "name": "@auto-page-agent/bridge",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,6 +11,6 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "@auto-page-agent/shared": "0.13.0"
+    "@auto-page-agent/shared": "0.13.1"
   }
 }

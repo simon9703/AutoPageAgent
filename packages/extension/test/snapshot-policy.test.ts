@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   getSnapshotCandidatePriority,
+  isExactOptionRecoveryMatch,
+  normalizeOptionRecoveryText,
   parseAriaIdRefs,
   resolveCurrentState,
   resolveMultipleState,
@@ -71,6 +73,13 @@ test("aria-selected fallback receives option semantics without overriding an exp
   assert.equal(resolveSnapshotRole(null, "", true), "option");
   assert.equal(resolveSnapshotRole("tab", "", true), "tab");
   assert.equal(resolveSnapshotRole(null, "combobox", false), "combobox");
+});
+
+test("visual option recovery only accepts exact normalized semantic text", () => {
+  assert.equal(normalizeOptionRecoveryText("  企业工作台－GLOBAL\n"), "企业工作台-global");
+  assert.equal(isExactOptionRecoveryMatch("企业工作台-global", " 企业工作台-global "), true);
+  assert.equal(isExactOptionRecoveryMatch("global", "企业工作台-global"), false);
+  assert.equal(isExactOptionRecoveryMatch("", ""), false);
 });
 
 test("simplified DOM exposes readonly combobox state and selected display values", () => {

@@ -71,6 +71,18 @@ export function resolveSnapshotRole(explicitRole: string | null, inferredRole: s
   return explicitRole || inferredRole || (hasAriaSelected ? "option" : "");
 }
 
+export function normalizeOptionRecoveryText(value: string | null | undefined): string {
+  return value?.normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase() ?? "";
+}
+
+export function isExactOptionRecoveryMatch(
+  optionText: string | null | undefined,
+  candidateText: string | null | undefined,
+): boolean {
+  const normalizedOption = normalizeOptionRecoveryText(optionText);
+  return Boolean(normalizedOption && normalizedOption === normalizeOptionRecoveryText(candidateText));
+}
+
 export function resolveMultipleState(element: {
   multiple?: boolean;
   ariaMultiselectable?: string | null;
